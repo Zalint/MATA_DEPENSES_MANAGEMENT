@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestion des Dépenses</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Page de connexion -->
+    <div id="login-page" class="page active">
+        <div class="login-container">
+            <div class="login-card">
+                <div class="login-header">
+                    <i class="fas fa-wallet"></i>
+                    <h1>Gestion des Dépenses</h1>
+                </div>
+                <form id="login-form">
+                                            <div class="form-group">
+                            <label for="username">Nom d'utilisateur</label>
+                            <input type="text" id="username" name="username" autocomplete="username" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="password">Mot de passe</label>
+                            <input type="password" id="password" name="password" autocomplete="current-password" required>
+                        </div>
+                    <button type="submit">Se connecter</button>
+                </form>
+                <div id="login-error" class="error-message"></div>
+                <div class="login-info">
+                    <h3>Comptes de test :</h3>
+                    <p><strong>Directeur Général :</strong> admin / password123</p>
+                    <p><strong>PCA :</strong> pca / password123</p>
+                    <p><strong>Directeurs :</strong> directeur1, directeur2, directeur3 / password123</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application principale -->
+    <div id="app" class="page">
+        <!-- Navigation -->
+        <nav class="navbar">
+            <div class="nav-brand">
+                <i class="fas fa-wallet"></i>
+                <span>Gestion des Dépenses</span>
+            </div>
+            <div class="nav-user">
+                <span id="user-name"></span>
+                <span id="user-role" class="role-badge"></span>
+                <button id="logout-btn" class="btn-logout">
+                    <i class="fas fa-sign-out-alt"></i>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Contenu principal -->
+        <div class="main-content">
+            <!-- Menu latéral -->
+            <aside class="sidebar">
+                <ul class="nav-menu">
+                    <li><a href="#" data-section="dashboard" class="nav-link active">
+                        <i class="fas fa-chart-dashboard"></i> Dashboard
+                    </a></li>
+                    <li><a href="#" data-section="expenses" class="nav-link">
+                        <i class="fas fa-receipt"></i> Mes Dépenses
+                    </a></li>
+                    <li><a href="#" data-section="add-expense" class="nav-link">
+                        <i class="fas fa-plus"></i> Ajouter Dépense
+                    </a></li>
+                    <li id="admin-menu" style="display: none;">
+                        <a href="#" data-section="manage-accounts" class="nav-link">
+                            <i class="fas fa-users-cog"></i> Gérer Comptes
+                        </a>
+                    </li>
+                </ul>
+            </aside>
+
+            <!-- Zone de contenu -->
+            <main class="content">
+                <!-- Dashboard -->
+                <section id="dashboard-section" class="section active">
+                    <h2>Dashboard de Suivi</h2>
+                    
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-day"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Cash Burn Aujourd'hui</h3>
+                                <p class="stat-value" id="daily-burn">0 FCFA</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-week"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Cash Burn depuis Lundi</h3>
+                                <p class="stat-value" id="weekly-burn">0 FCFA</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-alt"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Cash Burn du Mois</h3>
+                                <p class="stat-value" id="monthly-burn">0 FCFA</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filtres de date pour le dashboard -->
+                    <div class="dashboard-filters">
+                        <div class="form-group">
+                            <label for="dashboard-start-date">Date de début</label>
+                            <input type="date" id="dashboard-start-date">
+                        </div>
+                        <div class="form-group">
+                            <label for="dashboard-end-date">Date de fin</label>
+                            <input type="date" id="dashboard-end-date">
+                        </div>
+                        <button id="filter-dashboard" class="btn btn-primary">Actualiser</button>
+                        <button id="reset-dashboard" class="btn btn-secondary">Aujourd'hui</button>
+                    </div>
+
+                    <div class="charts-grid">
+                        <div class="chart-card">
+                            <h3>Dépenses par Compte</h3>
+                            <div id="account-chart"></div>
+                        </div>
+                        
+                        <div class="chart-card">
+                            <h3>Dépenses par Catégorie</h3>
+                            <div id="category-chart"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Liste des dépenses -->
+                <section id="expenses-section" class="section">
+                    <h2>Mes Dépenses</h2>
+                    
+                    <div class="filters">
+                        <div class="form-group">
+                            <label for="filter-start-date">Date de début</label>
+                            <input type="date" id="filter-start-date">
+                        </div>
+                        <div class="form-group">
+                            <label for="filter-end-date">Date de fin</label>
+                            <input type="date" id="filter-end-date">
+                        </div>
+                        <button id="filter-expenses" class="btn btn-primary">Filtrer</button>
+                    </div>
+                    
+                    <div class="invoice-management">
+                        <div class="invoice-controls">
+                            <button id="select-all-expenses" class="btn btn-secondary">
+                                <i class="fas fa-check-square"></i> Tout sélectionner
+                            </button>
+                            <button id="deselect-all-expenses" class="btn btn-secondary">
+                                <i class="fas fa-square"></i> Tout désélectionner
+                            </button>
+                            <button id="generate-invoices" class="btn btn-success" disabled>
+                                <i class="fas fa-file-pdf"></i> Gérer factures
+                            </button>
+                            <span id="selected-count" class="selected-info">0 dépense(s) sélectionnée(s)</span>
+                        </div>
+                    </div>
+
+                    <div class="table-container">
+                        <table id="expenses-table">
+                            <thead>
+                                <tr>
+                                    <th>
+                                        <input type="checkbox" id="select-all-header" title="Sélectionner tout">
+                                    </th>
+                                    <th>Date</th>
+                                    <th>Catégorie</th>
+                                    <th>Désignation</th>
+                                    <th>Fournisseur</th>
+                                    <th>Qté</th>
+                                    <th>P.U.</th>
+                                    <th>Montant Total</th>
+                                    <th>Prévisible</th>
+                                    <th>Justificatif</th>
+                                    <th>Compte</th>
+                                    <th>Username</th>
+                                    <th id="user-column" style="display: none;">Directeur</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="expenses-tbody">
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <!-- Ajouter une dépense -->
+                <section id="add-expense-section" class="section">
+                    <h2>Ajouter une Dépense</h2>
+                    
+                    <!-- Affichage du solde pour les directeurs -->
+                    <div id="balance-info" class="balance-card" style="display: none;">
+                        <div class="balance-content">
+                            <h3><i class="fas fa-wallet"></i> Mon Solde</h3>
+                            <div class="balance-details">
+                                <div class="balance-item">
+                                    <span class="balance-label">Solde actuel :</span>
+                                    <span class="balance-value" id="current-balance">0 FCFA</span>
+                                </div>
+                                <div class="balance-item">
+                                    <span class="balance-label">Total crédité :</span>
+                                    <span class="balance-value" id="total-credited">0 FCFA</span>
+                                </div>
+                                <div class="balance-item">
+                                    <span class="balance-label">Dépensé / Total :</span>
+                                    <span class="balance-value" id="total-spent">0 FCFA</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <form id="expense-form" class="expense-form">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expense-account">Compte</label>
+                                <select id="expense-account" name="account_id" required>
+                                    <option value="">Sélectionner un compte</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="expense-type">Type de Dépense</label>
+                                <select id="expense-type" name="expense_type" required>
+                                    <option value="">Sélectionner un type</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expense-category">Catégorie</label>
+                                <select id="expense-category" name="category" required disabled>
+                                    <option value="">Sélectionner d'abord un type</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="expense-subcategory">Sous-catégorie</label>
+                                <select id="expense-subcategory" name="subcategory" required disabled>
+                                    <option value="">Sélectionner d'abord une catégorie</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <!-- Champ spécial pour les réseaux sociaux -->
+                        <div class="form-row" id="social-network-row" style="display: none;">
+                            <div class="form-group">
+                                <label for="social-network-detail">Préciser le réseau social</label>
+                                <select id="social-network-detail" name="social_network_detail">
+                                    <option value="">Sélectionner un réseau</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expense-date">Date</label>
+                                <input type="date" id="expense-date" name="expense_date" required>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expense-designation">Désignation</label>
+                                <input type="text" id="expense-designation" name="designation" required placeholder="Ex: Achat de matériel, Service de transport...">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="expense-supplier">Nom Fournisseur</label>
+                                <input type="text" id="expense-supplier" name="supplier" required placeholder="Nom du fournisseur ou prestataire">
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expense-quantity">Quantité</label>
+                                <input type="number" id="expense-quantity" name="quantity" step="0.01" min="0" required placeholder="1">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="expense-unit-price">Prix Unitaire (FCFA)</label>
+                                <input type="number" id="expense-unit-price" name="unit_price" step="1" min="0" required placeholder="0">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="expense-total">Montant Total (FCFA)</label>
+                                <input type="number" id="expense-total" name="total" step="1" min="0" required placeholder="Calculé automatiquement">
+                                <small class="form-help">Se calcule automatiquement ou saisissez manuellement</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expense-predictable">Prévisible</label>
+                                <select id="expense-predictable" name="predictable" required>
+                                    <option value="">Sélectionner</option>
+                                    <option value="oui">Oui</option>
+                                    <option value="non">Non</option>
+                                </select>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="expense-justification">Justificatif (Optionnel)</label>
+                                <div class="file-input-wrapper">
+                                    <input type="file" id="expense-justification" name="justification" 
+                                           accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx"
+                                           title="Formats acceptés: JPG, PNG, PDF, Word, Excel"
+                                           style="display: none;">
+                                    <button type="button" class="file-input-button" onclick="document.getElementById('expense-justification').click()">
+                                        <i class="fas fa-upload"></i> Choisir un fichier
+                                    </button>
+                                    <span class="file-input-text" id="file-input-text">Aucun fichier sélectionné</span>
+                                </div>
+                                <small class="file-info">Formats: JPG, PNG, PDF, Word, Excel (Max: 5MB)</small>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="expense-description">Description/Commentaires</label>
+                            <textarea id="expense-description" name="description" placeholder="Informations complémentaires..."></textarea>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">Ajouter la Dépense</button>
+                    </form>
+                </section>
+
+                <!-- Gérer les comptes (Admin uniquement) -->
+                <section id="manage-accounts-section" class="section">
+                    <h2>Gérer les Comptes</h2>
+                    
+                    <!-- Créer un nouveau compte -->
+                    <form class="account-form" id="createAccountForm">
+                        <h3>Créer/Assigner un Compte</h3>
+                        
+                        <!-- Nouveau champ pour le nom du compte -->
+                        <div class="form-group">
+                            <label>Nom du Compte</label>
+                            <input type="text" id="accountName" placeholder="Ex: Compte Directeur Commercial, Budget Formation..." required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Assigner à l'utilisateur</label>
+                            <select id="createDirectorSelect" required>
+                                <option value="">Sélectionner un utilisateur directeur</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Montant initial (FCFA) - Optionnel</label>
+                            <input type="number" id="initialAmount" min="0" placeholder="0">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Description</label>
+                            <textarea id="createDescription" placeholder="Ex: Nouveau compte pour..."></textarea>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-success">Créer le Compte</button>
+                    </form>
+
+                    <form class="account-form" id="creditAccountForm">
+                        <h3>Créditer un Compte Existant</h3>
+                        
+                        <div class="form-group">
+                            <label>Compte</label>
+                            <select id="creditAccountSelect" required>
+                                <option value="">Sélectionner un compte</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Montant (FCFA)</label>
+                            <input type="number" id="creditAmount" min="1" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Description (optionnelle)</label>
+                            <textarea id="creditDescription" placeholder="Ex: Budget mensuel, remboursement..."></textarea>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary">Créditer le Compte</button>
+                    </form>
+
+                    <div class="accounts-list">
+                        <h3>Utilisateurs et Comptes Existants</h3>
+                        <div id="accounts-list">
+                            <!-- Les comptes seront chargés ici -->
+                        </div>
+                    </div>
+
+                    <div class="credit-history">
+                        <h3>Historique des Crédits</h3>
+                        <div class="table-container">
+                            <table id="credit-history-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Compte</th>
+                                        <th>Montant</th>
+                                        <th>Crédité par</th>
+                                        <th>Description</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="credit-history-tbody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
+
+    <!-- Messages de notification -->
+    <div id="notification" class="notification"></div>
+
+    <!-- Popup pour modifier une dépense -->
+    <div id="edit-expense-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Modifier la Dépense</h2>
+                <span class="close" onclick="closeEditModal()">&times;</span>
+            </div>
+            <form id="edit-expense-form" class="expense-form">
+                <input type="hidden" id="edit-expense-id" name="expense_id">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-expense-account">Compte</label>
+                        <select id="edit-expense-account" name="account_id" required>
+                            <option value="">Sélectionner un compte</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit-expense-type">Type de Dépense</label>
+                        <select id="edit-expense-type" name="expense_type" required>
+                            <option value="">Sélectionner un type</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-expense-category">Catégorie</label>
+                        <select id="edit-expense-category" name="category" required disabled>
+                            <option value="">Sélectionner d'abord un type</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit-expense-subcategory">Sous-catégorie</label>
+                        <select id="edit-expense-subcategory" name="subcategory" required disabled>
+                            <option value="">Sélectionner d'abord une catégorie</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Champ spécial pour les réseaux sociaux -->
+                <div class="form-row" id="edit-social-network-row" style="display: none;">
+                    <div class="form-group">
+                        <label for="edit-social-network-detail">Préciser le réseau social</label>
+                        <select id="edit-social-network-detail" name="social_network_detail">
+                            <option value="">Sélectionner un réseau</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-expense-date">Date</label>
+                        <input type="date" id="edit-expense-date" name="expense_date" required>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-expense-designation">Désignation</label>
+                        <input type="text" id="edit-expense-designation" name="designation" required placeholder="Ex: Achat de matériel, Service de transport...">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit-expense-supplier">Nom Fournisseur</label>
+                        <input type="text" id="edit-expense-supplier" name="supplier" required placeholder="Nom du fournisseur ou prestataire">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-expense-quantity">Quantité</label>
+                        <input type="number" id="edit-expense-quantity" name="quantity" step="0.01" min="0" required placeholder="1">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit-expense-unit-price">Prix Unitaire (FCFA)</label>
+                        <input type="number" id="edit-expense-unit-price" name="unit_price" step="1" min="0" required placeholder="0">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="edit-expense-total">Montant Total (FCFA)</label>
+                        <input type="number" id="edit-expense-total" name="total" step="1" min="0" required placeholder="Calculé automatiquement">
+                        <small class="form-help">Se calcule automatiquement ou saisissez manuellement</small>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-expense-predictable">Prévisible</label>
+                        <select id="edit-expense-predictable" name="predictable" required>
+                            <option value="">Sélectionner</option>
+                            <option value="oui">Oui</option>
+                            <option value="non">Non</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="edit-expense-description">Description/Commentaires</label>
+                    <textarea id="edit-expense-description" name="description" placeholder="Informations complémentaires..."></textarea>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Annuler</button>
+                    <button type="submit" class="btn btn-primary">Modifier la Dépense</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html> 
