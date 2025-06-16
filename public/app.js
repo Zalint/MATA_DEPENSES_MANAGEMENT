@@ -23,9 +23,16 @@ function showNotification(message, type = 'info') {
     notification.className = `notification ${type}`;
     notification.classList.add('show');
     
-    setTimeout(() => {
+    // Supprimer tout timeout existant pour éviter les conflits
+    if (notification.timeoutId) {
+        clearTimeout(notification.timeoutId);
+    }
+    
+    // Programmer la disparition après 5 secondes
+    notification.timeoutId = setTimeout(() => {
         notification.classList.remove('show');
-    }, 3000);
+        notification.timeoutId = null;
+    }, 5000);
 }
 
 // Gestion de l'authentification
@@ -121,8 +128,10 @@ function showSection(sectionName) {
         case 'manage-accounts':
             loadAccounts();
             loadUsersWithoutAccount();
+            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
             loadAccountsForCredit();
             loadCreditHistory();
+            }
             break;
         case 'add-expense':
             loadCategories();
@@ -131,6 +140,9 @@ function showSection(sectionName) {
                 loadAccountBalance();
                 loadUserAccounts();
             }
+            break;
+        case 'partner-tracking':
+            loadPartnerSummary();
             break;
     }
 }
@@ -155,6 +167,9 @@ async function loadInitialData() {
     
     if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
         await loadUsers();
+        // Afficher le formulaire d'ajustement pour DG/PCA
+        document.getElementById('adjustment-form-container').style.display = 'block';
+        setupAdjustmentForm();
     }
     if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'directeur') {
         await loadDashboard();
@@ -289,10 +304,13 @@ function calculateTotal() {
     if (!totalField.dataset.manuallyEdited) {
         const total = quantity * unitPrice;
         totalField.value = Math.round(total);
+        
+        // Supprimer les anciens messages de validation pendant le calcul automatique
+        let errorDiv = document.getElementById('balance-error');
+        if (errorDiv) {
+            errorDiv.remove();
+        }
     }
-    
-    // Valider le solde après calcul
-    validateExpenseAmount();
 }
 
 // Fonction pour valider le montant par rapport au solde disponible
@@ -522,7 +540,7 @@ async function loadUsers() {
             users.forEach(user => {
                 const option = document.createElement('option');
                 option.value = user.id;
-                option.textContent = user.full_name;
+                option.textContent = user.username;
                 userSelect.appendChild(option);
             });
         }
@@ -579,8 +597,82 @@ async function loadDashboard() {
         createChart('account-chart', stats.account_breakdown, 'account');
         createChart('category-chart', stats.category_breakdown, 'category');
         
+        // Mettre à jour les cartes de statistiques
+        await updateStatsCards(startDate, endDate);
+        
     } catch (error) {
         console.error('Erreur chargement dashboard:', error);
+    }
+}
+
+// Fonction pour créer le compte Ajustement et associer les dépenses orphelines
+async function createAdjustmentAccount() {
+    try {
+        const response = await fetch('/api/admin/create-adjustment-account', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            console.log('Compte Ajustement créé:', result);
+            showNotification(`Compte Ajustement créé avec succès ! ${result.orphanExpensesFound} dépenses orphelines (${formatCurrency(result.totalOrphanAmount)}) ont été associées.`, 'success');
+            
+            // Recharger les données
+            await loadAccounts();
+            await loadDashboard();
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error('Erreur création compte Ajustement:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Fonction pour mettre à jour les cartes de statistiques
+async function updateStatsCards(startDate, endDate) {
+    try {
+        // Construire l'URL avec les paramètres de date
+        let url = '/api/dashboard/stats-cards';
+        const params = new URLSearchParams();
+        
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        const response = await fetch(url);
+        const stats = await response.json();
+        
+        // Mettre à jour les valeurs des cartes
+        document.getElementById('total-spent-amount').textContent = formatCurrency(stats.totalSpent || 0);
+        document.getElementById('total-remaining-amount').textContent = formatCurrency(stats.totalRemaining || 0);
+        document.getElementById('total-credited-with-expenses').textContent = formatCurrency(stats.totalCreditedWithExpenses || 0);
+        document.getElementById('total-credited-general').textContent = formatCurrency(stats.totalCreditedGeneral || 0);
+        
+        // Mettre à jour les périodes
+        const periodText = startDate && endDate ? 
+            `Du ${formatDate(startDate)} au ${formatDate(endDate)}` : 
+            'Période sélectionnée';
+        
+        document.getElementById('spent-period').textContent = periodText;
+        document.getElementById('remaining-period').textContent = 'Soldes actuels';
+        document.getElementById('credited-expenses-period').textContent = 'Comptes avec activité';
+        document.getElementById('credited-general-period').textContent = 'Tous les comptes';
+        
+    } catch (error) {
+        console.error('Erreur chargement statistiques cartes:', error);
+        // Afficher des valeurs par défaut en cas d'erreur
+        document.getElementById('total-spent-amount').textContent = '0 FCFA';
+        document.getElementById('total-remaining-amount').textContent = '0 FCFA';
+        document.getElementById('total-credited-with-expenses').textContent = '0 FCFA';
+        document.getElementById('total-credited-general').textContent = '0 FCFA';
     }
 }
 
@@ -718,7 +810,7 @@ function displayExpenses(expenses) {
     const tbody = document.getElementById('expenses-tbody');
     tbody.innerHTML = '';
     
-    const colSpan = currentUser.role !== 'directeur' ? '14' : '13';
+    const colSpan = currentUser.role !== 'directeur' ? '16' : '15';
     
     if (expenses.length === 0) {
         tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center;">Aucune dépense trouvée</td></tr>`;
@@ -760,19 +852,20 @@ function displayExpenses(expenses) {
                 <input type="checkbox" class="expense-checkbox" data-expense-id="${expense.id}">
             </td>
             <td>${formatDate(expense.expense_date)}</td>
-            <td title="${expense.category_name}">${expense.category_name.length > 30 ? expense.category_name.substring(0, 30) + '...' : expense.category_name}</td>
-            <td>${expense.designation || '-'}</td>
-            <td>${expense.supplier || '-'}</td>
+            <td title="${expense.category_name}">${expense.category_name.length > 25 ? expense.category_name.substring(0, 25) + '...' : expense.category_name}</td>
+            <td title="${expense.designation || ''}">${expense.designation ? (expense.designation.length > 20 ? expense.designation.substring(0, 20) + '...' : expense.designation) : '-'}</td>
+            <td title="${expense.supplier || ''}">${expense.supplier ? (expense.supplier.length > 15 ? expense.supplier.substring(0, 15) + '...' : expense.supplier) : '-'}</td>
             <td>${expense.quantity || '-'}</td>
             <td>${expense.unit_price ? formatCurrency(expense.unit_price) : '-'}</td>
             <td><strong>${formatCurrency(parseInt(expense.total || expense.amount))}</strong></td>
+            <td title="${expense.description || ''}">${expense.description ? (expense.description.length > 30 ? expense.description.substring(0, 30) + '...' : expense.description) : '-'}</td>
             <td>
                 <span class="badge ${expense.predictable === 'oui' ? 'badge-success' : 'badge-warning'}">
                     ${expense.predictable === 'oui' ? 'Oui' : 'Non'}
                 </span>
             </td>
             <td>${justificationButton}</td>
-            <td>${expense.account_name || '-'}</td>
+            <td title="${expense.account_name || ''}">${expense.account_name ? (expense.account_name.length > 15 ? expense.account_name.substring(0, 15) + '...' : expense.account_name) : '-'}</td>
             <td>${expense.username || '-'}${isDGExpenseOnDirectorAccount ? ' <small style="color: #007bff;">(DG)</small>' : ''}</td>
             ${currentUser.role !== 'directeur' ? `<td>${expense.user_name}</td>` : ''}
             <td>${editButton}</td>
@@ -930,9 +1023,344 @@ async function generateInvoicesPDF() {
     }
 }
 
+// Variables globales pour le tri et les filtres
+let currentExpenses = [];
+let currentSortField = 'expense_date';
+let currentSortDirection = 'desc';
+
+// Fonction pour charger les dépenses avec filtres avancés
+async function loadExpensesWithFilters() {
+    try {
+        const startDate = document.getElementById('filter-start-date').value;
+        const endDate = document.getElementById('filter-end-date').value;
+        
+        let url = '/api/expenses';
+        const params = new URLSearchParams();
+        
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        const response = await fetch(url);
+        const expenses = await response.json();
+        
+        // Stocker les dépenses pour le filtrage côté client
+        currentExpenses = expenses;
+        
+        // Charger les options de filtres
+        populateFilterOptions(expenses);
+        
+        // Appliquer les filtres et afficher
+        applyFiltersAndDisplay();
+        
+    } catch (error) {
+        console.error('Erreur chargement dépenses:', error);
+    }
+}
+
+// Fonction pour peupler les options de filtres
+function populateFilterOptions(expenses) {
+    // Filtres de comptes
+    const accountFilter = document.getElementById('filter-account');
+    const accounts = [...new Set(expenses.map(e => e.account_name).filter(Boolean))].sort();
+    accountFilter.innerHTML = '<option value="">Tous les comptes</option>';
+    accounts.forEach(account => {
+        accountFilter.innerHTML += `<option value="${account}">${account}</option>`;
+    });
+    
+    // Filtres de catégories
+    const categoryFilter = document.getElementById('filter-category');
+    const categories = [...new Set(expenses.map(e => e.category_name).filter(Boolean))].sort();
+    categoryFilter.innerHTML = '<option value="">Toutes les catégories</option>';
+    categories.forEach(category => {
+        categoryFilter.innerHTML += `<option value="${category}">${category}</option>`;
+    });
+    
+    // Filtres d'utilisateurs
+    const userFilter = document.getElementById('filter-user');
+    const users = [...new Set(expenses.map(e => e.username).filter(Boolean))].sort();
+    userFilter.innerHTML = '<option value="">Tous les utilisateurs</option>';
+    users.forEach(user => {
+        userFilter.innerHTML += `<option value="${user}">${user}</option>`;
+    });
+}
+
+// Fonction pour appliquer les filtres
+function applyFiltersAndDisplay() {
+    let filteredExpenses = [...currentExpenses];
+    
+    // Filtrer par compte
+    const accountFilter = document.getElementById('filter-account').value;
+    if (accountFilter) {
+        filteredExpenses = filteredExpenses.filter(e => e.account_name === accountFilter);
+    }
+    
+    // Filtrer par catégorie
+    const categoryFilter = document.getElementById('filter-category').value;
+    if (categoryFilter) {
+        filteredExpenses = filteredExpenses.filter(e => e.category_name === categoryFilter);
+    }
+    
+    // Filtrer par fournisseur
+    const supplierFilter = document.getElementById('filter-supplier').value.toLowerCase();
+    if (supplierFilter) {
+        filteredExpenses = filteredExpenses.filter(e => 
+            (e.supplier || '').toLowerCase().includes(supplierFilter)
+        );
+    }
+    
+    // Filtrer par prévisible
+    const predictableFilter = document.getElementById('filter-predictable').value;
+    if (predictableFilter) {
+        filteredExpenses = filteredExpenses.filter(e => e.predictable === predictableFilter);
+    }
+    
+    // Filtrer par montant
+    const minAmount = parseFloat(document.getElementById('filter-amount-min').value) || 0;
+    const maxAmount = parseFloat(document.getElementById('filter-amount-max').value) || Infinity;
+    filteredExpenses = filteredExpenses.filter(e => {
+        const amount = parseInt(e.total || e.amount);
+        return amount >= minAmount && amount <= maxAmount;
+    });
+    
+    // Filtrer par utilisateur
+    const userFilter = document.getElementById('filter-user').value;
+    if (userFilter) {
+        filteredExpenses = filteredExpenses.filter(e => e.username === userFilter);
+    }
+    
+    // Appliquer le tri
+    sortExpenses(filteredExpenses);
+    
+    // Afficher les résultats
+    displayExpenses(filteredExpenses);
+    
+    // Mettre à jour le compteur
+    updateFilteredCount(filteredExpenses.length, currentExpenses.length);
+}
+
+// Fonction pour trier les dépenses
+function sortExpenses(expenses) {
+    expenses.sort((a, b) => {
+        let aValue = a[currentSortField];
+        let bValue = b[currentSortField];
+        
+        // Traitement spécial pour les dates
+        if (currentSortField === 'expense_date') {
+            aValue = new Date(aValue);
+            bValue = new Date(bValue);
+        }
+        
+        // Traitement spécial pour les montants
+        if (currentSortField === 'total' || currentSortField === 'unit_price') {
+            aValue = parseInt(aValue) || 0;
+            bValue = parseInt(bValue) || 0;
+        }
+        
+        // Traitement spécial pour les quantités
+        if (currentSortField === 'quantity') {
+            aValue = parseFloat(aValue) || 0;
+            bValue = parseFloat(bValue) || 0;
+        }
+        
+        // Traitement pour les chaînes
+        if (typeof aValue === 'string') {
+            aValue = aValue.toLowerCase();
+            bValue = (bValue || '').toLowerCase();
+        }
+        
+        if (aValue < bValue) return currentSortDirection === 'asc' ? -1 : 1;
+        if (aValue > bValue) return currentSortDirection === 'asc' ? 1 : -1;
+        return 0;
+    });
+}
+
+// Fonction pour gérer le clic sur les en-têtes de colonnes
+function handleColumnSort(field) {
+    if (currentSortField === field) {
+        currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        currentSortField = field;
+        currentSortDirection = 'desc';
+    }
+    
+    // Mettre à jour les icônes de tri
+    updateSortIcons();
+    
+    // Réappliquer les filtres avec le nouveau tri
+    applyFiltersAndDisplay();
+}
+
+// Fonction pour mettre à jour les icônes de tri
+function updateSortIcons() {
+    // Réinitialiser toutes les icônes
+    document.querySelectorAll('.sortable i').forEach(icon => {
+        icon.className = 'fas fa-sort';
+    });
+    
+    // Mettre à jour l'icône de la colonne active
+    const activeHeader = document.querySelector(`[data-sort="${currentSortField}"] i`);
+    if (activeHeader) {
+        activeHeader.className = currentSortDirection === 'asc' ? 'fas fa-sort-up' : 'fas fa-sort-down';
+    }
+}
+
+// Fonction pour effacer tous les filtres
+function clearAllFilters() {
+    document.getElementById('filter-start-date').value = '';
+    document.getElementById('filter-end-date').value = '';
+    document.getElementById('filter-account').value = '';
+    document.getElementById('filter-category').value = '';
+    document.getElementById('filter-supplier').value = '';
+    document.getElementById('filter-predictable').value = '';
+    document.getElementById('filter-amount-min').value = '';
+    document.getElementById('filter-amount-max').value = '';
+    document.getElementById('filter-user').value = '';
+    
+    // Réappliquer les filtres (qui seront vides)
+    applyFiltersAndDisplay();
+    
+    showNotification('Filtres effacés', 'info');
+}
+
+// Fonction pour exporter en CSV
+function exportExpensesToCSV() {
+    let filteredExpenses = [...currentExpenses];
+    
+    // Appliquer les mêmes filtres que l'affichage
+    const accountFilter = document.getElementById('filter-account').value;
+    if (accountFilter) {
+        filteredExpenses = filteredExpenses.filter(e => e.account_name === accountFilter);
+    }
+    
+    const categoryFilter = document.getElementById('filter-category').value;
+    if (categoryFilter) {
+        filteredExpenses = filteredExpenses.filter(e => e.category_name === categoryFilter);
+    }
+    
+    const supplierFilter = document.getElementById('filter-supplier').value.toLowerCase();
+    if (supplierFilter) {
+        filteredExpenses = filteredExpenses.filter(e => 
+            (e.supplier || '').toLowerCase().includes(supplierFilter)
+        );
+    }
+    
+    const predictableFilter = document.getElementById('filter-predictable').value;
+    if (predictableFilter) {
+        filteredExpenses = filteredExpenses.filter(e => e.predictable === predictableFilter);
+    }
+    
+    const minAmount = parseFloat(document.getElementById('filter-amount-min').value) || 0;
+    const maxAmount = parseFloat(document.getElementById('filter-amount-max').value) || Infinity;
+    filteredExpenses = filteredExpenses.filter(e => {
+        const amount = parseInt(e.total || e.amount);
+        return amount >= minAmount && amount <= maxAmount;
+    });
+    
+    const userFilter = document.getElementById('filter-user').value;
+    if (userFilter) {
+        filteredExpenses = filteredExpenses.filter(e => e.username === userFilter);
+    }
+    
+    // Trier les données
+    sortExpenses(filteredExpenses);
+    
+    // Créer le CSV
+    const headers = [
+        'Date', 'Catégorie', 'Désignation', 'Fournisseur', 'Quantité', 
+        'Prix Unitaire', 'Montant Total', 'Description', 'Prévisible', 
+        'Compte', 'Utilisateur', 'Directeur'
+    ];
+    
+    let csvContent = headers.join(',') + '\n';
+    
+    filteredExpenses.forEach(expense => {
+        const row = [
+            formatDate(expense.expense_date),
+            `"${expense.category_name || ''}"`,
+            `"${expense.designation || ''}"`,
+            `"${expense.supplier || ''}"`,
+            expense.quantity || '',
+            expense.unit_price || '',
+            parseInt(expense.total || expense.amount),
+            `"${expense.description || ''}"`,
+            expense.predictable || '',
+            `"${expense.account_name || ''}"`,
+            expense.username || '',
+            expense.user_name || ''
+        ];
+        csvContent += row.join(',') + '\n';
+    });
+    
+    // Télécharger le fichier
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `depenses_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showNotification('Export CSV généré avec succès', 'success');
+}
+
+// Fonction pour mettre à jour le compteur de résultats filtrés
+function updateFilteredCount(filtered, total) {
+    const existingCounter = document.getElementById('filtered-count');
+    if (existingCounter) {
+        existingCounter.remove();
+    }
+    
+    if (filtered !== total) {
+        const counter = document.createElement('div');
+        counter.id = 'filtered-count';
+        counter.style.cssText = 'margin: 10px 0; padding: 8px 12px; background: #e3f2fd; border-radius: 4px; color: #1976d2; font-size: 14px;';
+        counter.innerHTML = `<i class="fas fa-filter"></i> Affichage de ${filtered} dépense(s) sur ${total} au total`;
+        
+        const tableContainer = document.querySelector('.table-container');
+        tableContainer.parentNode.insertBefore(counter, tableContainer);
+    }
+}
+
+// Remplacer la fonction loadExpenses existante
+async function loadExpenses() {
+    await loadExpensesWithFilters();
+}
+
 async function addExpense(formData) {
     try {
-        // Construire la description complète avec la hiérarchie
+        // Vérifier le type de compte sélectionné
+        const accountSelect = document.getElementById('expense-account');
+        const selectedOption = accountSelect.options[accountSelect.selectedIndex];
+        const accountType = selectedOption?.dataset.accountType || 'classique';
+        
+        let expenseData;
+        
+        if (accountType === 'creance' || accountType === 'fournisseur') {
+            // Formulaire simplifié pour créance et fournisseur
+            expenseData = {
+                account_id: formData.account_id,
+                expense_date: formData.expense_date,
+                total: formData.total,
+                description: formData.description,
+                // Valeurs par défaut pour les champs obligatoires
+                designation: `Dépense ${accountType}`,
+                supplier: 'N/A',
+                quantity: 1,
+                unit_price: formData.total,
+                predictable: 'non',
+                expense_type: null,
+                category: null,
+                subcategory: null,
+                social_network_detail: null
+            };
+        } else {
+            // Formulaire complet pour les autres types de comptes
         const typeSelect = document.getElementById('expense-type');
         const categorySelect = document.getElementById('expense-category');
         const subcategorySelect = document.getElementById('expense-subcategory');
@@ -947,8 +1375,7 @@ async function addExpense(formData) {
         const hierarchyDescription = `${typeName} > ${categoryName} > ${subcategoryName}${socialNetwork}`;
         const fullDescription = `${hierarchyDescription}\n${formData.description}`;
         
-        // Préparer les données à envoyer
-        const expenseData = {
+            expenseData = {
             ...formData,
             description: fullDescription,
             expense_type: formData.expense_type,
@@ -956,6 +1383,7 @@ async function addExpense(formData) {
             subcategory: formData.subcategory,
             social_network_detail: socialNetworkSelect.value || null
         };
+        }
         
         const response = await fetch('/api/expenses', {
             method: 'POST',
@@ -967,8 +1395,15 @@ async function addExpense(formData) {
             showNotification('Dépense ajoutée avec succès !', 'success');
             document.getElementById('expense-form').reset();
             setDefaultDate();
-            // Réinitialiser les sélecteurs
+            
+            // Réinitialiser le formulaire selon le type de compte
+            if (accountType === 'creance' || accountType === 'fournisseur') {
+                showSimplifiedExpenseForm();
+            } else {
+                // Réinitialiser les sélecteurs pour les comptes classiques
             loadCategories();
+                showAllExpenseFields();
+            }
         } else {
             const error = await response.json();
             throw new Error(error.error);
@@ -985,7 +1420,10 @@ async function loadAccounts() {
         const accounts = await response.json();
         
         displayAccounts(accounts);
+        
+        if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
         await loadAccountsForCredit();
+        }
         
     } catch (error) {
         console.error('Erreur chargement comptes:', error);
@@ -995,53 +1433,481 @@ async function loadAccounts() {
 function displayAccounts(accounts) {
     const accountsList = document.getElementById('accounts-list');
     
+    // Vérifier que accounts est bien un tableau
+    if (!Array.isArray(accounts)) {
+        console.error('displayAccounts: accounts n\'est pas un tableau:', accounts);
+        accountsList.innerHTML = '<p>Erreur: impossible d\'afficher les comptes (format invalide).</p>';
+        return;
+    }
+    
     if (accounts.length === 0) {
         accountsList.innerHTML = '<p>Aucun compte trouvé.</p>';
         return;
     }
     
-    // Grouper les comptes par username pour un meilleur affichage
-    const accountsByUser = {};
-    accounts.forEach(account => {
-        if (!accountsByUser[account.username]) {
-            accountsByUser[account.username] = [];
-        }
-        accountsByUser[account.username].push(account);
-    });
+    // Stocker les comptes pour le filtrage
+    window.allAccounts = accounts;
     
-    let html = '';
-    Object.keys(accountsByUser).forEach(username => {
-        const userAccounts = accountsByUser[username];
-        html += `<div class="user-accounts-group">
-            <h4 class="user-group-title">${username} (${userAccounts.length} compte${userAccounts.length > 1 ? 's' : ''})</h4>`;
-        
-        userAccounts.forEach(account => {
-            html += `
-                <div class="account-card">
-                    <div class="account-header">
-                        <h5>${account.account_name}</h5>
-                        <span class="account-status ${account.is_active ? 'active' : 'inactive'}">
-                            ${account.is_active ? 'Actif' : 'Inactif'}
-                        </span>
+    // Créer les filtres
+    const filtersHtml = `
+        <div class="accounts-filters-card" style="margin-bottom: 25px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+            <div style="display: flex; align-items: center; margin-bottom: 20px;">
+                <i class="fas fa-filter" style="color: white; font-size: 20px; margin-right: 10px;"></i>
+                <h5 style="color: white; margin: 0; font-weight: 600;">Filtres de Recherche</h5>
+            </div>
+            
+            <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: end;">
+                <div style="flex: 1; min-width: 250px;">
+                    <label style="color: white; font-weight: 500; margin-bottom: 8px; display: block;">
+                        <i class="fas fa-university" style="margin-right: 5px;"></i>Comptes Sélectionnés
+                    </label>
+                    <div class="dropdown" style="position: relative;">
+                        <button class="btn btn-light dropdown-toggle" type="button" id="accountDropdown" onclick="toggleAccountDropdown()" style="width: 100%; border-radius: 10px; padding: 12px 15px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: left; background: white; border: none;">
+                            <span id="selected-accounts-text">Tous les comptes</span>
+                        </button>
+                        <div class="dropdown-menu" id="accounts-dropdown" style="display: none; position: absolute; top: 100%; left: 0; width: 100%; max-height: 300px; overflow-y: auto; border-radius: 10px; border: none; box-shadow: 0 5px 20px rgba(0,0,0,0.15); background: white; z-index: 1000;">
+                            <div class="px-3 py-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="select-all-accounts" checked>
+                                    <label class="form-check-label font-weight-bold" for="select-all-accounts">
+                                        Tous les comptes
+                                    </label>
                     </div>
-                    <div class="account-info">
-                        <p><strong>Solde actuel:</strong> ${formatCurrency(account.current_balance)}</p>
-                        <p><strong>Total crédité:</strong> ${formatCurrency(account.total_credited)}</p>
-                        <p><strong>Dépensé / Total:</strong> ${formatCurrency(account.total_spent)} / ${formatCurrency(account.total_credited)}</p>
-                        <p><strong>Créé le:</strong> ${formatDate(account.created_at)}</p>
-                        ${account.created_by_name ? `<p><strong>Créé par:</strong> ${account.created_by_name}</p>` : ''}
+                                <hr style="margin: 10px 0;">
+                                <div id="accounts-checkboxes">
+                                    <!-- Les checkboxes seront ajoutées ici -->
                     </div>
-                    ${account.is_active && (currentUser.role === 'directeur_general' || currentUser.role === 'pca') ? 
-                        `<button class="btn btn-danger btn-sm" onclick="deactivateAccount(${account.id})">Désactiver</button>` : 
-                        ''
-                    }
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            `;
-        });
-        html += '</div>';
+                
+                <div style="flex: 0 0 180px;">
+                    <label style="color: white; font-weight: 500; margin-bottom: 8px; display: block;">
+                        <i class="fas fa-tags" style="margin-right: 5px;"></i>Type de Compte
+                    </label>
+                    <select id="filter-account-type" class="form-control filter-select" style="border: none; border-radius: 10px; padding: 12px 15px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: white;">
+                        <option value="">Tous les types</option>
+                        <option value="classique">🏛️ Classique</option>
+                        <option value="creance">💳 Créance</option>
+                        <option value="fournisseur">🏪 Fournisseur</option>
+                        <option value="partenaire">🤝 Partenaire</option>
+                        <option value="statut">📊 Statut</option>
+                    </select>
+                </div>
+                
+                <div style="flex: 0 0 160px;">
+                    <label style="color: white; font-weight: 500; margin-bottom: 8px; display: block;">
+                        <i class="fas fa-user" style="margin-right: 5px;"></i>Utilisateur
+                    </label>
+                    <select id="filter-username" class="form-control filter-select" style="border: none; border-radius: 10px; padding: 12px 15px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: white;">
+                        <option value="">Tous les utilisateurs</option>
+                    </select>
+                </div>
+                
+                <div style="flex: 0 0 200px;">
+                    <label style="color: white; font-weight: 500; margin-bottom: 8px; display: block;">
+                        <i class="fas fa-folder" style="margin-right: 5px;"></i>Type de Catégorie
+                    </label>
+                    <select id="filter-category-type" class="form-control filter-select" style="border: none; border-radius: 10px; padding: 12px 15px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: white;">
+                        <option value="">Tous les types</option>
+                    </select>
+                </div>
+                
+                <div style="flex: 0 0 140px;">
+                    <button id="clear-filters" class="btn btn-light" style="width: 100%; border-radius: 10px; padding: 12px 20px; font-weight: 600; border: none; box-shadow: 0 2px 10px rgba(0,0,0,0.1); transition: all 0.3s ease;">
+                        <i class="fas fa-eraser" style="margin-right: 8px;"></i>Effacer
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <style>
+            .filter-select:focus {
+                outline: none !important;
+                box-shadow: 0 0 0 3px rgba(255,255,255,0.3) !important;
+                transform: translateY(-1px);
+                transition: all 0.3s ease;
+            }
+            
+            #clear-filters:hover {
+                background: #f8f9fa !important;
+                transform: translateY(-2px);
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
+            }
+            
+            .dropdown-menu {
+                border: none !important;
+            }
+            
+            .form-check-input:checked {
+                background-color: #667eea;
+                border-color: #667eea;
+            }
+            
+            .form-check-label {
+                cursor: pointer;
+                font-size: 14px;
+            }
+            
+            .dropdown-toggle::after {
+                float: right;
+                margin-top: 8px;
+            }
+            
+            @media (max-width: 768px) {
+                .accounts-filters-card > div:last-child {
+                    flex-direction: column;
+                    gap: 15px;
+                }
+                
+                .accounts-filters-card > div:last-child > div {
+                    flex: 1 1 100% !important;
+                    min-width: auto !important;
+                }
+            }
+        </style>
+    `;
+    
+    // Créer le tableau
+    const tableHtml = `
+        <div class="table-responsive" style="border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+            <table class="table table-striped table-hover mb-0" id="accounts-table" style="border-radius: 15px; overflow: hidden;">
+                <thead style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <tr>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-university" style="margin-right: 8px;"></i>Compte
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-tags" style="margin-right: 8px;"></i>Type
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-user" style="margin-right: 8px;"></i>Utilisateur
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-folder" style="margin-right: 8px;"></i>Catégorie
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-wallet" style="margin-right: 8px;"></i>Solde
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-plus-circle" style="margin-right: 8px;"></i>Crédité
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-minus-circle" style="margin-right: 8px;"></i>Dépensé
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-calendar" style="margin-right: 8px;"></i>Création
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-toggle-on" style="margin-right: 8px;"></i>Statut
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-cogs" style="margin-right: 8px;"></i>Actions
+                        </th>
+                    </tr>
+                </thead>
+                <tbody id="accounts-table-body" style="background: white;">
+                </tbody>
+            </table>
+                </div>
+        
+        <style>
+            #accounts-table tbody tr {
+                transition: all 0.3s ease;
+                border-left: 4px solid transparent;
+            }
+            
+            #accounts-table tbody tr:hover {
+                background: linear-gradient(90deg, #f8f9ff 0%, #ffffff 100%) !important;
+                border-left: 4px solid #667eea;
+                transform: translateX(5px);
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+            
+            #accounts-table tbody td {
+                padding: 15px;
+                vertical-align: middle;
+                border-color: #f1f3f4;
+            }
+            
+            .badge {
+                padding: 8px 12px;
+                border-radius: 20px;
+                font-weight: 500;
+                font-size: 12px;
+            }
+            
+            .badge-secondary {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }
+            
+            .btn-sm {
+                padding: 8px 16px;
+                border-radius: 20px;
+                font-weight: 500;
+                transition: all 0.3s ease;
+            }
+            
+            .btn-danger:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(220, 53, 69, 0.3);
+            }
+            
+            .btn-success:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+            }
+        </style>
+    `;
+    
+    accountsList.innerHTML = filtersHtml + tableHtml;
+    
+    // Peupler les filtres
+    populateAccountFilters(accounts);
+    
+    // Ajouter les event listeners pour les filtres
+    setupAccountFilters();
+    
+    // Initialiser le texte des comptes sélectionnés
+    updateSelectedAccountsText();
+    
+    // Afficher tous les comptes initialement
+    filterAndDisplayAccounts();
+}
+
+function populateAccountFilters(accounts) {
+    // Peupler les checkboxes des comptes
+    const accountsCheckboxes = document.getElementById('accounts-checkboxes');
+    accountsCheckboxes.innerHTML = '';
+    
+    accounts.forEach(account => {
+        const checkboxDiv = document.createElement('div');
+        checkboxDiv.className = 'form-check';
+        checkboxDiv.innerHTML = `
+            <input class="form-check-input account-checkbox" type="checkbox" id="account-${account.id}" value="${account.id}" checked>
+            <label class="form-check-label" for="account-${account.id}">
+                ${account.account_name}
+            </label>
+        `;
+        accountsCheckboxes.appendChild(checkboxDiv);
     });
     
-    accountsList.innerHTML = html;
+    // Peupler le filtre username
+    const usernameFilter = document.getElementById('filter-username');
+    const usernames = [...new Set(accounts.map(account => account.username).filter(Boolean))].sort();
+    usernames.forEach(username => {
+        const option = document.createElement('option');
+        option.value = username;
+        option.textContent = username;
+        usernameFilter.appendChild(option);
+    });
+    
+    // Peupler le filtre type de catégorie
+    const categoryTypeFilter = document.getElementById('filter-category-type');
+    const categoryTypes = [...new Set(accounts.map(account => account.category_type).filter(Boolean))].sort();
+    categoryTypes.forEach(categoryType => {
+        const option = document.createElement('option');
+        option.value = categoryType;
+        option.textContent = categoryType;
+        categoryTypeFilter.appendChild(option);
+    });
+}
+
+function toggleAccountDropdown() {
+    const dropdown = document.getElementById('accounts-dropdown');
+    const isVisible = dropdown.style.display !== 'none';
+    
+    if (isVisible) {
+        dropdown.style.display = 'none';
+    } else {
+        dropdown.style.display = 'block';
+    }
+}
+
+// Fermer le dropdown quand on clique ailleurs
+document.addEventListener('click', function(event) {
+    const dropdown = document.getElementById('accounts-dropdown');
+    const button = document.getElementById('accountDropdown');
+    
+    if (dropdown && button && !dropdown.contains(event.target) && !button.contains(event.target)) {
+        dropdown.style.display = 'none';
+    }
+});
+
+function setupAccountFilters() {
+    const filters = ['filter-account-type', 'filter-username', 'filter-category-type'];
+    
+    filters.forEach(filterId => {
+        const element = document.getElementById(filterId);
+        if (element) {
+            element.addEventListener('change', filterAndDisplayAccounts);
+        }
+    });
+    
+    // Gestion du "Tous les comptes"
+    document.getElementById('select-all-accounts').addEventListener('change', function() {
+        const accountCheckboxes = document.querySelectorAll('.account-checkbox');
+        accountCheckboxes.forEach(checkbox => {
+            checkbox.checked = this.checked;
+        });
+        updateSelectedAccountsText();
+        filterAndDisplayAccounts();
+    });
+    
+    // Gestion des checkboxes individuelles
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('account-checkbox')) {
+            const allCheckboxes = document.querySelectorAll('.account-checkbox');
+            const checkedCheckboxes = document.querySelectorAll('.account-checkbox:checked');
+            const selectAllCheckbox = document.getElementById('select-all-accounts');
+            
+            if (checkedCheckboxes.length === 0) {
+                selectAllCheckbox.indeterminate = false;
+                selectAllCheckbox.checked = false;
+            } else if (checkedCheckboxes.length === allCheckboxes.length) {
+                selectAllCheckbox.indeterminate = false;
+                selectAllCheckbox.checked = true;
+            } else {
+                selectAllCheckbox.indeterminate = true;
+            }
+            
+            updateSelectedAccountsText();
+            filterAndDisplayAccounts();
+        }
+    });
+    
+    // Empêcher la fermeture du dropdown quand on clique sur les checkboxes
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('#accounts-dropdown')) {
+            e.stopPropagation();
+        }
+    });
+    
+    // Bouton effacer filtres
+    document.getElementById('clear-filters').addEventListener('click', () => {
+        // Réinitialiser les filtres
+        filters.forEach(filterId => {
+            const element = document.getElementById(filterId);
+            if (element) {
+                element.value = '';
+            }
+        });
+        
+        // Sélectionner tous les comptes
+        document.getElementById('select-all-accounts').checked = true;
+        document.getElementById('select-all-accounts').indeterminate = false;
+        document.querySelectorAll('.account-checkbox').forEach(checkbox => {
+            checkbox.checked = true;
+        });
+        
+        updateSelectedAccountsText();
+        filterAndDisplayAccounts();
+    });
+}
+
+function updateSelectedAccountsText() {
+    const checkedCheckboxes = document.querySelectorAll('.account-checkbox:checked');
+    const totalCheckboxes = document.querySelectorAll('.account-checkbox');
+    const textElement = document.getElementById('selected-accounts-text');
+    
+    if (checkedCheckboxes.length === 0) {
+        textElement.textContent = 'Aucun compte sélectionné';
+    } else if (checkedCheckboxes.length === totalCheckboxes.length) {
+        textElement.textContent = 'Tous les comptes';
+    } else if (checkedCheckboxes.length === 1) {
+        const accountName = checkedCheckboxes[0].nextElementSibling.textContent;
+        textElement.textContent = accountName;
+    } else {
+        textElement.textContent = `${checkedCheckboxes.length} comptes sélectionnés`;
+    }
+}
+
+function filterAndDisplayAccounts() {
+    if (!window.allAccounts) return;
+    
+    // Récupérer les comptes sélectionnés
+    const selectedAccountIds = Array.from(document.querySelectorAll('.account-checkbox:checked')).map(cb => parseInt(cb.value));
+    const typeFilter = document.getElementById('filter-account-type').value;
+    const usernameFilter = document.getElementById('filter-username').value;
+    const categoryTypeFilter = document.getElementById('filter-category-type').value;
+    
+    const filteredAccounts = window.allAccounts.filter(account => {
+        const matchesSelectedAccounts = selectedAccountIds.includes(account.id);
+        const matchesType = !typeFilter || (account.account_type || 'classique') === typeFilter;
+        const matchesUsername = !usernameFilter || account.username === usernameFilter;
+        const matchesCategoryType = !categoryTypeFilter || account.category_type === categoryTypeFilter;
+        
+        return matchesSelectedAccounts && matchesType && matchesUsername && matchesCategoryType;
+    });
+    
+    displayAccountsTable(filteredAccounts);
+}
+
+function displayAccountsTable(accounts) {
+    const tbody = document.getElementById('accounts-table-body');
+    
+    if (accounts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align: center;">Aucun compte trouvé avec ces filtres</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = accounts.map(account => {
+        const statusClass = account.is_active ? 'text-success' : 'text-danger';
+        const statusText = account.is_active ? 'Actif' : 'Inactif';
+        // Boutons d'actions selon les permissions et l'état du compte
+        let actionButtons = '';
+        
+        if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+            // Bouton modifier (toujours disponible pour les admins)
+            actionButtons += `<button class="btn btn-primary btn-sm me-1" onclick="editAccount(${account.id})" title="Modifier">
+                <i class="fas fa-edit"></i>
+            </button>`;
+            
+            // Bouton supprimer (seulement si aucune dépense)
+            if (account.total_spent === 0) {
+                actionButtons += `<button class="btn btn-warning btn-sm me-1" onclick="deleteAccount(${account.id})" title="Supprimer">
+                    <i class="fas fa-trash"></i>
+                </button>`;
+            }
+            
+            // Bouton activer/désactiver
+            if (account.is_active) {
+                actionButtons += `<button class="btn btn-danger btn-sm" onclick="deactivateAccount(${account.id})" title="Désactiver">
+                    <i class="fas fa-ban"></i>
+                </button>`;
+            } else {
+                actionButtons += `<button class="btn btn-success btn-sm" onclick="activateAccount(${account.id})" title="Activer">
+                    <i class="fas fa-check"></i>
+                </button>`;
+            }
+        } else {
+            actionButtons = '<span class="text-muted">-</span>';
+        }
+        
+        // Pour les comptes partenaires, afficher les directeurs assignés
+        let usernameDisplay = account.username || '-';
+        if (account.account_type === 'partenaire' && account.partner_directors && account.partner_directors.length > 0) {
+            const directorUsernames = account.partner_directors.map(d => d.username).join('-');
+            usernameDisplay = `(${directorUsernames})`;
+        }
+        
+        return `
+            <tr>
+                <td><strong>${account.account_name}</strong></td>
+                <td><span class="badge badge-secondary">${account.account_type || 'classique'}</span></td>
+                <td>${usernameDisplay}</td>
+                <td>${account.category_type || '-'}</td>
+                <td><strong>${formatCurrency(account.current_balance)}</strong></td>
+                <td>${formatCurrency(account.total_credited)}</td>
+                <td>${formatCurrency(account.total_spent)}</td>
+                <td>${formatDate(account.created_at)}</td>
+                <td><span class="${statusClass}"><strong>${statusText}</strong></span></td>
+                <td>${actionButtons}</td>
+            </tr>
+        `;
+    }).join('');
 }
 
 // Fonction pour désactiver un compte
@@ -1061,6 +1927,130 @@ async function deactivateAccount(accountId) {
             await loadUsersWithoutAccount();
         } else {
             const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Fonction pour activer un compte
+async function activateAccount(accountId) {
+    if (!confirm('Êtes-vous sûr de vouloir activer ce compte ?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/accounts/${accountId}/activate`, {
+            method: 'PUT'
+        });
+        
+        if (response.ok) {
+            showNotification('Compte activé avec succès !', 'success');
+            await loadAccounts();
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Fonction pour modifier un compte
+async function editAccount(accountId) {
+    try {
+        // Récupérer les détails du compte
+        const response = await fetch('/api/accounts');
+        const accounts = await response.json();
+        const account = accounts.find(acc => acc.id === accountId);
+        
+        if (!account) {
+            showNotification('Compte non trouvé', 'error');
+            return;
+        }
+        
+        // Pré-remplir le formulaire avec les données existantes
+        document.getElementById('accountName').value = account.account_name;
+        document.getElementById('accountType').value = account.account_type || 'classique';
+        
+        // Déclencher le changement de type pour afficher les bons champs
+        handleAccountTypeChange();
+        
+        // Attendre un peu pour que les champs se chargent
+        setTimeout(() => {
+            // Pré-remplir les champs spécifiques selon le type
+            if (account.account_type === 'classique' && account.category_type) {
+                document.getElementById('categoryTypeSelect').value = account.category_type;
+            }
+            
+            if (account.username) {
+                const userSelect = document.getElementById('createDirectorSelect');
+                // Trouver l'option correspondant au username
+                for (let option of userSelect.options) {
+                    if (option.textContent === account.username) {
+                        option.selected = true;
+                        break;
+                    }
+                }
+            }
+            
+            document.getElementById('createDescription').value = account.description || '';
+        }, 500);
+        
+        // Changer le texte du bouton et ajouter un attribut pour identifier la modification
+        const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
+        const cancelButton = document.getElementById('cancelAccountEdit');
+        submitButton.textContent = 'Modifier le Compte';
+        submitButton.dataset.editingId = accountId;
+        cancelButton.style.display = 'inline-block';
+        
+        // Faire défiler vers le formulaire
+        document.getElementById('createAccountForm').scrollIntoView({ behavior: 'smooth' });
+        
+        showNotification('Formulaire pré-rempli pour modification', 'info');
+        
+    } catch (error) {
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Fonction pour supprimer un compte
+async function deleteAccount(accountId) {
+    try {
+        // Vérifier d'abord si le compte a des dépenses
+        const response = await fetch('/api/accounts');
+        const accounts = await response.json();
+        const account = accounts.find(acc => acc.id === accountId);
+        
+        if (!account) {
+            showNotification('Compte non trouvé', 'error');
+            return;
+        }
+        
+        if (account.total_spent > 0) {
+            showNotification('Impossible de supprimer un compte avec des dépenses', 'error');
+            return;
+        }
+        
+        if (!confirm(`Êtes-vous sûr de vouloir supprimer définitivement le compte "${account.account_name}" ?\n\nCette action est irréversible.`)) {
+            return;
+        }
+        
+        const deleteResponse = await fetch(`/api/accounts/${accountId}/delete`, {
+            method: 'DELETE'
+        });
+        
+        if (deleteResponse.ok) {
+            showNotification('Compte supprimé avec succès !', 'success');
+            await loadAccounts();
+            await loadUsersWithoutAccount();
+            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+                await loadAccountsForCredit();
+                await loadCreditHistory();
+            }
+        } else {
+            const error = await deleteResponse.json();
             throw new Error(error.error);
         }
     } catch (error) {
@@ -1154,11 +2144,13 @@ async function createAccount(formData) {
         
         if (response.ok) {
             showNotification('Compte créé avec succès !', 'success');
-            document.getElementById('createAccountForm').reset();
+            resetAccountForm();
             await loadAccounts();
             await loadUsersWithoutAccount();
+            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
             await loadAccountsForCredit();
             await loadCreditHistory();
+            }
         } else {
             const error = await response.json();
             throw new Error(error.error);
@@ -1168,10 +2160,52 @@ async function createAccount(formData) {
     }
 }
 
+// Fonction pour modifier un compte
+async function updateAccount(accountId, formData) {
+    try {
+        const response = await fetch(`/api/accounts/${accountId}/update`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        
+        if (response.ok) {
+            showNotification('Compte modifié avec succès !', 'success');
+            resetAccountForm();
+            await loadAccounts();
+            await loadUsersWithoutAccount();
+            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+                await loadAccountsForCredit();
+                await loadCreditHistory();
+            }
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Fonction pour réinitialiser le formulaire de compte
+function resetAccountForm() {
+    document.getElementById('createAccountForm').reset();
+    const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
+    const cancelButton = document.getElementById('cancelAccountEdit');
+    submitButton.textContent = 'Créer le Compte';
+    delete submitButton.dataset.editingId;
+    cancelButton.style.display = 'none';
+    
+    // Masquer les sections spécifiques
+    document.getElementById('categoryTypeGroup').style.display = 'none';
+    document.getElementById('creditorsSection').style.display = 'none';
+    document.getElementById('userSelectGroup').style.display = 'block';
+}
+
 // Fonction pour charger les comptes pour le crédit
 async function loadAccountsForCredit() {
     try {
-        const response = await fetch('/api/accounts');
+        const response = await fetch('/api/accounts/for-credit');
         const accounts = await response.json();
         
         const accountSelect = document.getElementById('creditAccountSelect');
@@ -1180,17 +2214,26 @@ async function loadAccountsForCredit() {
         accounts.forEach(account => {
             const option = document.createElement('option');
             option.value = account.id;
-            option.textContent = account.account_name;
+            // Afficher le type de compte avec le nom pour plus de clarté
+            const accountType = account.account_type || 'classique';
+            const typeBadge = accountType.charAt(0).toUpperCase() + accountType.slice(1);
+            option.textContent = `${account.account_name} [${typeBadge}]`;
             accountSelect.appendChild(option);
         });
     } catch (error) {
         console.error('Erreur chargement comptes pour crédit:', error);
+        showNotification('Erreur lors du chargement des comptes', 'error');
     }
 }
 
 // Utilitaires de date
 function setDefaultDate() {
     const today = new Date().toISOString().split('T')[0];
+    // Initialiser la date du crédit
+    const creditDateInput = document.getElementById('creditDate');
+    if (creditDateInput) {
+        creditDateInput.value = today;
+    }
     document.getElementById('expense-date').value = today;
 }
 
@@ -1264,6 +2307,8 @@ document.addEventListener('DOMContentLoaded', function() {
         addExpenseWithFile(formData);
     });
     
+
+    
     // Gestionnaires pour les sélecteurs de catégories hiérarchiques
     document.getElementById('expense-type').addEventListener('change', function() {
         const typeId = this.value;
@@ -1285,11 +2330,35 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('expense-quantity').addEventListener('input', calculateTotal);
     document.getElementById('expense-unit-price').addEventListener('input', calculateTotal);
     
+    // Gestionnaires pour valider le budget quand on quitte les champs quantité/prix
+    document.getElementById('expense-quantity').addEventListener('blur', function() {
+        const totalField = document.getElementById('expense-total');
+        if (totalField && totalField.value && parseFloat(totalField.value) > 0) {
+            validateExpenseAmount();
+        }
+    });
+    
+    document.getElementById('expense-unit-price').addEventListener('blur', function() {
+        const totalField = document.getElementById('expense-total');
+        if (totalField && totalField.value && parseFloat(totalField.value) > 0) {
+            validateExpenseAmount();
+        }
+    });
+    
     // Gestionnaire pour l'édition manuelle du total
     document.getElementById('expense-total').addEventListener('input', function() {
         // Marquer que l'utilisateur a modifié manuellement le total
         this.dataset.manuallyEdited = 'true';
-        // Valider le solde après modification du montant
+        // Supprimer les anciens messages de validation pendant la saisie
+        let errorDiv = document.getElementById('balance-error');
+        if (errorDiv) {
+            errorDiv.remove();
+        }
+    });
+    
+    // Gestionnaire pour valider le budget quand on quitte le champ (perte de focus)
+    document.getElementById('expense-total').addEventListener('blur', function() {
+        // Valider le solde seulement quand on quitte le champ
         validateExpenseAmount();
     });
     
@@ -1302,7 +2371,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Gestionnaire pour valider le solde quand on change de compte
     document.getElementById('expense-account').addEventListener('change', function() {
+        // Valider seulement si un montant est déjà saisi
+        const totalField = document.getElementById('expense-total');
+        if (totalField && totalField.value && parseFloat(totalField.value) > 0) {
         validateExpenseAmount();
+        }
+        handleAccountSelectionChange();
     });
     
     // Gestionnaire pour la validation des fichiers
@@ -1310,16 +2384,49 @@ document.addEventListener('DOMContentLoaded', function() {
         validateFile(this);
     });
     
-    // Gestionnaire de formulaire de création de compte
+    // Gestionnaire de formulaire de création/modification de compte
     document.getElementById('createAccountForm').addEventListener('submit', function(e) {
         e.preventDefault();
+        const submitButton = this.querySelector('button[type="submit"]');
+        const isEditing = submitButton.dataset.editingId;
+        
+        const accountType = document.getElementById('accountType').value;
         const formData = {
-            user_id: parseInt(document.getElementById('createDirectorSelect').value),
+            user_id: accountType === 'fournisseur' || accountType === 'partenaire' || accountType === 'statut' 
+                ? null : parseInt(document.getElementById('createDirectorSelect').value),
             account_name: document.getElementById('accountName').value,
             initial_amount: parseInt(document.getElementById('initialAmount').value) || 0,
-            description: document.getElementById('createDescription').value
+            description: document.getElementById('createDescription').value,
+            account_type: accountType
         };
+        
+        // Pour les comptes classiques, ajouter le type de catégorie
+        if (accountType === 'classique') {
+            const categoryType = document.getElementById('categoryTypeSelect').value;
+            if (categoryType) {
+                formData.category_type = categoryType;
+            }
+        }
+        
+        // Pour les comptes créance, ajouter les créditeurs
+        if (accountType === 'creance') {
+            const dgUser = currentUser.role === 'directeur_general' ? currentUser.id : 1; // Assumons que DG a l'ID 1
+            const assignedDirector = parseInt(document.getElementById('creanceDirectorSelect').value);
+            if (assignedDirector) {
+                formData.creditors = [
+                    { user_id: dgUser, type: 'dg' },
+                    { user_id: assignedDirector, type: 'directeur_assigne' }
+                ];
+            }
+        }
+        
+        if (isEditing) {
+            // Mode modification
+            updateAccount(parseInt(isEditing), formData);
+        } else {
+            // Mode création
         createAccount(formData);
+        }
     });
     
     // Gestionnaire de formulaire de crédit de compte
@@ -1328,7 +2435,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const formData = {
             account_id: parseInt(document.getElementById('creditAccountSelect').value),
             amount: parseInt(document.getElementById('creditAmount').value),
-            description: document.getElementById('creditDescription').value
+            description: document.getElementById('creditDescription').value,
+            credit_date: document.getElementById('creditDate').value
         };
         creditAccount(formData);
     });
@@ -1404,6 +2512,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Configurer les event listeners pour le modal de modification
     setupEditModalEventListeners();
+    
+    // Configurer les event listeners pour les comptes partenaires
+    setupPartnerEventListeners();
 });
 
 async function creditAccount(formData) {
@@ -1415,8 +2526,11 @@ async function creditAccount(formData) {
         });
         
         if (response.ok) {
-            showNotification('Compte crédité avec succès !', 'success');
+            const result = await response.json();
+            showNotification(result.message, 'success');
             document.getElementById('creditAccountForm').reset();
+            // Remettre la date à aujourd'hui
+            document.getElementById('creditDate').value = new Date().toISOString().split('T')[0];
             await loadAccounts();
             await loadCreditHistory();
         } else {
@@ -1425,6 +2539,169 @@ async function creditAccount(formData) {
         }
     } catch (error) {
         showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Fonction pour gérer le changement de type de compte
+// Charger les types de catégories depuis l'API
+async function loadCategoryTypes() {
+    try {
+        const response = await fetch('/api/categories-config');
+        const config = await response.json();
+        
+        const categoryTypeSelect = document.getElementById('categoryTypeSelect');
+        categoryTypeSelect.innerHTML = '<option value="">Sélectionner un type de catégorie</option>';
+        
+        config.types.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type.name;
+            option.textContent = type.name;
+            categoryTypeSelect.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Erreur chargement types de catégories:', error);
+    }
+}
+
+// Gérer les changements d'assignation d'utilisateur
+function handleUserAssignmentChange() {
+    const assignedUserId = document.getElementById('createDirectorSelect').value;
+    const assignedDirectorGroup = document.getElementById('assignedDirectorGroup');
+    
+    if (assignedUserId && assignedDirectorGroup) {
+        // Si un utilisateur est assigné, masquer le groupe "Directeur Créditeur"
+        assignedDirectorGroup.style.display = 'none';
+    } else if (assignedDirectorGroup) {
+        // Si aucun utilisateur assigné, montrer le groupe "Directeur Créditeur"
+        assignedDirectorGroup.style.display = 'block';
+    }
+}
+
+function handleAccountTypeChange() {
+    const accountType = document.getElementById('accountType').value;
+    const userSelectGroup = document.getElementById('userSelectGroup');
+    const creditorsSection = document.getElementById('creditorsSection');
+    const categoryTypeGroup = document.getElementById('categoryTypeGroup');
+    const createDirectorSelect = document.getElementById('createDirectorSelect');
+    const creanceDirectorSelect = document.getElementById('creanceDirectorSelect');
+    const helpText = document.getElementById('accountTypeHelp');
+    
+    // Réinitialiser la visibilité
+    userSelectGroup.style.display = 'block';
+    creditorsSection.style.display = 'none';
+    categoryTypeGroup.style.display = 'none';
+    createDirectorSelect.required = true;
+    
+    // Messages d'aide selon le type
+    const helpMessages = {
+        'classique': 'Compte standard assigné à un directeur spécifique',
+        'creance': 'Compte avec deux créditeurs : DG et directeur sélectionné',
+        'fournisseur': 'Compte accessible uniquement au DG et PCA',
+        'partenaire': 'Compte accessible à tous les utilisateurs',
+        'statut': 'Compte où le crédit écrase le solde existant'
+    };
+    
+    if (accountType && helpMessages[accountType]) {
+        helpText.textContent = helpMessages[accountType];
+    } else {
+        helpText.textContent = 'Sélectionnez d\'abord un type pour voir la description';
+    }
+    
+    // Gestion spécifique selon le type
+    switch (accountType) {
+        case 'classique':
+            categoryTypeGroup.style.display = 'block';
+            loadCategoryTypes(); // Charger les types de catégories
+            break;
+            
+        case 'creance':
+            creditorsSection.style.display = 'block';
+            loadDirectorsForCreance();
+            break;
+            
+        case 'fournisseur':
+        case 'partenaire':
+        case 'statut':
+            userSelectGroup.style.display = 'none';
+            createDirectorSelect.required = false;
+            break;
+            
+        default:
+            // Comportement par défaut
+            break;
+    }
+}
+
+// Fonction pour charger les directeurs pour les comptes créance
+async function loadDirectorsForCreance() {
+    try {
+        const response = await fetch('/api/users/directors-for-accounts');
+        const directors = await response.json();
+        
+        const creanceDirectorSelect = document.getElementById('creanceDirectorSelect');
+        const createDirectorSelect = document.getElementById('createDirectorSelect');
+        
+        // Remplir les deux selects
+        creanceDirectorSelect.innerHTML = '<option value="">Sélectionner le directeur créditeur</option>';
+        createDirectorSelect.innerHTML = '<option value="">Sélectionner un utilisateur directeur</option>';
+        
+        directors.forEach(director => {
+            const option1 = document.createElement('option');
+            option1.value = director.id;
+            option1.textContent = director.username;
+            creanceDirectorSelect.appendChild(option1);
+            
+            const option2 = document.createElement('option');
+            option2.value = director.id;
+            option2.textContent = director.username;
+            createDirectorSelect.appendChild(option2);
+        });
+    } catch (error) {
+        console.error('Erreur chargement directeurs:', error);
+    }
+}
+
+// Fonction pour gérer le changement de compte dans le formulaire de crédit
+async function handleCreditAccountChange() {
+    const accountId = document.getElementById('creditAccountSelect').value;
+    const helpText = document.getElementById('creditAccountHelp');
+    const warningDiv = document.getElementById('creditWarning');
+    const warningText = document.getElementById('creditWarningText');
+    const creditButton = document.getElementById('creditButton');
+    
+    if (!accountId) {
+        helpText.textContent = '';
+        warningDiv.style.display = 'none';
+        creditButton.disabled = false;
+        return;
+    }
+    
+    try {
+        // Vérifier si l'utilisateur peut créditer ce compte
+        const response = await fetch(`/api/accounts/${accountId}/can-credit`);
+        const result = await response.json();
+        
+        if (result.canCredit) {
+            helpText.textContent = `Type: ${result.accountType}`;
+            helpText.style.color = '#28a745';
+            warningDiv.style.display = 'none';
+            creditButton.disabled = false;
+            
+            // Message spécial pour les comptes statut
+            if (result.accountType === 'statut') {
+                warningText.textContent = 'Le crédit va écraser le solde existant (pas d\'addition).';
+                warningDiv.style.display = 'block';
+            }
+        } else {
+            helpText.textContent = result.reason;
+            helpText.style.color = '#dc3545';
+            warningDiv.style.display = 'none';
+            creditButton.disabled = true;
+        }
+    } catch (error) {
+        console.error('Erreur vérification crédit:', error);
+        helpText.textContent = 'Erreur lors de la vérification';
+        helpText.style.color = '#dc3545';
     }
 }
 
@@ -1455,23 +2732,178 @@ async function loadUserAccounts() {
         
         accountSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
         
-        if (accounts.length === 0) {
-            console.log('Aucun compte trouvé pour cet utilisateur');
+        // Filtrer les comptes partenaires (ils sont gérés séparément)
+        const filteredAccounts = accounts.filter(account => account.account_type !== 'partenaire');
+        
+        if (filteredAccounts.length === 0) {
+            console.log('Aucun compte (non-partenaire) trouvé pour cet utilisateur');
             accountSelect.innerHTML += '<option value="" disabled>Aucun compte disponible</option>';
             return;
         }
         
-        accounts.forEach(account => {
-            console.log('Ajout du compte:', account.account_name, 'ID:', account.id);
+        filteredAccounts.forEach(account => {
+            console.log('Ajout du compte:', account.account_name, 'ID:', account.id, 'Type:', account.account_type, 'Catégorie:', account.category_type);
             const option = document.createElement('option');
             option.value = account.id;
             option.textContent = account.account_name;
+            option.dataset.accountType = account.account_type || 'classique';
+            option.dataset.categoryType = account.category_type || '';
             accountSelect.appendChild(option);
         });
         
-        console.log('Comptes chargés avec succès:', accounts.length, 'comptes');
+        // Ajouter un event listener pour gérer le changement de compte
+        accountSelect.addEventListener('change', handleExpenseAccountChange);
+        
+        console.log('Comptes chargés avec succès:', filteredAccounts.length, 'comptes (hors partenaires)');
     } catch (error) {
         console.error('Erreur chargement comptes utilisateur:', error);
+    }
+}
+
+// Fonction pour gérer le changement de compte et adapter le formulaire
+function handleExpenseAccountChange() {
+    const accountSelect = document.getElementById('expense-account');
+    const selectedOption = accountSelect.options[accountSelect.selectedIndex];
+    const accountTypeInfo = document.getElementById('account-type-info');
+    
+    if (!selectedOption || !selectedOption.value) {
+        // Réinitialiser le formulaire si aucun compte n'est sélectionné
+        showAllExpenseFields();
+        accountTypeInfo.style.display = 'none';
+        return;
+    }
+    
+    const accountType = selectedOption.dataset.accountType || 'classique';
+    
+    // Afficher le type de compte sous le champ
+    const typeLabels = {
+        'classique': 'Classique',
+        'creance': 'Créance',
+        'fournisseur': 'Fournisseur',
+        'partenaire': 'Partenaire',
+        'statut': 'Statut'
+    };
+    
+    accountTypeInfo.textContent = `(${typeLabels[accountType] || accountType})`;
+    accountTypeInfo.style.display = 'block';
+    
+    // Afficher le formulaire approprié selon le type de compte
+    if (accountType === 'creance' || accountType === 'fournisseur') {
+        showSimplifiedExpenseForm();
+    } else {
+        showAllExpenseFields();
+    }
+}
+
+// Fonction pour afficher le formulaire simplifié (créance/fournisseur)
+function showSimplifiedExpenseForm() {
+    // Masquer tous les champs non nécessaires
+    const fieldsToHide = [
+        'expense-type',
+        'expense-category', 
+        'expense-subcategory',
+        'social-network-row',
+        'expense-designation',
+        'expense-supplier',
+        'expense-quantity',
+        'expense-unit-price',
+        'expense-predictable',
+        'expense-justification'
+    ];
+    
+    fieldsToHide.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            const formGroup = field.closest('.form-group') || field.closest('.form-row');
+            if (formGroup) {
+                formGroup.style.display = 'none';
+            }
+        }
+    });
+    
+    // Afficher seulement les champs nécessaires
+    const fieldsToShow = [
+        'expense-date',
+        'expense-total',
+        'expense-description'
+    ];
+    
+    fieldsToShow.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            const formGroup = field.closest('.form-group') || field.closest('.form-row');
+            if (formGroup) {
+                formGroup.style.display = 'block';
+            }
+        }
+    });
+    
+    // Modifier les labels pour le formulaire simplifié
+    const totalField = document.getElementById('expense-total');
+    if (totalField) {
+        const label = totalField.closest('.form-group').querySelector('label');
+        if (label) {
+            label.textContent = 'Montant (FCFA)';
+        }
+        totalField.placeholder = 'Montant de la dépense';
+        totalField.required = true;
+    }
+    
+    const descriptionField = document.getElementById('expense-description');
+    if (descriptionField) {
+        const label = descriptionField.closest('.form-group').querySelector('label');
+        if (label) {
+            label.textContent = 'Description';
+        }
+        descriptionField.placeholder = 'Description de la dépense...';
+        descriptionField.required = true;
+    }
+}
+
+// Fonction pour afficher tous les champs (formulaire complet)
+function showAllExpenseFields() {
+    // Afficher tous les champs
+    const allFields = [
+        'expense-type',
+        'expense-category', 
+        'expense-subcategory',
+        'expense-designation',
+        'expense-supplier',
+        'expense-quantity',
+        'expense-unit-price',
+        'expense-predictable',
+        'expense-justification'
+    ];
+    
+    allFields.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            const formGroup = field.closest('.form-group') || field.closest('.form-row');
+            if (formGroup) {
+                formGroup.style.display = 'block';
+            }
+        }
+    });
+    
+    // Restaurer les labels originaux
+    const totalField = document.getElementById('expense-total');
+    if (totalField) {
+        const label = totalField.closest('.form-group').querySelector('label');
+        if (label) {
+            label.textContent = 'Montant Total (FCFA)';
+        }
+        totalField.placeholder = 'Calculé automatiquement';
+        totalField.required = true;
+    }
+    
+    const descriptionField = document.getElementById('expense-description');
+    if (descriptionField) {
+        const label = descriptionField.closest('.form-group').querySelector('label');
+        if (label) {
+            label.textContent = 'Description/Commentaires';
+        }
+        descriptionField.placeholder = 'Informations complémentaires...';
+        descriptionField.required = false;
     }
 }
 
@@ -1583,10 +3015,14 @@ async function loadEditAccounts() {
         const accountSelect = document.getElementById('edit-expense-account');
         accountSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
         
-        accounts.forEach(account => {
+        // Filtrer les comptes partenaires (ils sont gérés séparément)
+        const filteredAccounts = accounts.filter(account => account.account_type !== 'partenaire');
+        
+        filteredAccounts.forEach(account => {
             const option = document.createElement('option');
             option.value = account.id;
             option.textContent = account.account_name;
+            option.dataset.accountType = account.account_type || 'classique';
             accountSelect.appendChild(option);
         });
         
@@ -1943,24 +3379,22 @@ function displayExpenseDetailsModal(data, totalAmount) {
     
     // Populer le contenu du modal
     const modalContent = modal.querySelector('.expense-details-content');
-    const expensesList = modal.querySelector('.expenses-list');
     
     // En-tête du modal
     modalContent.querySelector('.modal-header h3').textContent = `Détails des dépenses - ${data.account_name}`;
     modalContent.querySelector('.period-info').textContent = `Période: ${formatDate(data.period.start_date)} - ${formatDate(data.period.end_date)}`;
     modalContent.querySelector('.total-amount').textContent = `Total: ${formatCurrency(totalAmount)}`;
     
-    // Liste des dépenses
-    expensesList.innerHTML = '';
+    // Stocker les dépenses pour le filtrage et tri
+    window.modalExpenses = data.expenses || [];
+    window.modalCurrentSortField = 'expense_date';
+    window.modalCurrentSortDirection = 'desc';
     
-    if (data.expenses.length === 0) {
-        expensesList.innerHTML = '<p style="text-align: center; color: #666;">Aucune dépense trouvée pour cette période.</p>';
-    } else {
-        data.expenses.forEach(expense => {
-            const expenseCard = createExpenseCard(expense);
-            expensesList.appendChild(expenseCard);
-        });
-    }
+    // Populer les options de filtres
+    populateModalFilterOptions(window.modalExpenses);
+    
+    // Afficher les dépenses avec tri par défaut
+    applyModalFiltersAndDisplay();
     
     // Afficher le modal
     modal.style.display = 'block';
@@ -1986,13 +3420,13 @@ function createExpenseDetailsModal() {
     modal.innerHTML = `
         <div class="expense-details-content" style="
             background-color: #fefefe;
-            margin: 2% auto;
+            margin: 1% auto;
             padding: 0;
             border: none;
             border-radius: 8px;
-            width: 90%;
-            max-width: 1000px;
-            max-height: 90vh;
+            width: 95%;
+            max-width: 1400px;
+            max-height: 95vh;
             overflow: hidden;
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         ">
@@ -2017,10 +3451,164 @@ function createExpenseDetailsModal() {
             </div>
             <div class="modal-body" style="
                 padding: 20px;
-                max-height: calc(90vh - 150px);
+                max-height: calc(95vh - 150px);
                 overflow-y: auto;
             ">
-                <div class="expenses-list"></div>
+                <!-- Filtres -->
+                <div class="modal-filters-section" style="
+                    background: #f8f9fa;
+                    border: 1px solid #dee2e6;
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                ">
+                    <h4 style="margin: 0 0 15px 0; color: #495057; font-size: 1.1rem;">
+                        <i class="fas fa-filter" style="margin-right: 8px;"></i>Filtres
+                    </h4>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <!-- Filtres de date -->
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #495057;">Date début:</label>
+                            <input type="date" id="modal-start-date" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #495057;">Date fin:</label>
+                            <input type="date" id="modal-end-date" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                        </div>
+                        
+                        <!-- Filtre catégorie -->
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #495057;">Catégorie:</label>
+                            <select id="modal-category-filter" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                <option value="">Toutes les catégories</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Filtre fournisseur -->
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #495057;">Fournisseur:</label>
+                            <input type="text" id="modal-supplier-filter" placeholder="Rechercher un fournisseur..." 
+                                   style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                        </div>
+                        
+                        <!-- Filtre prévisible -->
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #495057;">Prévisible:</label>
+                            <select id="modal-predictable-filter" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                <option value="">Tous</option>
+                                <option value="oui">Oui</option>
+                                <option value="non">Non</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Filtre utilisateur -->
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #495057;">Utilisateur:</label>
+                            <select id="modal-user-filter" style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                                <option value="">Tous les utilisateurs</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Filtres de montant -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #495057;">Montant min (FCFA):</label>
+                            <input type="number" id="modal-min-amount" placeholder="0" min="0" 
+                                   style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #495057;">Montant max (FCFA):</label>
+                            <input type="number" id="modal-max-amount" placeholder="Illimité" min="0" 
+                                   style="width: 100%; padding: 8px; border: 1px solid #ced4da; border-radius: 4px;">
+                        </div>
+                    </div>
+                    
+                    <!-- Boutons d'action -->
+                    <div style="margin-top: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button id="modal-clear-filters" style="
+                            background-color: #6c757d;
+                            color: white;
+                            border: none;
+                            padding: 8px 16px;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-size: 0.9rem;
+                        ">
+                            <i class="fas fa-times" style="margin-right: 5px;"></i>Effacer les filtres
+                        </button>
+                        <button id="modal-export-csv" style="
+                            background-color: #28a745;
+                            color: white;
+                            border: none;
+                            padding: 8px 16px;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            font-size: 0.9rem;
+                        ">
+                            <i class="fas fa-download" style="margin-right: 5px;"></i>Exporter CSV
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Compteur de résultats -->
+                <div id="modal-filtered-count" style="
+                    margin-bottom: 15px;
+                    padding: 10px;
+                    background-color: #e9ecef;
+                    border-radius: 4px;
+                    font-weight: 500;
+                    color: #495057;
+                "></div>
+                
+                <!-- Tableau des dépenses -->
+                <div class="table-responsive">
+                    <table class="table table-striped" id="modal-expenses-table" style="
+                        width: 100%;
+                        border-collapse: collapse;
+                        background-color: white;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                        border-radius: 8px;
+                        overflow: hidden;
+                    ">
+                        <thead style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                            <tr>
+                                <th class="sortable" data-field="expense_date" style="padding: 12px; text-align: left; cursor: pointer; user-select: none; position: relative;">
+                                    Date <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="designation" style="padding: 12px; text-align: left; cursor: pointer; user-select: none; position: relative;">
+                                    Désignation <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="category" style="padding: 12px; text-align: left; cursor: pointer; user-select: none; position: relative;">
+                                    Catégorie <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="supplier" style="padding: 12px; text-align: left; cursor: pointer; user-select: none; position: relative;">
+                                    Fournisseur <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="quantity" style="padding: 12px; text-align: center; cursor: pointer; user-select: none; position: relative;">
+                                    Quantité <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="unit_price" style="padding: 12px; text-align: right; cursor: pointer; user-select: none; position: relative;">
+                                    Prix unitaire <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="total" style="padding: 12px; text-align: right; cursor: pointer; user-select: none; position: relative;">
+                                    Total <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="predictable" style="padding: 12px; text-align: center; cursor: pointer; user-select: none; position: relative;">
+                                    Prévisible <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="username" style="padding: 12px; text-align: left; cursor: pointer; user-select: none; position: relative;">
+                                    Utilisateur <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th style="padding: 12px; text-align: left;">Description</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modal-expenses-tbody">
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     `;
@@ -2036,71 +3624,1171 @@ function createExpenseDetailsModal() {
         }
     };
     
+    // Ajouter les event listeners pour les filtres et le tri
+    setupModalEventListeners(modal);
+    
     return modal;
 }
 
-// Fonction pour créer une carte de dépense
-function createExpenseCard(expense) {
-    const card = document.createElement('div');
-    card.style.cssText = `
-        background: #f8f9fa;
-        border: 1px solid #e9ecef;
-        border-radius: 8px;
-        padding: 15px;
-        margin-bottom: 15px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    `;
+// Fonctions pour le modal des détails de dépenses
+
+// Fonction pour configurer les event listeners du modal
+function setupModalEventListeners(modal) {
+    // Event listeners pour les filtres
+    const startDate = modal.querySelector('#modal-start-date');
+    const endDate = modal.querySelector('#modal-end-date');
+    const categoryFilter = modal.querySelector('#modal-category-filter');
+    const supplierFilter = modal.querySelector('#modal-supplier-filter');
+    const predictableFilter = modal.querySelector('#modal-predictable-filter');
+    const userFilter = modal.querySelector('#modal-user-filter');
+    const minAmount = modal.querySelector('#modal-min-amount');
+    const maxAmount = modal.querySelector('#modal-max-amount');
+    const clearFilters = modal.querySelector('#modal-clear-filters');
+    const exportCSV = modal.querySelector('#modal-export-csv');
     
-    // Déterminer si c'est une dépense du DG
-    const isDGExpense = currentUser.role === 'directeur' && expense.username !== currentUser.username;
-    const cardStyle = isDGExpense ? 'font-style: italic; opacity: 0.8;' : '';
+    // Event listeners pour filtrage en temps réel
+    [startDate, endDate, categoryFilter, supplierFilter, predictableFilter, userFilter, minAmount, maxAmount].forEach(element => {
+        if (element) {
+            element.addEventListener('input', applyModalFiltersAndDisplay);
+            element.addEventListener('change', applyModalFiltersAndDisplay);
+        }
+    });
     
-    card.innerHTML = `
-        <div style="${cardStyle}">
-            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px;">
-                <div>
-                    <h4 style="margin: 0; color: #333; font-size: 1.1rem;">
-                        ${expense.designation || 'Sans désignation'}
-                        ${isDGExpense ? '<span style="color: #007bff; font-size: 0.8rem; margin-left: 8px;">(DG)</span>' : ''}
-                    </h4>
-                    <p style="margin: 2px 0; color: #666; font-size: 0.9rem;">
-                        <strong>Date:</strong> ${formatDate(expense.expense_date)}
-                    </p>
-                </div>
-                <div style="text-align: right;">
-                    <div style="font-size: 1.2rem; font-weight: bold; color: #e74c3c;">
-                        ${formatCurrency(expense.total)}
-                    </div>
-                </div>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-                <div>
-                    <strong>Type:</strong> ${expense.expense_type || 'N/A'}<br>
-                    <strong>Catégorie:</strong> ${expense.category || 'N/A'}<br>
-                    <strong>Sous-catégorie:</strong> ${expense.subcategory || 'N/A'}
-                    ${expense.social_network_detail ? `<br><strong>Réseau:</strong> ${expense.social_network_detail}` : ''}
-                </div>
-                <div>
-                    <strong>Fournisseur:</strong> ${expense.supplier || 'N/A'}<br>
-                    <strong>Quantité:</strong> ${expense.quantity || 'N/A'}<br>
-                    <strong>Prix unitaire:</strong> ${expense.unit_price ? formatCurrency(expense.unit_price) : 'N/A'}
-                </div>
-            </div>
-            
-            <div style="border-top: 1px solid #dee2e6; padding-top: 10px;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span><strong>Dépense effectuée par:</strong> ${expense.username}</span>
+    // Event listener pour effacer les filtres
+    if (clearFilters) {
+        clearFilters.addEventListener('click', clearModalFilters);
+    }
+    
+    // Event listener pour export CSV
+    if (exportCSV) {
+        exportCSV.addEventListener('click', exportModalExpensesToCSV);
+    }
+    
+    // Event listeners pour le tri des colonnes
+    const sortableHeaders = modal.querySelectorAll('.sortable');
+    sortableHeaders.forEach(header => {
+        header.addEventListener('click', () => {
+            const field = header.getAttribute('data-field');
+            handleModalColumnSort(field);
+        });
+    });
+}
+
+// Fonction pour populer les options de filtres du modal
+function populateModalFilterOptions(expenses) {
+    const modal = document.getElementById('expense-details-modal');
+    if (!modal) return;
+    
+    // Populer les catégories
+    const categories = [...new Set(expenses.map(e => e.category).filter(Boolean))].sort();
+    const categorySelect = modal.querySelector('#modal-category-filter');
+    if (categorySelect) {
+        categorySelect.innerHTML = '<option value="">Toutes les catégories</option>';
+        categories.forEach(category => {
+            categorySelect.innerHTML += `<option value="${category}">${category}</option>`;
+        });
+    }
+    
+    // Populer les utilisateurs
+    const users = [...new Set(expenses.map(e => e.username).filter(Boolean))].sort();
+    const userSelect = modal.querySelector('#modal-user-filter');
+    if (userSelect) {
+        userSelect.innerHTML = '<option value="">Tous les utilisateurs</option>';
+        users.forEach(user => {
+            userSelect.innerHTML += `<option value="${user}">${user}</option>`;
+        });
+    }
+}
+
+// Fonction pour appliquer les filtres et afficher les résultats du modal
+function applyModalFiltersAndDisplay() {
+    if (!window.modalExpenses) return;
+    
+    const modal = document.getElementById('expense-details-modal');
+    if (!modal) return;
+    
+    let filteredExpenses = [...window.modalExpenses];
+    
+    // Filtres de date
+    const startDate = modal.querySelector('#modal-start-date')?.value;
+    const endDate = modal.querySelector('#modal-end-date')?.value;
+    
+    if (startDate) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            new Date(expense.expense_date) >= new Date(startDate)
+        );
+    }
+    
+    if (endDate) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            new Date(expense.expense_date) <= new Date(endDate)
+        );
+    }
+    
+    // Filtre catégorie
+    const categoryFilter = modal.querySelector('#modal-category-filter')?.value;
+    if (categoryFilter) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            expense.category && expense.category.toLowerCase().includes(categoryFilter.toLowerCase())
+        );
+    }
+    
+    // Filtre fournisseur
+    const supplierFilter = modal.querySelector('#modal-supplier-filter')?.value;
+    if (supplierFilter) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            expense.supplier && expense.supplier.toLowerCase().includes(supplierFilter.toLowerCase())
+        );
+    }
+    
+    // Filtre prévisible
+    const predictableFilter = modal.querySelector('#modal-predictable-filter')?.value;
+    if (predictableFilter) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            expense.predictable === predictableFilter
+        );
+    }
+    
+    // Filtre utilisateur
+    const userFilter = modal.querySelector('#modal-user-filter')?.value;
+    if (userFilter) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            expense.username === userFilter
+        );
+    }
+    
+    // Filtres de montant
+    const minAmount = parseFloat(modal.querySelector('#modal-min-amount')?.value) || 0;
+    const maxAmount = parseFloat(modal.querySelector('#modal-max-amount')?.value) || Infinity;
+    
+    filteredExpenses = filteredExpenses.filter(expense => {
+        const total = parseFloat(expense.total) || 0;
+        return total >= minAmount && total <= maxAmount;
+    });
+    
+    // Appliquer le tri
+    const sortedExpenses = sortModalExpenses(filteredExpenses);
+    
+    // Afficher les résultats
+    displayModalExpenses(sortedExpenses);
+    updateModalFilteredCount(sortedExpenses.length, window.modalExpenses.length);
+}
+
+// Fonction pour trier les dépenses du modal
+function sortModalExpenses(expenses) {
+    if (!window.modalCurrentSortField) return expenses;
+    
+    return [...expenses].sort((a, b) => {
+        let aValue = a[window.modalCurrentSortField];
+        let bValue = b[window.modalCurrentSortField];
+        
+        // Gestion des valeurs nulles/undefined
+        if (aValue == null) aValue = '';
+        if (bValue == null) bValue = '';
+        
+        // Tri spécial pour les dates
+        if (window.modalCurrentSortField === 'expense_date') {
+            aValue = new Date(aValue);
+            bValue = new Date(bValue);
+        }
+        
+        // Tri spécial pour les nombres
+        if (['total', 'unit_price', 'quantity'].includes(window.modalCurrentSortField)) {
+            aValue = parseFloat(aValue) || 0;
+            bValue = parseFloat(bValue) || 0;
+        }
+        
+        // Tri spécial pour les chaînes
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+            aValue = aValue.toLowerCase();
+            bValue = bValue.toLowerCase();
+        }
+        
+        let comparison = 0;
+        if (aValue < bValue) comparison = -1;
+        if (aValue > bValue) comparison = 1;
+        
+        return window.modalCurrentSortDirection === 'desc' ? -comparison : comparison;
+    });
+}
+
+// Fonction pour gérer le tri des colonnes du modal
+function handleModalColumnSort(field) {
+    if (window.modalCurrentSortField === field) {
+        // Inverser la direction si on clique sur la même colonne
+        window.modalCurrentSortDirection = window.modalCurrentSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+        // Nouvelle colonne, commencer par ordre décroissant pour les dates, croissant pour le reste
+        window.modalCurrentSortField = field;
+        window.modalCurrentSortDirection = field === 'expense_date' ? 'desc' : 'asc';
+    }
+    
+    updateModalSortIcons();
+    applyModalFiltersAndDisplay();
+}
+
+// Fonction pour mettre à jour les icônes de tri du modal
+function updateModalSortIcons() {
+    const modal = document.getElementById('expense-details-modal');
+    if (!modal) return;
+    
+    // Réinitialiser toutes les icônes
+    const allIcons = modal.querySelectorAll('.sort-icon');
+    allIcons.forEach(icon => {
+        icon.className = 'fas fa-sort sort-icon';
+        icon.style.opacity = '0.5';
+    });
+    
+    // Mettre à jour l'icône de la colonne active
+    const activeHeader = modal.querySelector(`[data-field="${window.modalCurrentSortField}"]`);
+    if (activeHeader) {
+        const icon = activeHeader.querySelector('.sort-icon');
+        if (icon) {
+            icon.className = `fas fa-sort-${window.modalCurrentSortDirection === 'asc' ? 'up' : 'down'} sort-icon`;
+            icon.style.opacity = '1';
+        }
+    }
+}
+
+// Fonction pour afficher les dépenses dans le tableau du modal
+function displayModalExpenses(expenses) {
+    const modal = document.getElementById('expense-details-modal');
+    if (!modal) return;
+    
+    const tbody = modal.querySelector('#modal-expenses-tbody');
+    if (!tbody) return;
+    
+    if (expenses.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="10" style="text-align: center; padding: 20px; color: #666;">
+                    Aucune dépense trouvée avec les filtres appliqués.
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = expenses.map(expense => {
+        // Déterminer si c'est une dépense du DG
+        const isDGExpense = currentUser.role === 'directeur' && expense.username !== currentUser.username;
+        const rowStyle = isDGExpense ? 'font-style: italic; opacity: 0.8;' : '';
+        
+        return `
+            <tr style="${rowStyle}">
+                <td style="padding: 12px;">${formatDate(expense.expense_date)}</td>
+                <td style="padding: 12px;">
+                    ${expense.designation || 'Sans désignation'}
+                    ${isDGExpense ? '<span style="color: #007bff; font-size: 0.8rem; margin-left: 8px;">(DG)</span>' : ''}
+                </td>
+                <td style="padding: 12px;">${expense.category || 'N/A'}</td>
+                <td style="padding: 12px;">${expense.supplier || 'N/A'}</td>
+                <td style="padding: 12px; text-align: center;">${expense.quantity || 'N/A'}</td>
+                <td style="padding: 12px; text-align: right;">${expense.unit_price ? formatCurrency(expense.unit_price) : 'N/A'}</td>
+                <td style="padding: 12px; text-align: right; font-weight: bold; color: #e74c3c;">${formatCurrency(expense.total)}</td>
+                <td style="padding: 12px; text-align: center;">
                     <span class="badge ${expense.predictable === 'oui' ? 'badge-success' : 'badge-warning'}" 
                           style="padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; 
                                  background-color: ${expense.predictable === 'oui' ? '#28a745' : '#ffc107'}; 
                                  color: ${expense.predictable === 'oui' ? 'white' : 'black'};">
-                        Prévisible: ${expense.predictable === 'oui' ? 'Oui' : 'Non'}
+                        ${expense.predictable === 'oui' ? 'Oui' : 'Non'}
                     </span>
-                </div>
-            </div>
-        </div>
-    `;
+                </td>
+                <td style="padding: 12px;">${expense.username}</td>
+                <td style="padding: 12px; max-width: 200px;">
+                    <span title="${expense.comment || 'Aucune description'}" style="
+                        display: block;
+                        white-space: nowrap;
+                        overflow: hidden;
+                        text-overflow: ellipsis;
+                    ">
+                        ${expense.comment || 'Aucune description'}
+                    </span>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Fonction pour effacer tous les filtres du modal
+function clearModalFilters() {
+    const modal = document.getElementById('expense-details-modal');
+    if (!modal) return;
     
-    return card;
-} 
+    // Effacer tous les champs de filtre
+    modal.querySelector('#modal-start-date').value = '';
+    modal.querySelector('#modal-end-date').value = '';
+    modal.querySelector('#modal-category-filter').value = '';
+    modal.querySelector('#modal-supplier-filter').value = '';
+    modal.querySelector('#modal-predictable-filter').value = '';
+    modal.querySelector('#modal-user-filter').value = '';
+    modal.querySelector('#modal-min-amount').value = '';
+    modal.querySelector('#modal-max-amount').value = '';
+    
+    // Réappliquer les filtres (maintenant vides)
+    applyModalFiltersAndDisplay();
+    
+    showNotification('Filtres effacés', 'success');
+}
+
+// Fonction pour exporter les dépenses filtrées du modal en CSV
+function exportModalExpensesToCSV() {
+    if (!window.modalExpenses) return;
+    
+    const modal = document.getElementById('expense-details-modal');
+    if (!modal) return;
+    
+    // Récupérer les dépenses filtrées et triées
+    let filteredExpenses = [...window.modalExpenses];
+    
+    // Appliquer les mêmes filtres que dans applyModalFiltersAndDisplay
+    const startDate = modal.querySelector('#modal-start-date')?.value;
+    const endDate = modal.querySelector('#modal-end-date')?.value;
+    const categoryFilter = modal.querySelector('#modal-category-filter')?.value;
+    const supplierFilter = modal.querySelector('#modal-supplier-filter')?.value;
+    const predictableFilter = modal.querySelector('#modal-predictable-filter')?.value;
+    const userFilter = modal.querySelector('#modal-user-filter')?.value;
+    const minAmount = parseFloat(modal.querySelector('#modal-min-amount')?.value) || 0;
+    const maxAmount = parseFloat(modal.querySelector('#modal-max-amount')?.value) || Infinity;
+    
+    if (startDate) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            new Date(expense.expense_date) >= new Date(startDate)
+        );
+    }
+    
+    if (endDate) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            new Date(expense.expense_date) <= new Date(endDate)
+        );
+    }
+    
+    if (categoryFilter) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            expense.category && expense.category.toLowerCase().includes(categoryFilter.toLowerCase())
+        );
+    }
+    
+    if (supplierFilter) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            expense.supplier && expense.supplier.toLowerCase().includes(supplierFilter.toLowerCase())
+        );
+    }
+    
+    if (predictableFilter) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            expense.predictable === predictableFilter
+        );
+    }
+    
+    if (userFilter) {
+        filteredExpenses = filteredExpenses.filter(expense => 
+            expense.username === userFilter
+        );
+    }
+    
+    filteredExpenses = filteredExpenses.filter(expense => {
+        const total = parseFloat(expense.total) || 0;
+        return total >= minAmount && total <= maxAmount;
+    });
+    
+    // Appliquer le tri
+    const sortedExpenses = sortModalExpenses(filteredExpenses);
+    
+    if (sortedExpenses.length === 0) {
+        showNotification('Aucune dépense à exporter', 'warning');
+        return;
+    }
+    
+    // Créer le contenu CSV
+    const headers = [
+        'Date',
+        'Désignation',
+        'Catégorie',
+        'Sous-catégorie',
+        'Fournisseur',
+        'Quantité',
+        'Prix unitaire (FCFA)',
+        'Total (FCFA)',
+        'Prévisible',
+        'Utilisateur',
+        'Description'
+    ];
+    
+    const csvContent = [
+        headers.join(','),
+        ...sortedExpenses.map(expense => [
+            formatDate(expense.expense_date),
+            `"${(expense.designation || '').replace(/"/g, '""')}"`,
+            `"${(expense.category || '').replace(/"/g, '""')}"`,
+            `"${(expense.subcategory || '').replace(/"/g, '""')}"`,
+            `"${(expense.supplier || '').replace(/"/g, '""')}"`,
+            expense.quantity || '',
+            expense.unit_price || '',
+            expense.total || '',
+            expense.predictable === 'oui' ? 'Oui' : 'Non',
+            `"${(expense.username || '').replace(/"/g, '""')}"`,
+            `"${(expense.comment || '').replace(/"/g, '""')}"`
+        ].join(','))
+    ].join('\n');
+    
+    // Télécharger le fichier
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `depenses_compte_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    showNotification(`Export CSV réussi (${sortedExpenses.length} dépenses)`, 'success');
+}
+
+// Fonction pour mettre à jour le compteur de résultats filtrés du modal
+function updateModalFilteredCount(filtered, total) {
+    const modal = document.getElementById('expense-details-modal');
+    if (!modal) return;
+    
+    const countElement = modal.querySelector('#modal-filtered-count');
+    if (countElement) {
+        countElement.textContent = `Affichage de ${filtered} dépense${filtered > 1 ? 's' : ''} sur ${total} au total`;
+    }
+}
+
+// === FONCTIONS POUR LES COMPTES PARTENAIRES ===
+
+// Fonction pour gérer le changement de sélection de compte dans le formulaire de dépense
+function handleAccountSelectionChange() {
+    const accountSelect = document.getElementById('expense-account');
+    const typeSelect = document.getElementById('expense-type');
+    const categorySelect = document.getElementById('expense-category');
+    const subcategorySelect = document.getElementById('expense-subcategory');
+    
+    if (!accountSelect || !typeSelect) return;
+    
+    const selectedOption = accountSelect.options[accountSelect.selectedIndex];
+    const accountType = selectedOption.dataset.accountType;
+    const categoryType = selectedOption.dataset.categoryType;
+    
+    console.log('Compte sélectionné:', selectedOption.textContent, 'Type:', accountType, 'Catégorie:', categoryType);
+    
+    // Pour les comptes classiques avec un category_type défini
+    if (accountType === 'classique' && categoryType && categoryType !== 'null') {
+        console.log('Compte classique avec catégorie prédéfinie:', categoryType);
+        
+        // Trouver et sélectionner automatiquement le bon type de dépense
+        let typeFound = false;
+        for (let i = 0; i < typeSelect.options.length; i++) {
+            const option = typeSelect.options[i];
+            if (option.textContent === categoryType) {
+                typeSelect.value = option.value;
+                typeFound = true;
+                console.log('Type de dépense sélectionné automatiquement:', option.textContent);
+                break;
+            }
+        }
+        
+        if (typeFound) {
+            // Désactiver la sélection du type de dépense
+            typeSelect.disabled = true;
+            typeSelect.style.backgroundColor = '#f5f5f5';
+            typeSelect.style.cursor = 'not-allowed';
+            
+            // Charger automatiquement les catégories pour ce type
+            loadCategoriesByType(typeSelect.value);
+            
+            // Ajouter un indicateur visuel
+            let indicator = document.getElementById('category-type-indicator');
+            if (!indicator) {
+                indicator = document.createElement('small');
+                indicator.id = 'category-type-indicator';
+                indicator.style.color = '#666';
+                indicator.style.fontStyle = 'italic';
+                indicator.style.display = 'block';
+                indicator.style.marginTop = '5px';
+                typeSelect.parentNode.appendChild(indicator);
+            }
+            indicator.textContent = `Type prédéfini pour ce compte: ${categoryType}`;
+        }
+    } else {
+        // Pour les autres types de comptes, réactiver la sélection
+        typeSelect.disabled = false;
+        typeSelect.style.backgroundColor = '';
+        typeSelect.style.cursor = '';
+        
+        // Supprimer l'indicateur s'il existe
+        const indicator = document.getElementById('category-type-indicator');
+        if (indicator) {
+            indicator.remove();
+        }
+        
+        // Réinitialiser les sélections
+        typeSelect.value = '';
+        categorySelect.innerHTML = '<option value="">Sélectionner d\'abord un type</option>';
+        categorySelect.disabled = true;
+        subcategorySelect.innerHTML = '<option value="">Sélectionner d\'abord une catégorie</option>';
+        subcategorySelect.disabled = true;
+    }
+}
+
+
+
+function setupPartnerEventListeners() {
+    // Formulaire d'ajout de livraison
+    const addDeliveryForm = document.getElementById('addDeliveryForm');
+    if (addDeliveryForm) {
+        addDeliveryForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            const accountId = document.getElementById('delivery-account-id').value;
+            const formData = {
+                delivery_date: document.getElementById('delivery-date').value,
+                article_count: parseInt(document.getElementById('delivery-article-count').value),
+                amount: parseInt(document.getElementById('delivery-amount').value),
+                description: document.getElementById('delivery-description').value
+            };
+            addPartnerDelivery(accountId, formData);
+        });
+    }
+    
+    // Initialiser la date du jour pour les livraisons
+    const deliveryDateInput = document.getElementById('delivery-date');
+    if (deliveryDateInput) {
+        deliveryDateInput.value = new Date().toISOString().split('T')[0];
+    }
+}
+
+// Charger le résumé des comptes partenaires
+async function loadPartnerSummary() {
+    try {
+        const response = await fetch('/api/partner/delivery-summary');
+        const partnerSummary = await response.json();
+        
+        displayPartnerSummary(partnerSummary);
+        
+        // Charger aussi la configuration si admin
+        if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+            await loadPartnerConfiguration();
+        }
+    } catch (error) {
+        console.error('Erreur chargement résumé partenaires:', error);
+    }
+}
+
+// Afficher le résumé des comptes partenaires
+function displayPartnerSummary(partnerSummary) {
+    const tbody = document.getElementById('partner-summary-tbody');
+    tbody.innerHTML = '';
+    
+    if (partnerSummary.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Aucun compte partenaire trouvé</td></tr>';
+        return;
+    }
+    
+    partnerSummary.forEach(account => {
+        const percentage = parseFloat(account.delivery_percentage) || 0;
+        const remaining = account.total_credited - account.total_delivered;
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${account.account_name}</td>
+            <td>${formatCurrency(account.total_credited)}</td>
+            <td>${formatCurrency(account.total_delivered)}</td>
+            <td>${formatCurrency(remaining)}</td>
+            <td>${account.total_articles}</td>
+            <td>
+                <div class="partner-progress">
+                    <div class="partner-progress-bar" style="width: ${percentage}%"></div>
+                    <div class="partner-progress-text">${percentage.toFixed(1)}%</div>
+                </div>
+            </td>
+            <td>
+                <button class="btn btn-primary btn-sm" onclick="showPartnerDetails(${account.account_id}, '${account.account_name}')">
+                    Détails
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// Afficher les détails d'un compte partenaire
+async function showPartnerDetails(accountId, accountName) {
+    try {
+        // Vérifier les permissions pour ajouter des livraisons
+        const permResponse = await fetch(`/api/partner/${accountId}/can-expense`);
+        const permResult = await permResponse.json();
+        
+        // Charger les directeurs assignés au compte
+        const directorsResponse = await fetch(`/api/partner/${accountId}/directors`);
+        const directorsResult = await directorsResponse.json();
+        window.currentAccountDirectors = directorsResult.assigned_director_ids || [];
+        console.log('Directeurs chargés pour le compte', accountId, ':', directorsResult);
+        
+        // Charger les livraisons
+        const response = await fetch(`/api/partner/${accountId}/deliveries`);
+        const deliveries = await response.json();
+        
+        // Afficher la section détails
+        document.querySelector('.partner-summary').style.display = 'none';
+        document.getElementById('partner-details').style.display = 'block';
+        document.getElementById('partner-details-title').textContent = `Détails - ${accountName}`;
+        
+        // Configurer le formulaire
+        document.getElementById('delivery-account-id').value = accountId;
+        const warningDiv = document.getElementById('delivery-authorization-warning');
+        const warningText = document.getElementById('delivery-warning-text');
+        const addBtn = document.getElementById('add-delivery-btn');
+        
+        if (permResult.canExpense) {
+            warningDiv.style.display = 'none';
+            addBtn.disabled = false;
+        } else {
+            warningDiv.style.display = 'block';
+            warningText.textContent = permResult.reason;
+            addBtn.disabled = true;
+        }
+        
+        // Afficher les livraisons
+        displayDeliveries(deliveries);
+        
+    } catch (error) {
+        console.error('Erreur chargement détails partenaire:', error);
+        showNotification('Erreur lors du chargement des détails', 'error');
+    }
+}
+
+// Afficher la liste des livraisons
+// Générer les boutons d'action selon le statut de la livraison
+function getDeliveryActionButtons(delivery) {
+    const validationStatus = delivery.validation_status || 'pending';
+    const canUserValidate = canValidateDelivery(delivery);
+    const userId = currentUser.id;
+    const isFirstValidator = delivery.first_validated_by === userId;
+    
+    switch (validationStatus) {
+        case 'pending':
+            // Livraison en attente de première validation
+            if (canUserValidate) {
+                return `<button class="btn-validate" onclick="firstValidateDelivery(${delivery.id})">1ère Validation</button>`;
+            }
+            return '-';
+            
+        case 'first_validated':
+            // Livraison en attente de seconde validation
+            if (canUserValidate && !isFirstValidator) {
+                return `
+                    <button class="btn-validate" onclick="finalValidateDelivery(${delivery.id})">Approuver</button>
+                    <button class="btn-reject" onclick="rejectDelivery(${delivery.id})">Rejeter</button>
+                `;
+            } else if (isFirstValidator) {
+                return 'En attente 2ème validation';
+            }
+            return '-';
+            
+        case 'fully_validated':
+            return 'Validée';
+            
+        case 'rejected':
+            // Livraison rejetée, peut être modifiée et resoumise
+            if (delivery.created_by === userId) {
+                return `<button class="btn-edit" onclick="editRejectedDelivery(${delivery.id})">Modifier</button>`;
+            }
+            return 'Rejetée';
+            
+        default:
+            return '-';
+    }
+}
+
+// Vérifier si l'utilisateur peut valider une livraison
+function canValidateDelivery(delivery) {
+    console.log('Vérification validation pour:', currentUser.username, 'ID:', currentUser.id);
+    console.log('Directeurs assignés au compte:', window.currentAccountDirectors);
+    console.log('Rôle utilisateur:', currentUser.role);
+    
+    // Le DG peut toujours valider
+    if (currentUser.role === 'directeur_general') {
+        console.log('Utilisateur est DG, peut valider');
+        return true;
+    }
+    
+    // Les directeurs assignés peuvent valider si ils ne l'ont pas déjà fait
+    // On vérifie dans la variable globale stockée lors du chargement des détails
+    if (window.currentAccountDirectors && window.currentAccountDirectors.includes(currentUser.id)) {
+        console.log('Utilisateur est dans les directeurs assignés, peut valider');
+        return true;
+    }
+    
+    console.log('Utilisateur ne peut pas valider');
+    return false;
+}
+
+function displayDeliveries(deliveries) {
+    const tbody = document.getElementById('deliveries-tbody');
+    tbody.innerHTML = '';
+    
+    if (deliveries.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Aucune livraison trouvée</td></tr>';
+        return;
+    }
+    
+    deliveries.forEach(delivery => {
+        const validationStatus = delivery.validation_status || 'pending';
+        let statusClass, statusText, statusDetails = '';
+        
+        switch (validationStatus) {
+            case 'pending':
+                statusClass = 'pending';
+                statusText = 'En attente';
+                break;
+            case 'first_validated':
+                statusClass = 'first-validated';
+                statusText = 'Première validation';
+                statusDetails = delivery.first_validated_by_name ? `<br><small>Par: ${delivery.first_validated_by_name}</small>` : '';
+                break;
+            case 'fully_validated':
+                statusClass = 'validated';
+                statusText = 'Validée définitivement';
+                statusDetails = delivery.validated_by_name ? `<br><small>Par: ${delivery.validated_by_name}</small>` : '';
+                break;
+            case 'rejected':
+                statusClass = 'rejected';
+                statusText = 'Rejetée';
+                statusDetails = delivery.rejected_by_name ? `<br><small>Par: ${delivery.rejected_by_name}</small>` : '';
+                if (delivery.rejection_comment) {
+                    statusDetails += `<br><small>Motif: ${delivery.rejection_comment}</small>`;
+                }
+                break;
+        }
+        
+        const actionButtons = getDeliveryActionButtons(delivery);
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${formatDate(delivery.delivery_date)}</td>
+            <td>${delivery.article_count}</td>
+            <td>${formatCurrency(delivery.amount)}</td>
+            <td>${delivery.description}</td>
+            <td>${delivery.created_by_name}</td>
+            <td>
+                <span class="delivery-status ${statusClass}">${statusText}</span>
+                ${statusDetails}
+            </td>
+            <td>${actionButtons}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// Fermer les détails partenaire
+function closePartnerDetails() {
+    document.getElementById('partner-details').style.display = 'none';
+    document.querySelector('.partner-summary').style.display = 'block';
+    
+    // Réinitialiser le formulaire
+    document.getElementById('addDeliveryForm').reset();
+    document.getElementById('delivery-date').value = new Date().toISOString().split('T')[0];
+}
+
+// Ajouter une livraison partenaire
+async function addPartnerDelivery(accountId, formData) {
+    try {
+        const response = await fetch(`/api/partner/${accountId}/deliveries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            showNotification(result.message, 'success');
+            
+            // Réinitialiser le formulaire
+            document.getElementById('addDeliveryForm').reset();
+            document.getElementById('delivery-date').value = new Date().toISOString().split('T')[0];
+            
+            // Recharger les données
+            await showPartnerDetails(accountId, document.getElementById('partner-details-title').textContent.split(' - ')[1]);
+            await loadPartnerSummary();
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Première validation d'une livraison partenaire
+async function firstValidateDelivery(deliveryId) {
+    if (!confirm('Effectuer la première validation de cette livraison ?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/partner/deliveries/${deliveryId}/first-validate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showNotification(data.message, 'success');
+            // Recharger les données
+            const accountId = document.getElementById('delivery-account-id').value;
+            const accountName = document.getElementById('partner-details-title').textContent.split(' - ')[1];
+            await showPartnerDetails(accountId, accountName);
+            await loadPartnerSummary();
+        } else {
+            showNotification(data.error, 'error');
+        }
+    } catch (error) {
+        console.error('Erreur première validation:', error);
+        showNotification('Erreur lors de la première validation', 'error');
+    }
+}
+
+// Validation finale d'une livraison partenaire
+async function finalValidateDelivery(deliveryId) {
+    if (!confirm('Approuver définitivement cette livraison ? Le montant sera déduit du compte.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/partner/deliveries/${deliveryId}/final-validate`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showNotification(data.message, 'success');
+            // Recharger les données
+            const accountId = document.getElementById('delivery-account-id').value;
+            const accountName = document.getElementById('partner-details-title').textContent.split(' - ')[1];
+            await showPartnerDetails(accountId, accountName);
+            await loadPartnerSummary();
+        } else {
+            showNotification(data.error, 'error');
+        }
+    } catch (error) {
+        console.error('Erreur validation finale:', error);
+        showNotification('Erreur lors de la validation finale', 'error');
+    }
+}
+
+// Rejeter une livraison partenaire
+async function rejectDelivery(deliveryId) {
+    const comment = prompt('Motif du refus (obligatoire):');
+    
+    if (!comment || comment.trim() === '') {
+        showNotification('Un commentaire de refus est obligatoire', 'error');
+        return;
+    }
+    
+    if (!confirm('Rejeter cette livraison ?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/partner/deliveries/${deliveryId}/reject`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ comment: comment.trim() })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showNotification(data.message, 'success');
+            // Recharger les données
+            const accountId = document.getElementById('delivery-account-id').value;
+            const accountName = document.getElementById('partner-details-title').textContent.split(' - ')[1];
+            await showPartnerDetails(accountId, accountName);
+            await loadPartnerSummary();
+        } else {
+            showNotification(data.error, 'error');
+        }
+    } catch (error) {
+        console.error('Erreur rejet livraison:', error);
+        showNotification('Erreur lors du rejet', 'error');
+    }
+}
+
+// Modifier une livraison rejetée
+async function editRejectedDelivery(deliveryId) {
+    // Pour l'instant, on informe l'utilisateur qu'il peut créer une nouvelle livraison
+    showNotification('Votre livraison a été rejetée. Vous pouvez créer une nouvelle livraison avec les corrections demandées.', 'info');
+}
+
+// Valider une livraison partenaire (DG uniquement)
+async function validateDelivery(deliveryId) {
+    if (!confirm('Êtes-vous sûr de vouloir valider cette livraison ? Cette action déduira le montant du solde du compte.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/partner/deliveries/${deliveryId}/validate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            showNotification(result.message, 'success');
+            
+            // Recharger les données
+            const accountId = document.getElementById('delivery-account-id').value;
+            const accountName = document.getElementById('partner-details-title').textContent.split(' - ')[1];
+            await showPartnerDetails(accountId, accountName);
+            await loadPartnerSummary();
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Charger la configuration des comptes partenaires (Admin)
+async function loadPartnerConfiguration() {
+    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca') {
+        return;
+    }
+    
+    try {
+        const [accountsResponse, directorsResponse] = await Promise.all([
+            fetch('/api/partner/accounts'),
+            fetch('/api/users/directors-for-accounts')
+        ]);
+        
+        const partnerAccounts = await accountsResponse.json();
+        const directors = await directorsResponse.json();
+        
+        displayPartnerConfiguration(partnerAccounts, directors);
+        
+        // Afficher la section config pour les admins
+        document.getElementById('partner-config').style.display = 'block';
+    } catch (error) {
+        console.error('Erreur chargement configuration partenaires:', error);
+    }
+}
+
+// Afficher la configuration des comptes partenaires
+function displayPartnerConfiguration(partnerAccounts, directors) {
+    const configDiv = document.getElementById('partner-accounts-config');
+    configDiv.innerHTML = '';
+    
+    if (partnerAccounts.length === 0) {
+        configDiv.innerHTML = '<p>Aucun compte partenaire trouvé.</p>';
+        return;
+    }
+    
+    partnerAccounts.forEach(account => {
+        const configCard = document.createElement('div');
+        configCard.className = 'partner-account-config';
+        
+        const assignedDirectorIds = account.assigned_director_ids || [];
+        const assignedDirectorNames = account.assigned_director_names || [];
+        
+        configCard.innerHTML = `
+            <h5>${account.account_name}</h5>
+            
+            <div class="director-assignment">
+                <label>Directeur 1:</label>
+                <select id="director1-${account.id}">
+                    <option value="">Sélectionner un directeur</option>
+                    ${directors.map(d => `<option value="${d.id}" ${assignedDirectorIds.length > 0 && assignedDirectorIds[0] === d.id ? 'selected' : ''}>${d.username}</option>`).join('')}
+                </select>
+            </div>
+            
+            <div class="director-assignment">
+                <label>Directeur 2:</label>
+                <select id="director2-${account.id}">
+                    <option value="">Sélectionner un directeur</option>
+                    ${directors.map(d => `<option value="${d.id}" ${assignedDirectorIds.length > 1 && assignedDirectorIds[1] === d.id ? 'selected' : ''}>${d.username}</option>`).join('')}
+                </select>
+            </div>
+            
+            <button class="btn btn-primary btn-sm" onclick="updatePartnerDirectors(${account.id})">
+                Mettre à jour
+            </button>
+            
+            ${assignedDirectorNames.length > 0 ? `
+                <div class="assigned-directors">
+                    <h6>Directeurs assignés:</h6>
+                    ${assignedDirectorNames.map(name => `<span class="assigned-director">${name}</span>`).join('')}
+                </div>
+            ` : ''}
+        `;
+        
+        configDiv.appendChild(configCard);
+    });
+}
+
+// Mettre à jour les directeurs assignés à un compte partenaire
+async function updatePartnerDirectors(accountId) {
+    try {
+        const director1 = document.getElementById(`director1-${accountId}`).value;
+        const director2 = document.getElementById(`director2-${accountId}`).value;
+        
+        const directorIds = [director1, director2].filter(id => id && id !== '');
+        
+        const response = await fetch(`/api/partner/${accountId}/directors`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ director_ids: directorIds })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            showNotification(result.message, 'success');
+            await loadPartnerConfiguration();
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Fonctions pour le formulaire d'ajustement
+function setupAdjustmentForm() {
+    // Définir la date par défaut
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('adjustment-date').value = today;
+    
+    // Gestionnaire de soumission du formulaire d'ajustement
+    document.getElementById('adjustment-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const formData = {
+            adjustment_date: document.getElementById('adjustment-date').value,
+            adjustment_amount: document.getElementById('adjustment-amount').value,
+            adjustment_comment: document.getElementById('adjustment-comment').value
+        };
+        
+        await addAdjustmentExpense(formData);
+    });
+    
+    // Gestionnaire de réinitialisation
+    document.getElementById('reset-adjustment-form').addEventListener('click', function() {
+        document.getElementById('adjustment-form').reset();
+        document.getElementById('adjustment-date').value = today;
+    });
+    
+    // Créer automatiquement le compte Ajustement s'il n'existe pas
+    ensureAdjustmentAccountExists();
+}
+
+async function ensureAdjustmentAccountExists() {
+    try {
+        // Vérifier si le compte Ajustement existe déjà
+        const response = await fetch('/api/accounts');
+        const accounts = await response.json();
+        
+        const adjustmentAccount = accounts.find(account => account.account_name === 'Ajustement');
+        
+        if (!adjustmentAccount) {
+            console.log('Compte Ajustement non trouvé, création automatique...');
+            await createAdjustmentAccount();
+        } else {
+            console.log('Compte Ajustement trouvé:', adjustmentAccount.id);
+        }
+    } catch (error) {
+        console.error('Erreur vérification compte Ajustement:', error);
+    }
+}
+
+async function addAdjustmentExpense(formData) {
+    try {
+        // D'abord, s'assurer que le compte Ajustement existe
+        const accountsResponse = await fetch('/api/accounts');
+        const accounts = await accountsResponse.json();
+        
+        let adjustmentAccount = accounts.find(account => account.account_name === 'Ajustement');
+        
+        if (!adjustmentAccount) {
+            // Créer le compte Ajustement s'il n'existe pas
+            await createAdjustmentAccount();
+            
+            // Recharger les comptes
+            const newAccountsResponse = await fetch('/api/accounts');
+            const newAccounts = await newAccountsResponse.json();
+            adjustmentAccount = newAccounts.find(account => account.account_name === 'Ajustement');
+        }
+        
+        if (!adjustmentAccount) {
+            throw new Error('Impossible de créer ou trouver le compte Ajustement');
+        }
+        
+        // Utiliser la route spécialisée pour les ajustements
+        const response = await fetch('/api/admin/adjustment-expense', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+        
+        if (response.ok) {
+            showNotification('Ajustement comptable ajouté avec succès !', 'success');
+            
+            // Réinitialiser le formulaire
+            document.getElementById('adjustment-form').reset();
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('adjustment-date').value = today;
+            
+            // Recharger les données
+            await loadDashboard();
+            await loadExpenses();
+            
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+        
+    } catch (error) {
+        console.error('Erreur ajout ajustement:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Event listeners pour les filtres et le tri
+document.addEventListener('DOMContentLoaded', function() {
+    // Event listeners pour les filtres
+    document.getElementById('filter-expenses').addEventListener('click', applyFiltersAndDisplay);
+    document.getElementById('clear-filters').addEventListener('click', clearAllFilters);
+    document.getElementById('export-expenses').addEventListener('click', exportExpensesToCSV);
+    
+    // Event listeners pour les filtres en temps réel
+    document.getElementById('filter-account').addEventListener('change', applyFiltersAndDisplay);
+    document.getElementById('filter-category').addEventListener('change', applyFiltersAndDisplay);
+    document.getElementById('filter-supplier').addEventListener('input', applyFiltersAndDisplay);
+    document.getElementById('filter-predictable').addEventListener('change', applyFiltersAndDisplay);
+    document.getElementById('filter-amount-min').addEventListener('input', applyFiltersAndDisplay);
+    document.getElementById('filter-amount-max').addEventListener('input', applyFiltersAndDisplay);
+    document.getElementById('filter-user').addEventListener('change', applyFiltersAndDisplay);
+    
+    // Event listeners pour le tri des colonnes
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.addEventListener('click', function() {
+            const field = this.getAttribute('data-sort');
+            handleColumnSort(field);
+        });
+        header.style.cursor = 'pointer';
+    });
+    
+    // Initialiser les icônes de tri
+    updateSortIcons();
+});

@@ -1138,6 +1138,89 @@ input[readonly] {
     font-size: 0.9rem;
 }
 
+/* Cartes de statistiques du dashboard */
+.stats-cards {
+    display: flex;
+    gap: 15px;
+    margin: 20px 0;
+    overflow-x: auto;
+}
+
+.stats-cards .stat-card {
+    background: white;
+    border-radius: 8px;
+    padding: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    min-width: 200px;
+    flex: 1;
+}
+
+.stats-cards .stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+}
+
+.stats-cards .stat-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 10px;
+    font-size: 18px;
+    color: white;
+    flex-shrink: 0;
+}
+
+.stats-cards .stat-card:nth-child(1) .stat-icon {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+}
+
+.stats-cards .stat-card:nth-child(2) .stat-icon {
+    background: linear-gradient(135deg, #27ae60, #229954);
+}
+
+.stats-cards .stat-card:nth-child(3) .stat-icon {
+    background: linear-gradient(135deg, #f39c12, #e67e22);
+}
+
+.stats-cards .stat-card:nth-child(4) .stat-icon {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+}
+
+.stats-cards .stat-content {
+    flex: 1;
+}
+
+.stats-cards .stat-content h4 {
+    font-size: 11px;
+    font-weight: 600;
+    color: #666;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    line-height: 1.2;
+}
+
+.stats-cards .stat-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 2px;
+    line-height: 1.1;
+}
+
+.stats-cards .stat-period {
+    font-size: 9px;
+    color: #999;
+    font-style: italic;
+    line-height: 1.1;
+}
+
 /* Responsive pour les nouveaux champs */
 @media (max-width: 768px) {
     .form-row {
@@ -1199,6 +1282,36 @@ input[readonly] {
     .dashboard-filters .btn {
         width: 100%;
         margin-top: 10px;
+    }
+    
+    .stats-cards {
+        flex-direction: column;
+        gap: 10px;
+        margin: 15px 0;
+    }
+    
+    .stats-cards .stat-card {
+        padding: 10px;
+        min-width: auto;
+    }
+    
+    .stats-cards .stat-icon {
+        width: 35px;
+        height: 35px;
+        font-size: 16px;
+        margin-right: 8px;
+    }
+    
+    .stats-cards .stat-value {
+        font-size: 14px;
+    }
+    
+    .stats-cards .stat-content h4 {
+        font-size: 10px;
+    }
+    
+    .stats-cards .stat-period {
+        font-size: 8px;
     }
     
     /* Styles responsives pour les tableaux de résumé */
@@ -1359,4 +1472,467 @@ input[readonly] {
         width: 100%;
         min-width: auto;
     }
-} 
+}
+
+/* Styles pour les types de comptes */
+.warning-message {
+    background-color: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 10px 0;
+    color: #856404;
+}
+
+.warning-message strong {
+    color: #d35400;
+}
+
+.form-help {
+    font-size: 0.9em;
+    color: #6c757d;
+    margin-top: 5px;
+    display: block;
+}
+
+.account-type-badge {
+    display: inline-block;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: bold;
+    text-transform: uppercase;
+    margin-left: 8px;
+}
+
+.account-type-classique {
+    background-color: #e3f2fd;
+    color: #1976d2;
+}
+
+.account-type-creance {
+    background-color: #f3e5f5;
+    color: #7b1fa2;
+}
+
+.account-type-fournisseur {
+    background-color: #ffebee;
+    color: #c62828;
+}
+
+.account-type-partenaire {
+    background-color: #e8f5e8;
+    color: #2e7d32;
+}
+
+.account-type-statut {
+    background-color: #fff3e0;
+    color: #ef6c00;
+}
+
+.creditors-info {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    padding: 10px;
+    margin: 5px 0;
+    font-size: 0.9em;
+}
+
+.creditors-info h5 {
+    margin: 0 0 5px 0;
+    color: #495057;
+}
+
+/* Styles pour les comptes partenaires */
+.partner-summary {
+    margin-bottom: 30px;
+}
+
+.partner-progress {
+    width: 100%;
+    height: 20px;
+    background-color: #e9ecef;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+}
+
+.partner-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #28a745 0%, #20c997 100%);
+    transition: width 0.3s ease;
+    border-radius: 10px;
+}
+
+.partner-progress-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 0.8em;
+    font-weight: bold;
+    color: #ffffff;
+    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+}
+
+.delivery-status {
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+
+.delivery-status.pending {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.delivery-status.validated {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.delivery-status.first-validated {
+    background-color: #d1ecf1;
+    color: #0c5460;
+}
+
+.delivery-status.rejected {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.btn-reject {
+    background-color: #dc3545;
+    color: white;
+    border: 1px solid #dc3545;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+    margin-left: 5px;
+}
+
+.btn-reject:hover {
+    background-color: #c82333;
+    border-color: #bd2130;
+}
+
+.btn-edit {
+    background-color: #28a745;
+    color: white;
+    border: 1px solid #28a745;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.8em;
+}
+
+.partner-details {
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 20px;
+}
+
+.deliveries-list {
+    margin-top: 30px;
+}
+
+.btn-validate {
+    background-color: #17a2b8;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 0.8em;
+}
+
+.btn-validate:hover {
+    background-color: #138496;
+}
+
+.btn-validate:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+
+.partner-config {
+    margin-top: 30px;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+}
+
+.partner-account-config {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    background-color: white;
+}
+
+.partner-account-config h5 {
+    margin: 0 0 15px 0;
+    color: #495057;
+}
+
+.director-assignment {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.director-assignment select {
+    flex: 1;
+}
+
+.assigned-directors {
+    background-color: #e9f7ef;
+    border: 1px solid #c3e6cb;
+    border-radius: 4px;
+    padding: 10px;
+    margin-top: 10px;
+}
+
+.assigned-directors h6 {
+    margin: 0 0 5px 0;
+    color: #155724;
+}
+
+.assigned-director {
+    display: inline-block;
+    background-color: #28a745;
+    color: white;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    margin-right: 5px;
+}
+
+.account-type-section {
+    margin-bottom: 30px;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.account-type-section h3 {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    margin: 0;
+    padding: 15px 20px;
+    font-size: 1.1rem;
+}
+
+/* Formulaire d'ajustement */
+.adjustment-form-container {
+    margin-bottom: 30px;
+    padding: 20px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    border-radius: 10px;
+    border-left: 5px solid #ffc107;
+}
+
+.adjustment-form-card {
+    background: white;
+    padding: 25px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.adjustment-form-card h3 {
+    color: #856404;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.adjustment-form-card h3 i {
+    color: #ffc107;
+}
+
+.form-description {
+    color: #6c757d;
+    font-size: 14px;
+    margin-bottom: 20px;
+    font-style: italic;
+}
+
+.adjustment-form .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.adjustment-form .form-row:last-of-type {
+    grid-template-columns: 1fr;
+}
+
+.adjustment-form textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.form-actions {
+    display: flex;
+    gap: 15px;
+    justify-content: flex-start;
+    margin-top: 25px;
+    padding-top: 20px;
+    border-top: 1px solid #dee2e6;
+}
+
+.btn-warning {
+    background: linear-gradient(135deg, #ffc107, #e0a800);
+    color: #212529;
+    border: none;
+    font-weight: 600;
+}
+
+.btn-warning:hover {
+    background: linear-gradient(135deg, #e0a800, #d39e00);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3);
+}
+
+@media (max-width: 768px) {
+    .adjustment-form .form-row {
+        grid-template-columns: 1fr;
+        gap: 15px;
+    }
+    
+    .adjustment-form-container {
+        padding: 15px;
+    }
+    
+    .adjustment-form-card {
+        padding: 20px;
+    }
+    
+    .form-actions {
+        flex-direction: column;
+    }
+}
+
+/* Styles pour les filtres avancés */
+.filters {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+
+.filters .form-row {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 15px;
+    align-items: end;
+}
+
+.filters .form-group {
+    flex: 1;
+    min-width: 150px;
+}
+
+.filters .form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-start;
+    margin-top: 10px;
+}
+
+.filters .form-actions .btn {
+    padding: 8px 16px;
+    font-size: 14px;
+}
+
+/* Styles pour les en-têtes triables */
+.sortable {
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.sortable:hover {
+    background-color: #f8f9fa !important;
+}
+
+.sortable i {
+    margin-left: 5px;
+    opacity: 0.6;
+    transition: opacity 0.2s ease;
+}
+
+.sortable:hover i {
+    opacity: 1;
+}
+
+.sortable[data-sort="expense_date"] i {
+    color: #007bff;
+    opacity: 1;
+}
+
+/* Styles pour le compteur de résultats filtrés */
+#filtered-count {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 500;
+}
+
+#filtered-count i {
+    color: #1976d2;
+}
+
+/* Amélioration du tableau des dépenses */
+#expenses-table {
+    font-size: 13px;
+}
+
+#expenses-table th {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    padding: 8px 6px;
+}
+
+#expenses-table td {
+    padding: 6px;
+    vertical-align: middle;
+}
+
+#expenses-table .badge {
+    font-size: 10px;
+    padding: 2px 6px;
+}
+
+/* Responsive pour les filtres */
+@media (max-width: 768px) {
+    .filters .form-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .filters .form-actions {
+        flex-direction: column;
+    }
+    
+    .filters .form-actions .btn {
+        width: 100%;
+    }
+    
+    #expenses-table {
+        font-size: 11px;
+    }
+    
+    #expenses-table th,
+    #expenses-table td {
+        padding: 4px;
+    }
+}

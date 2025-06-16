@@ -74,6 +74,11 @@
                             <i class="fas fa-users-cog"></i> Gérer Comptes
                         </a>
                     </li>
+                    <li>
+                        <a href="#" data-section="partner-tracking" class="nav-link">
+                            <i class="fas fa-handshake"></i> Suivi Partenaires
+                        </a>
+                    </li>
                 </ul>
             </aside>
 
@@ -129,6 +134,53 @@
                         <button id="reset-dashboard" class="btn btn-secondary">Aujourd'hui</button>
                     </div>
 
+                    <!-- Cartes de statistiques -->
+                    <div class="stats-cards">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-minus-circle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h4>Montant Dépensé Total</h4>
+                                <p class="stat-value" id="total-spent-amount">0 FCFA</p>
+                                <small class="stat-period" id="spent-period">Période sélectionnée</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-wallet"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h4>Montant Restant Total</h4>
+                                <p class="stat-value" id="total-remaining-amount">0 FCFA</p>
+                                <small class="stat-period" id="remaining-period">Soldes actuels</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-plus-circle"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h4>Total Crédité avec Dépenses</h4>
+                                <p class="stat-value" id="total-credited-with-expenses">0 FCFA</p>
+                                <small class="stat-period" id="credited-expenses-period">Comptes avec activité</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h4>Total Crédité Général</h4>
+                                <p class="stat-value" id="total-credited-general">0 FCFA</p>
+                                <small class="stat-period" id="credited-general-period">Tous les comptes</small>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="charts-grid">
                         <div class="chart-card">
                             <h3>Dépenses par Compte</h3>
@@ -147,15 +199,69 @@
                     <h2>Mes Dépenses</h2>
                     
                     <div class="filters">
-                        <div class="form-group">
-                            <label for="filter-start-date">Date de début</label>
-                            <input type="date" id="filter-start-date">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="filter-start-date">Date de début</label>
+                                <input type="date" id="filter-start-date">
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-end-date">Date de fin</label>
+                                <input type="date" id="filter-end-date">
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-account">Compte</label>
+                                <select id="filter-account">
+                                    <option value="">Tous les comptes</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="filter-end-date">Date de fin</label>
-                            <input type="date" id="filter-end-date">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="filter-category">Catégorie</label>
+                                <select id="filter-category">
+                                    <option value="">Toutes les catégories</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-supplier">Fournisseur</label>
+                                <input type="text" id="filter-supplier" placeholder="Rechercher par fournisseur...">
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-predictable">Prévisible</label>
+                                <select id="filter-predictable">
+                                    <option value="">Tous</option>
+                                    <option value="oui">Oui</option>
+                                    <option value="non">Non</option>
+                                </select>
+                            </div>
                         </div>
-                        <button id="filter-expenses" class="btn btn-primary">Filtrer</button>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="filter-amount-min">Montant min (FCFA)</label>
+                                <input type="number" id="filter-amount-min" placeholder="0" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-amount-max">Montant max (FCFA)</label>
+                                <input type="number" id="filter-amount-max" placeholder="Illimité" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label for="filter-user">Utilisateur</label>
+                                <select id="filter-user">
+                                    <option value="">Tous les utilisateurs</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-actions">
+                            <button id="filter-expenses" class="btn btn-primary">
+                                <i class="fas fa-filter"></i> Appliquer les filtres
+                            </button>
+                            <button id="clear-filters" class="btn btn-secondary">
+                                <i class="fas fa-times"></i> Effacer les filtres
+                            </button>
+                            <button id="export-expenses" class="btn btn-success">
+                                <i class="fas fa-download"></i> Exporter (CSV)
+                            </button>
+                        </div>
                     </div>
                     
                     <div class="invoice-management">
@@ -180,18 +286,41 @@
                                     <th>
                                         <input type="checkbox" id="select-all-header" title="Sélectionner tout">
                                     </th>
-                                    <th>Date</th>
-                                    <th>Catégorie</th>
-                                    <th>Désignation</th>
-                                    <th>Fournisseur</th>
-                                    <th>Qté</th>
-                                    <th>P.U.</th>
-                                    <th>Montant Total</th>
-                                    <th>Prévisible</th>
+                                    <th class="sortable" data-sort="expense_date">
+                                        Date <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="category_name">
+                                        Catégorie <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="designation">
+                                        Désignation <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="supplier">
+                                        Fournisseur <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="quantity">
+                                        Qté <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="unit_price">
+                                        P.U. <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="total">
+                                        Montant Total <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th>Description</th>
+                                    <th class="sortable" data-sort="predictable">
+                                        Prévisible <i class="fas fa-sort"></i>
+                                    </th>
                                     <th>Justificatif</th>
-                                    <th>Compte</th>
-                                    <th>Username</th>
-                                    <th id="user-column" style="display: none;">Directeur</th>
+                                    <th class="sortable" data-sort="account_name">
+                                        Compte <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="username">
+                                        Username <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th id="user-column" style="display: none;" class="sortable" data-sort="user_name">
+                                        Directeur <i class="fas fa-sort"></i>
+                                    </th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -233,6 +362,7 @@
                                 <select id="expense-account" name="account_id" required>
                                     <option value="">Sélectionner un compte</option>
                                 </select>
+                                <small id="account-type-info" class="form-help" style="font-size: 11px; color: #666; font-style: italic; display: none;"></small>
                             </div>
                             
                             <div class="form-group">
@@ -339,6 +469,45 @@
                         
                         <button type="submit" class="btn btn-primary">Ajouter la Dépense</button>
                     </form>
+                    
+                    <!-- Formulaire d'ajustement (visible uniquement pour DG/PCA) -->
+                    <div id="adjustment-form-container" class="adjustment-form-container" style="display: none;">
+                        <div class="adjustment-form-card">
+                            <h3><i class="fas fa-balance-scale"></i> Ajustement Comptable</h3>
+                            <p class="form-description">Formulaire spécial pour les ajustements comptables et corrections</p>
+                            
+                            <form id="adjustment-form" class="adjustment-form">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="adjustment-date">Date</label>
+                                        <input type="date" id="adjustment-date" name="adjustment_date" required>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label for="adjustment-amount">Montant (FCFA)</label>
+                                        <input type="number" id="adjustment-amount" name="adjustment_amount" step="1" min="0" required placeholder="0">
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="adjustment-comment">Commentaire / Justification</label>
+                                        <textarea id="adjustment-comment" name="adjustment_comment" required placeholder="Décrivez la raison de cet ajustement comptable..." rows="3"></textarea>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-warning">
+                                        <i class="fas fa-plus"></i> Ajouter l'Ajustement
+                                    </button>
+                                    <button type="button" id="reset-adjustment-form" class="btn btn-secondary">
+                                        <i class="fas fa-undo"></i> Réinitialiser
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
                 </section>
 
                 <!-- Gérer les comptes (Admin uniquement) -->
@@ -355,11 +524,49 @@
                             <input type="text" id="accountName" placeholder="Ex: Compte Directeur Commercial, Budget Formation..." required>
                         </div>
                         
+                        <!-- Nouveau champ pour le type de compte -->
                         <div class="form-group">
+                            <label>Type de Compte</label>
+                            <select id="accountType" onchange="handleAccountTypeChange()" required>
+                                <option value="">Sélectionner un type</option>
+                                <option value="classique">Compte Classique</option>
+                                <option value="creance">Compte Créance</option>
+                                <option value="fournisseur">Compte Fournisseur</option>
+                                <option value="partenaire">Compte Partenaire</option>
+                                <option value="statut">Compte Statut</option>
+                            </select>
+                            <small class="form-help" id="accountTypeHelp">Sélectionnez d'abord un type pour voir la description</small>
+                        </div>
+                        
+                        <div class="form-group" id="userSelectGroup">
                             <label>Assigner à l'utilisateur</label>
-                            <select id="createDirectorSelect" required>
+                            <select id="createDirectorSelect" onchange="handleUserAssignmentChange()">
                                 <option value="">Sélectionner un utilisateur directeur</option>
                             </select>
+                        </div>
+                        
+                        <!-- Champ pour le type de catégorie (comptes classiques seulement) -->
+                        <div class="form-group" id="categoryTypeGroup" style="display: none;">
+                            <label>Type de Catégorie</label>
+                            <select id="categoryTypeSelect">
+                                <option value="">Sélectionner un type de catégorie</option>
+                            </select>
+                            <small class="form-help">Définit le type de dépenses autorisées pour ce compte</small>
+                        </div>
+                        
+                        <!-- Section pour les créditeurs du compte créance -->
+                        <div id="creditorsSection" style="display: none;">
+                            <h4>Créditeurs du Compte Créance</h4>
+                            <div class="form-group">
+                                <label>Directeur Général (créditeur automatique)</label>
+                                <input type="text" value="Directeur Général" disabled>
+                            </div>
+                            <div class="form-group" id="assignedDirectorGroup">
+                                <label>Directeur Créditeur</label>
+                                <select id="creanceDirectorSelect">
+                                    <option value="">Sélectionner le directeur créditeur</option>
+                                </select>
+                            </div>
                         </div>
                         
                         <div class="form-group">
@@ -372,7 +579,10 @@
                             <textarea id="createDescription" placeholder="Ex: Nouveau compte pour..."></textarea>
                         </div>
                         
-                        <button type="submit" class="btn btn-success">Créer le Compte</button>
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-success">Créer le Compte</button>
+                            <button type="button" class="btn btn-secondary" id="cancelAccountEdit" onclick="resetAccountForm()" style="display: none; margin-left: 10px;">Annuler</button>
+                        </div>
                     </form>
 
                     <form class="account-form" id="creditAccountForm">
@@ -380,9 +590,10 @@
                         
                         <div class="form-group">
                             <label>Compte</label>
-                            <select id="creditAccountSelect" required>
+                            <select id="creditAccountSelect" onchange="handleCreditAccountChange()" required>
                                 <option value="">Sélectionner un compte</option>
                             </select>
+                            <small class="form-help" id="creditAccountHelp"></small>
                         </div>
                         
                         <div class="form-group">
@@ -391,11 +602,20 @@
                         </div>
                         
                         <div class="form-group">
-                            <label>Description (optionnelle)</label>
-                            <textarea id="creditDescription" placeholder="Ex: Budget mensuel, remboursement..."></textarea>
+                            <label>Date</label>
+                            <input type="date" id="creditDate" required>
                         </div>
                         
-                        <button type="submit" class="btn btn-primary">Créditer le Compte</button>
+                        <div class="form-group">
+                            <label>Commentaire</label>
+                            <textarea id="creditDescription" placeholder="Ex: Budget mensuel, remboursement..." required></textarea>
+                        </div>
+                        
+                        <div id="creditWarning" class="warning-message" style="display: none;">
+                            <strong>Attention:</strong> <span id="creditWarningText"></span>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary" id="creditButton">Créditer le Compte</button>
                     </form>
 
                     <div class="accounts-list">
@@ -421,6 +641,108 @@
                                 <tbody id="credit-history-tbody">
                                 </tbody>
                             </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Suivi Comptes Partenaires -->
+                <section id="partner-tracking-section" class="section">
+                    <h2>Suivi des Comptes Partenaires</h2>
+                    
+                    <!-- Résumé des comptes partenaires -->
+                    <div class="partner-summary">
+                        <h3>Résumé des Livraisons</h3>
+                        <div class="table-container">
+                            <table id="partner-summary-table">
+                                <thead>
+                                    <tr>
+                                        <th>Compte</th>
+                                        <th>Montant Total</th>
+                                        <th>Livré</th>
+                                        <th>Restant</th>
+                                        <th>Articles</th>
+                                        <th>Progression</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="partner-summary-tbody">
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- Détails d'un compte partenaire -->
+                    <div id="partner-details" style="display: none;">
+                        <h3 id="partner-details-title">Détails du Compte</h3>
+                        
+                        <!-- Formulaire d'ajout de livraison -->
+                        <form class="account-form" id="addDeliveryForm">
+                            <h4>Ajouter une Livraison</h4>
+                            
+                            <input type="hidden" id="delivery-account-id">
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Date de Livraison</label>
+                                    <input type="date" id="delivery-date" required>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Nombre d'Articles</label>
+                                    <input type="number" id="delivery-article-count" min="1" required>
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Montant (FCFA)</label>
+                                    <input type="number" id="delivery-amount" min="1" required>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Description</label>
+                                <textarea id="delivery-description" placeholder="Description des articles livrés..." required></textarea>
+                            </div>
+                            
+                            <div id="delivery-authorization-warning" class="warning-message" style="display: none;">
+                                <strong>Attention:</strong> <span id="delivery-warning-text"></span>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary" id="add-delivery-btn">Ajouter la Livraison</button>
+                        </form>
+
+                        <!-- Liste des livraisons -->
+                        <div class="deliveries-list">
+                            <h4>Historique des Livraisons</h4>
+                            <div class="table-container">
+                                <table id="deliveries-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Articles</th>
+                                            <th>Montant</th>
+                                            <th>Description</th>
+                                            <th>Créé par</th>
+                                            <th>Statut</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="deliveries-tbody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-secondary" onclick="closePartnerDetails()">Retour au Résumé</button>
+                    </div>
+
+                    <!-- Configuration des directeurs partenaires (Admin uniquement) -->
+                    <div class="partner-config" id="partner-config" style="display: none;">
+                        <h3>Configuration des Directeurs Partenaires</h3>
+                        
+                        <div id="partner-accounts-config">
+                            <!-- Les comptes partenaires seront chargés ici -->
                         </div>
                     </div>
                 </section>

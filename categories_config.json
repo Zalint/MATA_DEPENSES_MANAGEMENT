@@ -1,8 +1,8 @@
 {
   "types": [
     {
-      "id": "achat",
-      "name": "Achat",
+      "id": "achatbovin",
+      "name": "Achat Bovin",
       "categories": [
         {
           "id": "bovin",
@@ -11,17 +11,25 @@
             { "id": "boeuf", "name": "Boeuf" },
             { "id": "veau", "name": "Veau" }
           ]
-        },
-        {
-          "id": "ovin",
-          "name": "Ovin",
-          "subcategories": [
-            { "id": "agneau", "name": "Agneau" },
-            { "id": "brebis", "name": "Brebis" }
-          ]
         }
       ]
     },
+    {
+        "id": "achatovin",
+        "name": "Achat Ovin",
+        "categories": [
+        
+          {
+            "id": "ovin",
+            "name": "Ovin",
+            "subcategories": [
+              { "id": "agneau", "name": "Agneau" },
+              { "id": "brebis", "name": "Brebis" },
+              { "id": "belier", "name": "Belier" }
+            ]
+          }
+        ]
+      },
     {
       "id": "depense_mata_group",
       "name": "Dépense Mata Group",
