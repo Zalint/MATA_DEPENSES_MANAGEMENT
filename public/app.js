@@ -96,6 +96,7 @@ function showApp() {
     // Afficher le menu admin si nécessaire
     if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
         document.getElementById('admin-menu').style.display = 'block';
+        document.getElementById('admin-users-menu').style.display = 'block';
         document.getElementById('user-column').style.display = 'table-cell';
     }
 }
@@ -143,6 +144,9 @@ function showSection(sectionName) {
             break;
         case 'partner-tracking':
             loadPartnerSummary();
+            break;
+        case 'manage-users':
+            loadAllUsers();
             break;
     }
 }
@@ -840,12 +844,40 @@ function displayExpenses(expenses) {
             </button>` : 
             '<span style="color: #999;">Aucun</span>';
         
-        // Bouton pour modifier la dépense (seulement pour les dépenses propres du directeur)
-        const editButton = (!isDGExpenseOnDirectorAccount || currentUser.role !== 'directeur') ? 
-            `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="Modifier la dépense">
+        // Bouton pour modifier la dépense avec vérification des restrictions
+        let editButton = '';
+        
+        if (isDGExpenseOnDirectorAccount && currentUser.role === 'directeur') {
+            // Dépense du DG sur compte directeur - pas d'édition
+            editButton = '<span style="color: #999;" title="Seul le Directeur Général peut modifier cette dépense"><i class="fas fa-lock"></i></span>';
+        } else if (currentUser.role === 'directeur') {
+            // Vérifier la restriction de 48 heures pour les directeurs
+            const expenseDate = new Date(expense.created_at);
+            const now = new Date();
+            const hoursDifference = (now - expenseDate) / (1000 * 60 * 60);
+            
+            if (hoursDifference > 48) {
+                editButton = '<span style="color: #dc3545;" title="Modification non autorisée - Plus de 48 heures écoulées"><i class="fas fa-clock"></i></span>';
+            } else {
+                const remainingHours = 48 - hoursDifference;
+                if (remainingHours <= 12) {
+                    // Avertissement - proche de la limite
+                    editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="⚠️ Il reste ${Math.floor(remainingHours)}h${Math.floor((remainingHours % 1) * 60)}min pour modifier">
+                        <i class="fas fa-edit"></i> <i class="fas fa-exclamation-triangle" style="font-size: 0.7em;"></i>
+                    </button>`;
+                } else {
+                    // Modification normale
+                    editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="Modifier la dépense (${Math.floor(remainingHours)}h restantes)">
+                        <i class="fas fa-edit"></i>
+                    </button>`;
+                }
+            }
+        } else {
+            // DG et PCA peuvent toujours modifier
+            editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="Modifier la dépense">
                 <i class="fas fa-edit"></i>
-            </button>` : 
-            '<span style="color: #999;" title="Seul le Directeur Général peut modifier cette dépense"><i class="fas fa-lock"></i></span>';
+            </button>`;
+        }
         
         row.innerHTML = `
             <td>
@@ -1493,6 +1525,7 @@ function displayAccounts(accounts) {
                         <option value="fournisseur">🏪 Fournisseur</option>
                         <option value="partenaire">🤝 Partenaire</option>
                         <option value="statut">📊 Statut</option>
+                        <option value="Ajustement">⚖️ Ajustement</option>
                     </select>
                 </div>
                 
@@ -1511,6 +1544,17 @@ function displayAccounts(accounts) {
                     </label>
                     <select id="filter-category-type" class="form-control filter-select" style="border: none; border-radius: 10px; padding: 12px 15px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: white;">
                         <option value="">Tous les types</option>
+                    </select>
+                </div>
+                
+                <div style="flex: 0 0 160px;">
+                    <label style="color: white; font-weight: 500; margin-bottom: 8px; display: block;">
+                        <i class="fas fa-toggle-on" style="margin-right: 5px;"></i>Statut
+                    </label>
+                    <select id="filter-account-status" class="form-control filter-select" style="border: none; border-radius: 10px; padding: 12px 15px; font-size: 14px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); background: white;">
+                        <option value="">Tous les statuts</option>
+                        <option value="active">✅ Actifs uniquement</option>
+                        <option value="inactive">❌ Inactifs uniquement</option>
                     </select>
                 </div>
                 
@@ -1737,7 +1781,7 @@ document.addEventListener('click', function(event) {
 });
 
 function setupAccountFilters() {
-    const filters = ['filter-account-type', 'filter-username', 'filter-category-type'];
+    const filters = ['filter-account-type', 'filter-username', 'filter-category-type', 'filter-account-status'];
     
     filters.forEach(filterId => {
         const element = document.getElementById(filterId);
@@ -1832,14 +1876,22 @@ function filterAndDisplayAccounts() {
     const typeFilter = document.getElementById('filter-account-type').value;
     const usernameFilter = document.getElementById('filter-username').value;
     const categoryTypeFilter = document.getElementById('filter-category-type').value;
+    const statusFilter = document.getElementById('filter-account-status').value;
+    
+    // Si aucun filtre n'est appliqué (sauf les checkboxes), utiliser la sélection des checkboxes
+    const hasActiveFilters = typeFilter || usernameFilter || categoryTypeFilter || statusFilter;
     
     const filteredAccounts = window.allAccounts.filter(account => {
-        const matchesSelectedAccounts = selectedAccountIds.includes(account.id);
+        // Si des filtres sont appliqués, ignorer la sélection des checkboxes et filtrer sur tous les comptes
+        const matchesSelectedAccounts = hasActiveFilters ? true : selectedAccountIds.includes(account.id);
         const matchesType = !typeFilter || (account.account_type || 'classique') === typeFilter;
         const matchesUsername = !usernameFilter || account.username === usernameFilter;
         const matchesCategoryType = !categoryTypeFilter || account.category_type === categoryTypeFilter;
+        const matchesStatus = !statusFilter || 
+            (statusFilter === 'active' && account.is_active) || 
+            (statusFilter === 'inactive' && !account.is_active);
         
-        return matchesSelectedAccounts && matchesType && matchesUsername && matchesCategoryType;
+        return matchesSelectedAccounts && matchesType && matchesUsername && matchesCategoryType && matchesStatus;
     });
     
     displayAccountsTable(filteredAccounts);
@@ -1847,6 +1899,9 @@ function filterAndDisplayAccounts() {
 
 function displayAccountsTable(accounts) {
     const tbody = document.getElementById('accounts-table-body');
+    
+    // Mettre à jour le compteur de comptes filtrés
+    updateAccountFilterCount(accounts.length, window.allAccounts ? window.allAccounts.length : 0);
     
     if (accounts.length === 0) {
         tbody.innerHTML = '<tr><td colspan="10" style="text-align: center;">Aucun compte trouvé avec ces filtres</td></tr>';
@@ -1908,6 +1963,36 @@ function displayAccountsTable(accounts) {
             </tr>
         `;
     }).join('');
+}
+
+// Mettre à jour le compteur de comptes filtrés
+function updateAccountFilterCount(filtered, total) {
+    const existingCounter = document.querySelector('.account-filter-count');
+    if (existingCounter) {
+        existingCounter.remove();
+    }
+    
+    if (filtered !== total) {
+        const counter = document.createElement('div');
+        counter.className = 'account-filter-count';
+        counter.style.cssText = `
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            margin-bottom: 15px;
+            text-align: center;
+            font-weight: 500;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        `;
+        counter.innerHTML = `
+            <i class="fas fa-filter" style="margin-right: 8px;"></i>
+            ${filtered} compte${filtered > 1 ? 's' : ''} affiché${filtered > 1 ? 's' : ''} sur ${total}
+        `;
+        
+        const tableContainer = document.querySelector('#accounts-table').parentElement;
+        tableContainer.insertBefore(counter, tableContainer.firstChild);
+    }
 }
 
 // Fonction pour désactiver un compte
@@ -2598,7 +2683,8 @@ function handleAccountTypeChange() {
         'creance': 'Compte avec deux créditeurs : DG et directeur sélectionné',
         'fournisseur': 'Compte accessible uniquement au DG et PCA',
         'partenaire': 'Compte accessible à tous les utilisateurs',
-        'statut': 'Compte où le crédit écrase le solde existant'
+        'statut': 'Compte où le crédit écrase le solde existant',
+        'Ajustement': 'Compte spécial pour les ajustements comptables (DG/PCA uniquement)'
     };
     
     if (accountType && helpMessages[accountType]) {
@@ -2622,6 +2708,7 @@ function handleAccountTypeChange() {
         case 'fournisseur':
         case 'partenaire':
         case 'statut':
+        case 'Ajustement':
             userSelectGroup.style.display = 'none';
             createDirectorSelect.required = false;
             break;
@@ -2917,6 +3004,40 @@ async function openEditModal(expenseId) {
         }
         
         const expense = await response.json();
+        
+        // Vérifier les restrictions de modification pour les directeurs réguliers
+        if (currentUser.role === 'directeur') {
+            const expenseDate = new Date(expense.created_at);
+            const now = new Date();
+            const hoursDifference = (now - expenseDate) / (1000 * 60 * 60); // Différence en heures
+            
+            if (hoursDifference > 48) {
+                const confirmMessage = `⚠️ RESTRICTION DE MODIFICATION ⚠️\n\n` +
+                    `Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures.\n\n` +
+                    `En tant que Directeur, vous ne pouvez modifier une dépense que dans les 48 heures suivant sa création.\n\n` +
+                    `Seuls le Directeur Général et le PCA peuvent modifier les dépenses après 48 heures.\n\n` +
+                    `Voulez-vous contacter un administrateur pour cette modification ?`;
+                
+                if (confirm(confirmMessage)) {
+                    showNotification('Veuillez contacter le Directeur Général ou le PCA pour modifier cette dépense.', 'info');
+                }
+                return; // Empêcher l'ouverture du modal
+            } else {
+                // Afficher un avertissement si proche de la limite
+                const remainingHours = 48 - hoursDifference;
+                if (remainingHours <= 12) {
+                    const warningMessage = `⏰ ATTENTION ⏰\n\n` +
+                        `Il vous reste ${Math.floor(remainingHours)} heures et ${Math.floor((remainingHours % 1) * 60)} minutes ` +
+                        `pour modifier cette dépense.\n\n` +
+                        `Après 48 heures, seuls le DG et le PCA pourront la modifier.\n\n` +
+                        `Voulez-vous continuer la modification ?`;
+                    
+                    if (!confirm(warningMessage)) {
+                        return; // L'utilisateur a choisi d'annuler
+                    }
+                }
+            }
+        }
         
         // Charger les catégories dans le modal
         await loadEditCategories();
@@ -3870,16 +3991,16 @@ function displayModalExpenses(expenses) {
     }
     
     tbody.innerHTML = expenses.map(expense => {
-        // Déterminer si c'est une dépense du DG
-        const isDGExpense = currentUser.role === 'directeur' && expense.username !== currentUser.username;
+    // Déterminer si c'est une dépense du DG
+    const isDGExpense = currentUser.role === 'directeur' && expense.username !== currentUser.username;
         const rowStyle = isDGExpense ? 'font-style: italic; opacity: 0.8;' : '';
         
         return `
             <tr style="${rowStyle}">
                 <td style="padding: 12px;">${formatDate(expense.expense_date)}</td>
                 <td style="padding: 12px;">
-                    ${expense.designation || 'Sans désignation'}
-                    ${isDGExpense ? '<span style="color: #007bff; font-size: 0.8rem; margin-left: 8px;">(DG)</span>' : ''}
+                        ${expense.designation || 'Sans désignation'}
+                        ${isDGExpense ? '<span style="color: #007bff; font-size: 0.8rem; margin-left: 8px;">(DG)</span>' : ''}
                 </td>
                 <td style="padding: 12px;">${expense.category || 'N/A'}</td>
                 <td style="padding: 12px;">${expense.supplier || 'N/A'}</td>
@@ -4591,48 +4712,92 @@ function displayPartnerConfiguration(partnerAccounts, directors) {
     configDiv.innerHTML = '';
     
     if (partnerAccounts.length === 0) {
-        configDiv.innerHTML = '<p>Aucun compte partenaire trouvé.</p>';
+        configDiv.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-users-slash fa-3x text-muted mb-3"></i>
+                <p class="text-muted">Aucun compte partenaire trouvé.</p>
+                    </div>
+        `;
         return;
     }
     
     partnerAccounts.forEach(account => {
         const configCard = document.createElement('div');
-        configCard.className = 'partner-account-config';
+        configCard.className = 'partner-config-card';
         
         const assignedDirectorIds = account.assigned_director_ids || [];
         const assignedDirectorNames = account.assigned_director_names || [];
         
         configCard.innerHTML = `
-            <h5>${account.account_name}</h5>
-            
-            <div class="director-assignment">
-                <label>Directeur 1:</label>
-                <select id="director1-${account.id}">
-                    <option value="">Sélectionner un directeur</option>
-                    ${directors.map(d => `<option value="${d.id}" ${assignedDirectorIds.length > 0 && assignedDirectorIds[0] === d.id ? 'selected' : ''}>${d.username}</option>`).join('')}
-                </select>
-            </div>
-            
-            <div class="director-assignment">
-                <label>Directeur 2:</label>
-                <select id="director2-${account.id}">
-                    <option value="">Sélectionner un directeur</option>
-                    ${directors.map(d => `<option value="${d.id}" ${assignedDirectorIds.length > 1 && assignedDirectorIds[1] === d.id ? 'selected' : ''}>${d.username}</option>`).join('')}
-                </select>
-            </div>
-            
-            <button class="btn btn-primary btn-sm" onclick="updatePartnerDirectors(${account.id})">
-                Mettre à jour
-            </button>
-            
-            ${assignedDirectorNames.length > 0 ? `
-                <div class="assigned-directors">
-                    <h6>Directeurs assignés:</h6>
-                    ${assignedDirectorNames.map(name => `<span class="assigned-director">${name}</span>`).join('')}
+            <div class="card-header">
+                <div class="account-info">
+                    <i class="fas fa-building text-primary me-2"></i>
+                    <h5 class="account-title">${account.account_name}</h5>
                 </div>
-            ` : ''}
-        `;
-        
+                <div class="account-status">
+                    <span class="status-badge ${assignedDirectorNames.length > 0 ? 'status-active' : 'status-pending'}">
+                        ${assignedDirectorNames.length > 0 ? 'Configuré' : 'En attente'}
+                    </span>
+                </div>
+            </div>
+            
+            <div class="card-body">
+                <div class="directors-grid">
+                    <div class="director-field">
+                        <label class="field-label">
+                            <i class="fas fa-user-tie me-2"></i>
+                            Directeur Principal
+                        </label>
+                        <select id="director1-${account.id}" class="form-select director-select">
+                            <option value="">Sélectionner un directeur</option>
+                            ${directors.map(d => `<option value="${d.id}" ${assignedDirectorIds.length > 0 && assignedDirectorIds[0] === d.id ? 'selected' : ''}>${d.username}</option>`).join('')}
+                        </select>
+                </div>
+                    
+                    <div class="director-field">
+                        <label class="field-label">
+                            <i class="fas fa-user-friends me-2"></i>
+                            Directeur Secondaire
+                        </label>
+                        <select id="director2-${account.id}" class="form-select director-select">
+                            <option value="">Sélectionner un directeur</option>
+                            ${directors.map(d => `<option value="${d.id}" ${assignedDirectorIds.length > 1 && assignedDirectorIds[1] === d.id ? 'selected' : ''}>${d.username}</option>`).join('')}
+                        </select>
+                </div>
+            </div>
+            
+                ${assignedDirectorNames.length > 0 ? `
+                    <div class="current-assignment">
+                        <h6 class="assignment-title">
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                            Directeurs Assignés
+                        </h6>
+                        <div class="directors-list">
+                            ${assignedDirectorNames.map((name, index) => `
+                                <span class="director-badge ${index === 0 ? 'director-primary' : 'director-secondary'}">
+                                    <i class="fas fa-user me-1"></i>
+                                    ${name}
+                                    <small class="role-text">${index === 0 ? 'Principal' : 'Secondaire'}</small>
+                    </span>
+                            `).join('')}
+                </div>
+            </div>
+                ` : `
+                    <div class="no-assignment">
+                        <i class="fas fa-exclamation-triangle text-warning me-2"></i>
+                        <span class="text-muted">Aucun directeur assigné</span>
+                    </div>
+                `}
+            </div>
+            
+            <div class="card-footer">
+                <button class="btn btn-update" onclick="updatePartnerDirectors(${account.id})">
+                    <i class="fas fa-save me-2"></i>
+                    Mettre à jour
+                </button>
+        </div>
+    `;
+    
         configDiv.appendChild(configCard);
     });
 }
@@ -4644,6 +4809,24 @@ async function updatePartnerDirectors(accountId) {
         const director2 = document.getElementById(`director2-${accountId}`).value;
         
         const directorIds = [director1, director2].filter(id => id && id !== '');
+        
+        // Récupérer les noms des directeurs sélectionnés pour la confirmation
+        const director1Name = director1 ? document.getElementById(`director1-${accountId}`).selectedOptions[0].text : 'Aucun';
+        const director2Name = director2 ? document.getElementById(`director2-${accountId}`).selectedOptions[0].text : 'Aucun';
+        
+        // Récupérer le nom du compte
+        const accountName = document.querySelector(`#director1-${accountId}`).closest('.partner-account-config').querySelector('h5').textContent;
+        
+        // Message de confirmation
+        const confirmMessage = `Êtes-vous sûr de vouloir mettre à jour les directeurs pour le compte "${accountName}" ?\n\n` +
+                              `Directeur 1: ${director1Name}\n` +
+                              `Directeur 2: ${director2Name}\n\n` +
+                              `Cette action modifiera les permissions d'accès au compte.`;
+        
+        // Demander confirmation
+        if (!confirm(confirmMessage)) {
+            return; // Annuler si l'utilisateur refuse
+        }
         
         const response = await fetch(`/api/partner/${accountId}/directors`, {
             method: 'POST',
@@ -4791,4 +4974,529 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialiser les icônes de tri
     updateSortIcons();
+});
+
+// === FONCTIONS DE GESTION DES UTILISATEURS ===
+
+// Charger tous les utilisateurs pour l'administration (réutilise loadUsers existante)
+async function loadAllUsers() {
+    try {
+        // Réutiliser la fonction loadUsers existante mais avec l'endpoint admin
+        const response = await fetch('/api/admin/users');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const users = await response.json();
+        allUsersData = users; // Stocker les données pour les filtres
+        displayAllUsers(users);
+    } catch (error) {
+        console.error('Erreur chargement utilisateurs:', error);
+        showNotification('Erreur lors du chargement des utilisateurs', 'error');
+    }
+}
+
+// Afficher la liste des utilisateurs avec options d'administration
+function displayAllUsers(users) {
+    const usersList = document.getElementById('users-list');
+    
+    if (!Array.isArray(users)) {
+        console.error('displayAllUsers: users n\'est pas un tableau:', users);
+        usersList.innerHTML = '<p>Erreur: impossible d\'afficher les utilisateurs.</p>';
+        return;
+    }
+    
+    if (users.length === 0) {
+        usersList.innerHTML = '<p>Aucun utilisateur trouvé.</p>';
+        return;
+    }
+    
+    const tableHtml = `
+        <div class="table-responsive" style="border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+            <table class="table table-striped table-hover mb-0" style="border-radius: 15px; overflow: hidden;">
+                <thead style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    <tr>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-user" style="margin-right: 8px;"></i>Nom d'utilisateur
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-id-card" style="margin-right: 8px;"></i>Nom complet
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-envelope" style="margin-right: 8px;"></i>Email
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-user-tag" style="margin-right: 8px;"></i>Rôle
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-calendar" style="margin-right: 8px;"></i>Création
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-toggle-on" style="margin-right: 8px;"></i>Statut
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-cogs" style="margin-right: 8px;"></i>Actions
+                        </th>
+                    </tr>
+                </thead>
+                <tbody style="background: white;">
+                    ${users.map(user => {
+                        const statusClass = user.is_active ? 'text-success' : 'text-danger';
+                        const statusText = user.is_active ? 'Actif' : 'Inactif';
+                        const roleLabels = {
+                            'directeur': 'Directeur',
+                            'directeur_general': 'Directeur Général',
+                            'pca': 'PCA'
+                        };
+                        
+                        let actionButtons = '';
+                        
+                        // Ne pas permettre de modifier/désactiver son propre compte
+                        if (user.id !== currentUser.id) {
+                            // Bouton modifier
+                            actionButtons += `<button class="btn btn-primary btn-sm me-1" onclick="editUser(${user.id})" title="Modifier">
+                                <i class="fas fa-edit"></i>
+                            </button>`;
+                            
+                            // Bouton activer/désactiver
+                            if (user.is_active) {
+                                actionButtons += `<button class="btn btn-warning btn-sm me-1" onclick="deactivateUser(${user.id})" title="Désactiver">
+                                    <i class="fas fa-ban"></i>
+                                </button>`;
+                            } else {
+                                actionButtons += `<button class="btn btn-success btn-sm me-1" onclick="activateUser(${user.id})" title="Activer">
+                                    <i class="fas fa-check"></i>
+                                </button>`;
+                            }
+                            
+                            // Bouton réinitialiser mot de passe
+                            actionButtons += `<button class="btn btn-info btn-sm" onclick="resetUserPassword(${user.id})" title="Réinitialiser mot de passe">
+                                <i class="fas fa-key"></i>
+                            </button>`;
+                        } else {
+                            actionButtons = '<span class="text-muted">Votre compte</span>';
+                        }
+                        
+                        return `
+                            <tr style="transition: all 0.3s ease; border-left: 4px solid transparent;">
+                                <td style="padding: 15px; vertical-align: middle;"><strong>${user.username}</strong></td>
+                                <td style="padding: 15px; vertical-align: middle;">${user.full_name || '-'}</td>
+                                <td style="padding: 15px; vertical-align: middle;">${user.email || '-'}</td>
+                                <td style="padding: 15px; vertical-align: middle;">
+                                    <span class="badge badge-primary" style="padding: 8px 12px; border-radius: 20px; font-weight: 500;">
+                                        ${roleLabels[user.role] || user.role}
+                                    </span>
+                                </td>
+                                <td style="padding: 15px; vertical-align: middle;">${formatDate(user.created_at)}</td>
+                                <td style="padding: 15px; vertical-align: middle;">
+                                    <span class="${statusClass}"><strong>${statusText}</strong></span>
+                                </td>
+                                <td style="padding: 15px; vertical-align: middle;">${actionButtons}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        </div>
+        
+        <style>
+            .users-list tbody tr:hover {
+                background: linear-gradient(90deg, #f8f9ff 0%, #ffffff 100%) !important;
+                border-left: 4px solid #667eea !important;
+                transform: translateX(5px);
+                box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            }
+            
+            .badge-primary {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+            }
+        </style>
+    `;
+    
+    usersList.innerHTML = tableHtml;
+}
+
+// Variables globales pour les filtres utilisateurs
+let allUsersData = [];
+
+// Filtrer les utilisateurs selon les critères sélectionnés
+function filterUsers() {
+    const statusFilter = document.getElementById('statusFilter').value;
+    const roleFilter = document.getElementById('roleFilter').value;
+    
+    let filteredUsers = allUsersData;
+    
+    // Filtrer par statut
+    if (statusFilter) {
+        if (statusFilter === 'active') {
+            filteredUsers = filteredUsers.filter(user => user.is_active === true);
+        } else if (statusFilter === 'inactive') {
+            filteredUsers = filteredUsers.filter(user => user.is_active === false);
+        }
+    }
+    
+    // Filtrer par rôle
+    if (roleFilter) {
+        filteredUsers = filteredUsers.filter(user => user.role === roleFilter);
+    }
+    
+    // Afficher les utilisateurs filtrés
+    displayAllUsers(filteredUsers);
+    
+    // Mettre à jour le compteur
+    updateUserFilterCount(filteredUsers.length, allUsersData.length);
+}
+
+// Effacer tous les filtres utilisateurs
+function clearUserFilters() {
+    document.getElementById('statusFilter').value = '';
+    document.getElementById('roleFilter').value = '';
+    displayAllUsers(allUsersData);
+    updateUserFilterCount(allUsersData.length, allUsersData.length);
+}
+
+// Mettre à jour le compteur d'utilisateurs filtrés
+function updateUserFilterCount(filtered, total) {
+    const existingCounter = document.querySelector('.user-filter-count');
+    if (existingCounter) {
+        existingCounter.remove();
+    }
+    
+    if (filtered !== total) {
+        const counter = document.createElement('div');
+        counter.className = 'user-filter-count';
+        counter.style.cssText = `
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 20px;
+            margin-bottom: 15px;
+            text-align: center;
+            font-weight: 500;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        `;
+        counter.innerHTML = `
+            <i class="fas fa-filter" style="margin-right: 8px;"></i>
+            ${filtered} utilisateur${filtered > 1 ? 's' : ''} affiché${filtered > 1 ? 's' : ''} sur ${total}
+        `;
+        
+        const usersList = document.getElementById('users-list');
+        usersList.insertBefore(counter, usersList.firstChild);
+    }
+}
+
+// Recharger les utilisateurs en maintenant les filtres actuels
+async function reloadUsersWithFilters() {
+    await loadAllUsers();
+    // Réappliquer les filtres après le rechargement
+    const statusFilter = document.getElementById('statusFilter');
+    const roleFilter = document.getElementById('roleFilter');
+    if ((statusFilter && statusFilter.value) || (roleFilter && roleFilter.value)) {
+        filterUsers();
+    }
+}
+
+// Créer un nouvel utilisateur
+async function createUser(formData) {
+    try {
+        const response = await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showNotification('Utilisateur créé avec succès', 'success');
+            resetUserForm();
+            reloadUsersWithFilters(); // Recharger la liste
+        } else {
+            showNotification(result.error || 'Erreur lors de la création', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur création utilisateur:', error);
+        showNotification('Erreur lors de la création de l\'utilisateur', 'error');
+    }
+}
+
+// Modifier un utilisateur
+async function editUser(userId) {
+    try {
+        const response = await fetch(`/api/admin/users/${userId}`);
+        const user = await response.json();
+        
+        if (response.ok) {
+            // Remplir le formulaire avec les données existantes
+            document.getElementById('newUsername').value = user.username;
+            document.getElementById('newFullName').value = user.full_name || '';
+            document.getElementById('newEmail').value = user.email || '';
+            document.getElementById('newUserRole').value = user.role;
+            document.getElementById('newPassword').value = '';
+            document.getElementById('newPassword').placeholder = 'Laisser vide pour ne pas changer';
+            document.getElementById('newPassword').required = false;
+            
+            // Changer le bouton et ajouter l'ID en mode édition
+            const submitButton = document.querySelector('#createUserForm button[type="submit"]');
+            submitButton.textContent = 'Modifier l\'Utilisateur';
+            submitButton.dataset.editingId = userId;
+            
+            // Afficher le bouton annuler
+            document.getElementById('cancelUserEdit').style.display = 'inline-block';
+            
+            // Faire défiler vers le formulaire
+            document.getElementById('createUserForm').scrollIntoView({ behavior: 'smooth' });
+        } else {
+            showNotification('Erreur lors du chargement des données utilisateur', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur chargement utilisateur:', error);
+        showNotification('Erreur lors du chargement des données utilisateur', 'error');
+    }
+}
+
+// Mettre à jour un utilisateur
+async function updateUser(userId, formData) {
+    try {
+        const response = await fetch(`/api/admin/users/${userId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showNotification('Utilisateur modifié avec succès', 'success');
+            resetUserForm();
+            reloadUsersWithFilters(); // Recharger la liste
+        } else {
+            showNotification(result.error || 'Erreur lors de la modification', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur modification utilisateur:', error);
+        showNotification('Erreur lors de la modification de l\'utilisateur', 'error');
+    }
+}
+
+// Désactiver un utilisateur
+async function deactivateUser(userId) {
+    if (!confirm('Êtes-vous sûr de vouloir désactiver cet utilisateur ?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/admin/users/${userId}/deactivate`, {
+            method: 'PUT'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showNotification('Utilisateur désactivé avec succès', 'success');
+            reloadUsersWithFilters(); // Recharger la liste
+        } else {
+            showNotification(result.error || 'Erreur lors de la désactivation', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur désactivation utilisateur:', error);
+        showNotification('Erreur lors de la désactivation de l\'utilisateur', 'error');
+    }
+}
+
+// Activer un utilisateur
+async function activateUser(userId) {
+    try {
+        const response = await fetch(`/api/admin/users/${userId}/activate`, {
+            method: 'PUT'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showNotification('Utilisateur activé avec succès', 'success');
+            reloadUsersWithFilters(); // Recharger la liste
+        } else {
+            showNotification(result.error || 'Erreur lors de l\'activation', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur activation utilisateur:', error);
+        showNotification('Erreur lors de l\'activation de l\'utilisateur', 'error');
+    }
+}
+
+// Réinitialiser le mot de passe d'un utilisateur
+async function resetUserPassword(userId) {
+    const newPassword = prompt('Entrez le nouveau mot de passe temporaire :');
+    if (!newPassword) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/admin/users/${userId}/reset-password`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ newPassword })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showNotification('Mot de passe réinitialisé avec succès', 'success');
+        } else {
+            showNotification(result.error || 'Erreur lors de la réinitialisation', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur réinitialisation mot de passe:', error);
+        showNotification('Erreur lors de la réinitialisation du mot de passe', 'error');
+    }
+}
+
+// Réinitialiser le formulaire utilisateur
+function resetUserForm() {
+    document.getElementById('createUserForm').reset();
+    document.getElementById('newPassword').placeholder = 'Mot de passe temporaire';
+    document.getElementById('newPassword').required = true;
+    
+    const submitButton = document.querySelector('#createUserForm button[type="submit"]');
+    submitButton.textContent = 'Créer l\'Utilisateur';
+    delete submitButton.dataset.editingId;
+    
+    document.getElementById('cancelUserEdit').style.display = 'none';
+}
+
+// Mobile Menu Functions
+function setupMobileMenu() {
+    const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    
+    if (mobileMenuToggle) {
+        mobileMenuToggle.addEventListener('click', toggleMobileMenu);
+    }
+    
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener('click', closeMobileMenu);
+    }
+    
+    // Close menu on window resize if desktop
+    window.addEventListener('resize', function() {
+        if (window.innerWidth >= 768) {
+            closeMobileMenu();
+        }
+    });
+    
+    // Close menu on escape key
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            closeMobileMenu();
+        }
+    });
+}
+
+function toggleMobileMenu() {
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    
+    if (sidebar && sidebarOverlay) {
+        const isOpen = sidebar.classList.contains('active');
+        
+        if (isOpen) {
+            closeMobileMenu();
+        } else {
+            openMobileMenu();
+        }
+    }
+}
+
+function openMobileMenu() {
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+    
+    if (sidebar && sidebarOverlay) {
+        sidebar.classList.add('active');
+        sidebarOverlay.classList.add('active');
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        
+        if (mobileMenuToggle) {
+            const icon = mobileMenuToggle.querySelector('i');
+            if (icon) {
+                icon.classList.remove('fa-bars');
+                icon.classList.add('fa-times');
+            }
+        }
+    }
+}
+
+function closeMobileMenu() {
+    const sidebar = document.getElementById('sidebar');
+    const sidebarOverlay = document.getElementById('sidebar-overlay');
+    const mobileMenuToggle = document.getElementById('mobile-menu-toggle');
+    
+    if (sidebar && sidebarOverlay) {
+        sidebar.classList.remove('active');
+        sidebarOverlay.classList.remove('active');
+        document.body.style.overflow = ''; // Restore scrolling
+        
+        if (mobileMenuToggle) {
+            const icon = mobileMenuToggle.querySelector('i');
+            if (icon) {
+                icon.classList.remove('fa-times');
+                icon.classList.add('fa-bars');
+            }
+        }
+    }
+}
+
+// Event listeners pour le formulaire utilisateur
+document.addEventListener('DOMContentLoaded', function() {
+    // Setup mobile menu
+    setupMobileMenu();
+    
+    // Update navigation links to close mobile menu
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', function() {
+            closeMobileMenu();
+        });
+    });
+    
+    // Gestionnaire de formulaire de création/modification d'utilisateur
+    document.getElementById('createUserForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        const submitButton = this.querySelector('button[type="submit"]');
+        const isEditing = submitButton.dataset.editingId;
+        
+        const formData = {
+            username: document.getElementById('newUsername').value,
+            full_name: document.getElementById('newFullName').value,
+            email: document.getElementById('newEmail').value,
+            role: document.getElementById('newUserRole').value
+        };
+        
+        // Ajouter le mot de passe seulement s'il est fourni
+        const password = document.getElementById('newPassword').value;
+        if (password) {
+            formData.password = password;
+        }
+        
+        if (isEditing) {
+            // Mode modification
+            updateUser(parseInt(isEditing), formData);
+        } else {
+            // Mode création - mot de passe requis
+            if (!password) {
+                showNotification('Le mot de passe est requis pour créer un utilisateur', 'error');
+                return;
+            }
+            createUser(formData);
+        }
+    });
 });

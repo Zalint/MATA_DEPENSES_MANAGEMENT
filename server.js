@@ -190,10 +190,10 @@ app.post('/api/accounts/credit', requireAuth, async (req, res) => {
         
         // Pour les comptes classiques, aussi enregistrer dans l'ancien historique
         if (account.account_type === 'classique') {
-            await pool.query(
-                'INSERT INTO credit_history (account_id, credited_by, amount, description) VALUES ($1, $2, $3, $4)',
-                [account_id, credited_by, parseInt(amount), description || 'Crédit de compte']
-            );
+        await pool.query(
+            'INSERT INTO credit_history (account_id, credited_by, amount, description) VALUES ($1, $2, $3, $4)',
+            [account_id, credited_by, parseInt(amount), description || 'Crédit de compte']
+        );
         }
         
         await pool.query('COMMIT');
@@ -329,16 +329,20 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
                    COALESCE(a.account_type, 'classique') as account_type,
                    a.category_type, a.access_restricted, a.allowed_roles, a.created_by
             FROM accounts a
-            WHERE a.is_active = true
+            WHERE 1=1
         `;
         let params = [];
         
         if (req.session.user.role === 'directeur') {
-            query += ' AND (a.user_id = $1 OR a.account_type IN (\'partenaire\', \'statut\'))';
+            // Les directeurs ne voient que LEURS PROPRES comptes actifs uniquement
+            query += ' AND a.is_active = true AND a.user_id = $1';
             params.push(req.session.user.id);
-        } else if (req.session.user.role !== 'directeur_general' && req.session.user.role !== 'pca') {
-            // Pour les autres rôles, ne montrer que les comptes non restreints
-            query += ' AND (a.access_restricted = false OR a.access_restricted IS NULL)';
+        } else if (req.session.user.role === 'directeur_general' || req.session.user.role === 'pca') {
+            // Les admins voient tous les comptes (actifs et inactifs)
+            // Pas de filtre supplémentaire
+        } else {
+            // Pour les autres rôles, ne montrer que les comptes actifs non restreints + comptes Ajustement
+            query += ' AND a.is_active = true AND (a.access_restricted = false OR a.access_restricted IS NULL OR a.account_type = \'Ajustement\')';
         }
         
         query += ' ORDER BY COALESCE(a.account_type, \'classique\'), a.account_name';
@@ -352,14 +356,14 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
         // Calculer les vrais totaux pour chaque compte et ajouter les informations utilisateur
         const accountsWithDetails = await Promise.all(result.rows.map(async (account) => {
             try {
-                // Calculer le total réellement dépensé pour ce compte
-                const expensesResult = await pool.query(
-                    'SELECT COALESCE(SUM(total), 0) as real_total_spent FROM expenses WHERE account_id = $1',
-                    [account.id]
-                );
-                
-                const realTotalSpent = parseInt(expensesResult.rows[0].real_total_spent) || 0;
-                const realCurrentBalance = account.total_credited - realTotalSpent;
+            // Calculer le total réellement dépensé pour ce compte
+            const expensesResult = await pool.query(
+                'SELECT COALESCE(SUM(total), 0) as real_total_spent FROM expenses WHERE account_id = $1',
+                [account.id]
+            );
+            
+            const realTotalSpent = parseInt(expensesResult.rows[0].real_total_spent) || 0;
+            const realCurrentBalance = account.total_credited - realTotalSpent;
                 
                 // Récupérer les informations utilisateur si nécessaire
                 let userInfo = null;
@@ -409,10 +413,10 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
                         partnerDirectors = null;
                     }
                 }
-                
-                return {
-                    ...account,
-                    total_spent: realTotalSpent,
+            
+            return {
+                ...account,
+                total_spent: realTotalSpent,
                     current_balance: realCurrentBalance,
                     user_name: userInfo ? userInfo.full_name : null,
                     username: userInfo ? userInfo.username : null,
@@ -1218,15 +1222,15 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
         
         // Récupérer les dépenses sélectionnées
         let query = `
-            SELECT e.*, u.full_name as user_name, u.username, a.account_name,
-                CASE 
-                    WHEN e.expense_type IS NOT NULL THEN 
-                        CONCAT(e.expense_type, ' > ', e.category, ' > ', e.subcategory,
-                               CASE WHEN e.social_network_detail IS NOT NULL AND e.social_network_detail != '' 
-                                    THEN CONCAT(' (', e.social_network_detail, ')') 
-                                    ELSE '' END)
-                    ELSE 'Catégorie non définie'
-                END as category_name
+                         SELECT e.*, u.full_name as user_name, u.username, a.account_name,
+                    CASE 
+                        WHEN e.expense_type IS NOT NULL THEN 
+                            CONCAT(e.expense_type, ' > ', e.category, ' > ', e.subcategory,
+                                   CASE WHEN e.social_network_detail IS NOT NULL AND e.social_network_detail != '' 
+                                        THEN CONCAT(' (', e.social_network_detail, ')') 
+                                        ELSE '' END)
+                        ELSE 'Catégorie non définie'
+                    END as category_name
             FROM expenses e
             JOIN users u ON e.user_id = u.id
             LEFT JOIN accounts a ON e.account_id = a.id
@@ -1269,11 +1273,11 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                 size: 'A4'
             });
             
-            res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Type', 'application/pdf');
             res.setHeader('Content-Disposition', `attachment; filename="factures_completes_${new Date().toISOString().split('T')[0]}.pdf"`);
-            
-            doc.pipe(res);
-            
+        
+        doc.pipe(res);
+        
             let isFirstPage = true;
             
             // PARTIE 1: Ajouter tous les justificatifs (pièces jointes)
@@ -1293,9 +1297,9 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                 if (fs.existsSync(justificationPath)) {
                     try {
                         if (!isFirstPage) {
-                            doc.addPage();
-                        }
-                        
+                doc.addPage();
+            }
+            
                         // Déterminer le type de fichier à partir du nom original
                         const fileExtension = path.extname(expense.justification_filename).toLowerCase();
                         
@@ -1485,31 +1489,31 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                     yPos += 15;
                 }
                 
-                if (expense.description && expense.description.trim() !== '') {
+            if (expense.description && expense.description.trim() !== '') {
                     doc.text('Description :', 50, yPos);
                     yPos += 12;
                     doc.text(expense.description, 50, yPos, { width: 450 });
                 }
                 
                 // Cachet MATA
-                const cachetPath = path.join(__dirname, 'public', 'images', 'CachetMata.jpg');
-                if (fs.existsSync(cachetPath)) {
-                    try {
+            const cachetPath = path.join(__dirname, 'public', 'images', 'CachetMata.jpg');
+            if (fs.existsSync(cachetPath)) {
+                try {
                         doc.image(cachetPath, 400, doc.page.height - 180, { width: 120, height: 120 });
-                    } catch (error) {
+                } catch (error) {
                         doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e3a8a');
                         doc.text('CACHET MATA', 450, doc.page.height - 100);
-                    }
+                }
                 } else {
                     doc.rect(400, doc.page.height - 180, 120, 120).stroke('#1e3a8a').lineWidth(2);
                     doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
                     doc.text('CACHET\nMATA', 440, doc.page.height - 130, { align: 'center' });
-                }
+            }
                 
                 isFirstPage = false;
-            });
-            
-            doc.end();
+        });
+        
+        doc.end();
         } else {
             return res.status(400).json({ error: 'Aucune dépense à traiter' });
         }
@@ -1579,6 +1583,19 @@ app.put('/api/expenses/:id', requireAuth, async (req, res) => {
         
         if (existingExpense.rows.length === 0) {
             return res.status(404).json({ error: 'Dépense non trouvée ou non autorisée' });
+        }
+        
+        // Vérifier la restriction de 48 heures pour les directeurs réguliers
+        if (req.session.user.role === 'directeur') {
+            const expenseCreatedAt = new Date(existingExpense.rows[0].created_at);
+            const now = new Date();
+            const hoursDifference = (now - expenseCreatedAt) / (1000 * 60 * 60);
+            
+            if (hoursDifference > 48) {
+                return res.status(403).json({ 
+                    error: `Modification non autorisée. Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures. Les directeurs ne peuvent modifier une dépense que dans les 48 heures suivant sa création.` 
+                });
+            }
         }
         
         const newAmount = parseInt(total) || 0;
@@ -1746,7 +1763,7 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
         const created_by = req.session.user.id;
         
         // Validation du type de compte
-        const validTypes = ['classique', 'creance', 'fournisseur', 'partenaire', 'statut'];
+        const validTypes = ['classique', 'creance', 'fournisseur', 'partenaire', 'statut', 'Ajustement'];
         if (account_type && !validTypes.includes(account_type)) {
             return res.status(400).json({ error: 'Type de compte invalide' });
         }
@@ -1755,14 +1772,14 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
         
         // Pour les comptes spéciaux (sauf créance), user_id peut être null
         if (finalAccountType === 'classique' || finalAccountType === 'creance') {
-            // Vérifier que l'utilisateur existe et est un directeur
-            const userResult = await pool.query(
-                'SELECT * FROM users WHERE id = $1 AND role = $2',
-                [user_id, 'directeur']
-            );
-            
-            if (userResult.rows.length === 0) {
-                return res.status(404).json({ error: 'Directeur non trouvé' });
+        // Vérifier que l'utilisateur existe et est un directeur
+        const userResult = await pool.query(
+            'SELECT * FROM users WHERE id = $1 AND role = $2',
+            [user_id, 'directeur']
+        );
+        
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Directeur non trouvé' });
             }
         }
         
@@ -1783,14 +1800,14 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
             `INSERT INTO accounts (user_id, account_name, current_balance, total_credited, total_spent, created_by, account_type, access_restricted, allowed_roles, category_type) 
              VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9) RETURNING *`,
             [
-                finalAccountType === 'fournisseur' || finalAccountType === 'partenaire' || finalAccountType === 'statut' ? null : user_id,
+                finalAccountType === 'fournisseur' || finalAccountType === 'partenaire' || finalAccountType === 'statut' || finalAccountType === 'Ajustement' ? null : user_id,
                 account_name, 
                 parseInt(initial_amount) || 0, 
                 parseInt(initial_amount) || 0, 
                 created_by,
                 finalAccountType,
-                finalAccountType === 'fournisseur', // access_restricted pour fournisseur
-                finalAccountType === 'fournisseur' ? ['directeur_general', 'pca'] : null,
+                finalAccountType === 'fournisseur' || finalAccountType === 'Ajustement', // access_restricted pour fournisseur et Ajustement
+                finalAccountType === 'fournisseur' || finalAccountType === 'Ajustement' ? ['directeur_general', 'pca'] : null,
                 finalAccountType === 'classique' ? category_type : null
             ]
         );
@@ -2003,7 +2020,8 @@ app.get('/api/accounts/types', requireAuth, (req, res) => {
         { id: 'creance', name: 'Compte Créance', description: 'Compte avec créditeurs multiples (DG + directeur assigné)' },
         { id: 'fournisseur', name: 'Compte Fournisseur', description: 'Compte accessible uniquement au DG/PCA' },
         { id: 'partenaire', name: 'Compte Partenaire', description: 'Compte accessible à tous' },
-        { id: 'statut', name: 'Compte Statut', description: 'Compte où le crédit écrase le solde existant' }
+        { id: 'statut', name: 'Compte Statut', description: 'Compte où le crédit écrase le solde existant' },
+        { id: 'Ajustement', name: 'Compte Ajustement', description: 'Compte spécial pour les ajustements comptables (DG/PCA uniquement)' }
     ];
     res.json(accountTypes);
 });
@@ -2093,6 +2111,7 @@ app.get('/api/accounts/:accountId/can-credit', requireAuth, async (req, res) => 
             case 'classique':
             case 'fournisseur':
             case 'statut':
+            case 'Ajustement':
                 canCredit = userRole === 'directeur_general' || userRole === 'pca';
                 reason = canCredit ? '' : 'Seuls le DG et le PCA peuvent créditer ce type de compte';
                 break;
@@ -2697,6 +2716,280 @@ app.put('/api/accounts/:accountId/activate', requireAdminAuth, async (req, res) 
         res.json({ message: 'Compte activé avec succès', account: result.rows[0] });
     } catch (error) {
         console.error('Erreur activation compte:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// === ROUTES DE GESTION DES UTILISATEURS (ADMIN) ===
+
+// Route pour obtenir tous les utilisateurs (admin uniquement)
+app.get('/api/admin/users', requireAdminAuth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT id, username, full_name, email, role, is_active, created_at, updated_at
+            FROM users 
+            ORDER BY created_at DESC
+        `);
+        
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération utilisateurs:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir un utilisateur spécifique (admin uniquement)
+app.get('/api/admin/users/:userId', requireAdminAuth, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        const result = await pool.query(`
+            SELECT id, username, full_name, role, created_at,
+                   NULL as email, true as is_active, created_at as updated_at
+            FROM users 
+            WHERE id = $1
+        `, [userId]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Utilisateur non trouvé' });
+        }
+        
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Erreur récupération utilisateur:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour créer un nouvel utilisateur (admin uniquement)
+app.post('/api/admin/users', requireAdminAuth, async (req, res) => {
+    try {
+        const { username, full_name, email, role, password } = req.body;
+        
+        // Validation des données
+        if (!username || !role || !password) {
+            return res.status(400).json({ error: 'Nom d\'utilisateur, rôle et mot de passe sont requis' });
+        }
+        
+        // Vérifier que le nom d'utilisateur n'existe pas déjà
+        const existingUser = await pool.query(
+            'SELECT id FROM users WHERE username = $1',
+            [username]
+        );
+        
+        if (existingUser.rows.length > 0) {
+            return res.status(400).json({ error: 'Ce nom d\'utilisateur existe déjà' });
+        }
+        
+        // Vérifier que l'email n'existe pas déjà (si fourni et non vide)
+        if (email && email.trim()) {
+            const existingEmail = await pool.query(
+                'SELECT id FROM users WHERE email = $1 AND email IS NOT NULL AND email != \'\'',
+                [email.trim()]
+            );
+            
+            if (existingEmail.rows.length > 0) {
+                return res.status(400).json({ error: 'Cette adresse email existe déjà' });
+            }
+        }
+        
+        // Valider le rôle
+        const validRoles = ['directeur', 'directeur_general', 'pca'];
+        if (!validRoles.includes(role)) {
+            return res.status(400).json({ error: 'Rôle invalide' });
+        }
+        
+        // Hacher le mot de passe
+        const hashedPassword = await bcrypt.hash(password, 10);
+        
+        // Créer l'utilisateur
+        const result = await pool.query(`
+            INSERT INTO users (username, full_name, email, role, password_hash, is_active, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING id, username, full_name, email, role, is_active, created_at
+        `, [username, full_name || null, email && email.trim() ? email.trim() : null, role, hashedPassword]);
+        
+        res.json({ 
+            message: 'Utilisateur créé avec succès', 
+            user: result.rows[0] 
+        });
+    } catch (error) {
+        console.error('Erreur création utilisateur:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour modifier un utilisateur (admin uniquement)
+app.put('/api/admin/users/:userId', requireAdminAuth, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { username, full_name, email, role, password } = req.body;
+        
+        // Vérifier que l'utilisateur existe
+        const existingUser = await pool.query(
+            'SELECT id FROM users WHERE id = $1',
+            [userId]
+        );
+        
+        if (existingUser.rows.length === 0) {
+            return res.status(404).json({ error: 'Utilisateur non trouvé' });
+        }
+        
+        // Vérifier l'unicité du nom d'utilisateur (sauf pour l'utilisateur actuel)
+        if (username) {
+            const duplicateUsername = await pool.query(
+                'SELECT id FROM users WHERE username = $1 AND id != $2',
+                [username, userId]
+            );
+            
+            if (duplicateUsername.rows.length > 0) {
+                return res.status(400).json({ error: 'Ce nom d\'utilisateur existe déjà' });
+            }
+        }
+        
+        // Vérifier l'unicité de l'email (sauf pour l'utilisateur actuel, si fourni et non vide)
+        if (email && email.trim()) {
+            const duplicateEmail = await pool.query(
+                'SELECT id FROM users WHERE email = $1 AND id != $2 AND email IS NOT NULL AND email != \'\'',
+                [email.trim(), userId]
+            );
+            
+            if (duplicateEmail.rows.length > 0) {
+                return res.status(400).json({ error: 'Cette adresse email existe déjà' });
+            }
+        }
+        
+        // Valider le rôle
+        if (role) {
+            const validRoles = ['directeur', 'directeur_general', 'pca'];
+            if (!validRoles.includes(role)) {
+                return res.status(400).json({ error: 'Rôle invalide' });
+            }
+        }
+        
+        // Construire la requête de mise à jour
+        let updateQuery = 'UPDATE users SET updated_at = CURRENT_TIMESTAMP';
+        let updateValues = [];
+        let paramCount = 1;
+        
+        if (username) {
+            updateQuery += `, username = $${paramCount}`;
+            updateValues.push(username);
+            paramCount++;
+        }
+        
+        if (full_name !== undefined) {
+            updateQuery += `, full_name = $${paramCount}`;
+            updateValues.push(full_name);
+            paramCount++;
+        }
+        
+        if (email !== undefined) {
+            updateQuery += `, email = $${paramCount}`;
+            updateValues.push(email && email.trim() ? email.trim() : null);
+            paramCount++;
+        }
+        
+        if (role) {
+            updateQuery += `, role = $${paramCount}`;
+            updateValues.push(role);
+            paramCount++;
+        }
+        
+        if (password) {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            updateQuery += `, password_hash = $${paramCount}`;
+            updateValues.push(hashedPassword);
+            paramCount++;
+        }
+        
+        updateQuery += ` WHERE id = $${paramCount} RETURNING id, username, full_name, email, role, is_active, updated_at`;
+        updateValues.push(userId);
+        
+        const result = await pool.query(updateQuery, updateValues);
+        
+        res.json({ 
+            message: 'Utilisateur modifié avec succès', 
+            user: result.rows[0] 
+        });
+    } catch (error) {
+        console.error('Erreur modification utilisateur:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour désactiver un utilisateur (admin uniquement)
+app.put('/api/admin/users/:userId/deactivate', requireAdminAuth, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        // Empêcher la désactivation de son propre compte
+        if (parseInt(userId) === req.session.user.id) {
+            return res.status(400).json({ error: 'Vous ne pouvez pas désactiver votre propre compte' });
+        }
+        
+        const result = await pool.query(
+            'UPDATE users SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING username',
+            [userId]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Utilisateur non trouvé' });
+        }
+        
+        res.json({ message: `Utilisateur "${result.rows[0].username}" désactivé avec succès` });
+    } catch (error) {
+        console.error('Erreur désactivation utilisateur:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour activer un utilisateur (admin uniquement)
+app.put('/api/admin/users/:userId/activate', requireAdminAuth, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        const result = await pool.query(
+            'UPDATE users SET is_active = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING username',
+            [userId]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Utilisateur non trouvé' });
+        }
+        
+        res.json({ message: `Utilisateur "${result.rows[0].username}" activé avec succès` });
+    } catch (error) {
+        console.error('Erreur activation utilisateur:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour réinitialiser le mot de passe d'un utilisateur (admin uniquement)
+app.put('/api/admin/users/:userId/reset-password', requireAdminAuth, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { newPassword } = req.body;
+        
+        if (!newPassword) {
+            return res.status(400).json({ error: 'Nouveau mot de passe requis' });
+        }
+        
+        // Hacher le nouveau mot de passe
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        const result = await pool.query(
+            'UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING username',
+            [hashedPassword, userId]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Utilisateur non trouvé' });
+        }
+        
+        res.json({ message: `Mot de passe réinitialisé pour "${result.rows[0].username}"` });
+    } catch (error) {
+        console.error('Erreur réinitialisation mot de passe:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });

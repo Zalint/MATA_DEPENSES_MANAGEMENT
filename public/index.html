@@ -2,7 +2,10 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="theme-color" content="#667eea">
     <title>Gestion des Dépenses</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
@@ -43,6 +46,9 @@
         <!-- Navigation -->
         <nav class="navbar">
             <div class="nav-brand">
+                <button class="mobile-menu-toggle" id="mobile-menu-toggle">
+                    <i class="fas fa-bars"></i>
+                </button>
                 <i class="fas fa-wallet"></i>
                 <span>Gestion des Dépenses</span>
             </div>
@@ -57,8 +63,11 @@
 
         <!-- Contenu principal -->
         <div class="main-content">
+            <!-- Overlay pour mobile -->
+            <div class="sidebar-overlay" id="sidebar-overlay"></div>
+            
             <!-- Menu latéral -->
-            <aside class="sidebar">
+            <aside class="sidebar" id="sidebar">
                 <ul class="nav-menu">
                     <li><a href="#" data-section="dashboard" class="nav-link active">
                         <i class="fas fa-chart-dashboard"></i> Dashboard
@@ -72,6 +81,11 @@
                     <li id="admin-menu" style="display: none;">
                         <a href="#" data-section="manage-accounts" class="nav-link">
                             <i class="fas fa-users-cog"></i> Gérer Comptes
+                        </a>
+                    </li>
+                    <li id="admin-users-menu" style="display: none;">
+                        <a href="#" data-section="manage-users" class="nav-link">
+                            <i class="fas fa-user-shield"></i> Gérer Utilisateurs
                         </a>
                     </li>
                     <li>
@@ -280,7 +294,8 @@
                     </div>
 
                     <div class="table-container">
-                        <table id="expenses-table">
+                        <div class="mobile-table-scroll">
+                            <table id="expenses-table">
                             <thead>
                                 <tr>
                                     <th>
@@ -327,6 +342,7 @@
                             <tbody id="expenses-tbody">
                             </tbody>
                         </table>
+                        </div>
                     </div>
                 </section>
 
@@ -534,6 +550,7 @@
                                 <option value="fournisseur">Compte Fournisseur</option>
                                 <option value="partenaire">Compte Partenaire</option>
                                 <option value="statut">Compte Statut</option>
+                                <option value="Ajustement">Compte Ajustement</option>
                             </select>
                             <small class="form-help" id="accountTypeHelp">Sélectionnez d'abord un type pour voir la description</small>
                         </div>
@@ -743,6 +760,96 @@
                         
                         <div id="partner-accounts-config">
                             <!-- Les comptes partenaires seront chargés ici -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Gérer les utilisateurs (Admin uniquement) -->
+                <section id="manage-users-section" class="section">
+                    <h2>Gérer les Utilisateurs</h2>
+                    
+                    <!-- Créer un nouvel utilisateur -->
+                    <form class="account-form" id="createUserForm">
+                        <h3>Créer un Nouvel Utilisateur</h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Nom d'utilisateur</label>
+                                <input type="text" id="newUsername" placeholder="Ex: jdupont" autocomplete="username" required>
+                                <small class="form-help">Utilisé pour la connexion (sans espaces)</small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Nom complet</label>
+                                <input type="text" id="newFullName" placeholder="Ex: Jean Dupont" autocomplete="name" required>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Email (optionnel)</label>
+                                <input type="email" id="newEmail" placeholder="jean.dupont@example.com" autocomplete="email">
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Rôle</label>
+                                <select id="newUserRole" required>
+                                    <option value="">Sélectionner un rôle</option>
+                                    <option value="directeur">Directeur</option>
+                                    <option value="directeur_general">Directeur Général</option>
+                                    <option value="pca">PCA</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Mot de passe temporaire</label>
+                            <input type="password" id="newPassword" placeholder="Mot de passe temporaire" autocomplete="new-password" required>
+                            <small class="form-help">L'utilisateur devra changer ce mot de passe à sa première connexion</small>
+                        </div>
+                        
+                        <div class="form-actions">
+                            <button type="submit" class="btn btn-success">Créer l'Utilisateur</button>
+                            <button type="button" class="btn btn-secondary" id="cancelUserEdit" onclick="resetUserForm()" style="display: none; margin-left: 10px;">Annuler</button>
+                        </div>
+                    </form>
+
+                    <!-- Liste des utilisateurs existants -->
+                    <div class="users-list">
+                        <h3>Utilisateurs Existants</h3>
+                        
+                        <!-- Filtres -->
+                        <div class="filters-container" style="margin-bottom: 20px;">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label>Filtrer par Statut</label>
+                                    <select id="statusFilter" onchange="filterUsers()">
+                                        <option value="">Tous les statuts</option>
+                                        <option value="active">Actifs uniquement</option>
+                                        <option value="inactive">Inactifs uniquement</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>Filtrer par Rôle</label>
+                                    <select id="roleFilter" onchange="filterUsers()">
+                                        <option value="">Tous les rôles</option>
+                                        <option value="directeur">Directeur</option>
+                                        <option value="directeur_general">Directeur Général</option>
+                                        <option value="pca">PCA</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <button type="button" class="btn btn-secondary" onclick="clearUserFilters()" style="margin-top: 25px;">
+                                        Effacer les filtres
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div id="users-list">
+                            <!-- Les utilisateurs seront chargés ici -->
                         </div>
                     </div>
                 </section>
