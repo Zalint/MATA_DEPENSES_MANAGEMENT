@@ -5748,6 +5748,7 @@ async function handleTransfertSubmit(e) {
     }
     // Vérifier le solde max
     const sourceOpt = form['transfert-source'].options[form['transfert-source'].selectedIndex];
+    const destOpt = form['transfert-destination'].options[form['transfert-destination'].selectedIndex];
     const solde = parseInt(sourceOpt.dataset.solde) || 0;
     console.log('[Transfert] Solde source affiché:', solde);
     if (montant > solde) {
@@ -5755,6 +5756,21 @@ async function handleTransfertSubmit(e) {
         notif.className = 'notification error';
         notif.style.display = 'block';
         return;
+    }
+    
+    // Pop-up de confirmation
+    const sourceAccountName = sourceOpt.textContent.split(' (')[0];
+    const destAccountName = destOpt.textContent.split(' (')[0];
+    const montantFormate = montant.toLocaleString('fr-FR') + ' FCFA';
+    
+    const confirmationMessage = `Êtes-vous sûr de vouloir effectuer ce transfert ?\n\n` +
+        `De : ${sourceAccountName}\n` +
+        `Vers : ${destAccountName}\n` +
+        `Montant : ${montantFormate}\n\n` +
+        `Cette action est irréversible.`;
+    
+    if (!confirm(confirmationMessage)) {
+        return; // L'utilisateur a annulé
     }
     // Appel API réel
     try {
@@ -5771,7 +5787,23 @@ async function handleTransfertSubmit(e) {
             notif.style.display = 'block';
             form.reset();
             document.getElementById('solde-source-info').style.display = 'none';
+            
+            // Mettre à jour les dropdowns avec les nouveaux soldes
             await loadTransfertAccounts();
+            
+            // Mettre à jour le dashboard si affiché
+            const dashboardSection = document.getElementById('dashboard-section');
+            if (dashboardSection && dashboardSection.classList.contains('active') && typeof loadDashboard === 'function') {
+                await loadDashboard();
+            }
+            
+            // Mettre à jour la liste des comptes si affichée
+            if (typeof loadAccounts === 'function') {
+                const accountsSection = document.getElementById('manage-accounts-section');
+                if (accountsSection && accountsSection.classList.contains('active')) {
+                    await loadAccounts();
+                }
+            }
         } else {
             notif.textContent = data.error || 'Erreur lors du transfert.';
             notif.className = 'notification error';
