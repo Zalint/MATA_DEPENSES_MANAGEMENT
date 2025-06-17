@@ -191,24 +191,45 @@ app.post('/api/accounts/credit', requireAuth, async (req, res) => {
         
         await pool.query('BEGIN');
         
-        // Utiliser la fonction PostgreSQL pour gérer les crédits selon le type
-        const creditResult = await pool.query(
-            'SELECT handle_special_credit($1, $2, $3, $4, $5) as success',
-            [account_id, credited_by, parseInt(amount), description || 'Crédit de compte', finalCreditDate]
-        );
+        // Vérification des permissions simplifiée
+        const userRole = req.session.user.role;
+        let canCredit = false;
         
-        if (!creditResult.rows[0].success) {
+        if (userRole === 'directeur_general' || userRole === 'pca') {
+            // DG et PCA peuvent créditer tous les comptes
+            canCredit = true;
+        } else if (userRole === 'directeur') {
+            // Directeurs peuvent créditer leurs propres comptes
+            if (account.user_id === credited_by) {
+                canCredit = true;
+            }
+        }
+        
+        if (!canCredit) {
             await pool.query('ROLLBACK');
             return res.status(403).json({ error: 'Vous n\'êtes pas autorisé à créditer ce compte' });
         }
         
-        // Pour les comptes classiques, aussi enregistrer dans l'ancien historique
-        if (account.account_type === 'classique') {
+        // Mise à jour directe du compte selon le type
+        if (account.account_type === 'statut') {
+            // Pour les comptes statut, écraser le total_credited
+            await pool.query(
+                'UPDATE accounts SET total_credited = $1, current_balance = $1 - total_spent, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+                [parseInt(amount), account_id]
+            );
+        } else {
+            // Pour les comptes classiques, ajouter au total_credited
+            await pool.query(
+                'UPDATE accounts SET total_credited = total_credited + $1, current_balance = current_balance + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+                [parseInt(amount), account_id]
+            );
+        }
+        
+        // Enregistrer dans l'historique de crédit
         await pool.query(
             'INSERT INTO credit_history (account_id, credited_by, amount, description) VALUES ($1, $2, $3, $4)',
             [account_id, credited_by, parseInt(amount), description || 'Crédit de compte']
         );
-        }
         
         await pool.query('COMMIT');
         
