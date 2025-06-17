@@ -1,0 +1,94 @@
+"section","table_name","column_name","ordinal_position","data_type","character_maximum_length","is_nullable","column_default"
+"COLUMNS","achats_boeuf","id",1,"integer",NULL,"NO","nextval('achats_boeuf_id_seq'::regclass)"
+"COLUMNS","achats_boeuf","mois",2,"character varying",255,"YES",NULL
+"COLUMNS","achats_boeuf","date",3,"date",NULL,"NO",NULL
+"COLUMNS","achats_boeuf","bete",4,"character varying",255,"YES",NULL
+"COLUMNS","achats_boeuf","prix",5,"double precision",NULL,"YES",NULL
+"COLUMNS","achats_boeuf","abats",6,"double precision",NULL,"YES","0"
+"COLUMNS","achats_boeuf","frais_abattage",7,"double precision",NULL,"YES","0"
+"COLUMNS","achats_boeuf","nbr_kg",8,"double precision",NULL,"YES",NULL
+"COLUMNS","achats_boeuf","prix_achat_kg",9,"double precision",NULL,"YES",NULL
+"COLUMNS","achats_boeuf","commentaire",10,"text",NULL,"YES",NULL
+"COLUMNS","achats_boeuf","annee",11,"integer",NULL,"YES",NULL
+"COLUMNS","achats_boeuf","createdAt",12,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","achats_boeuf","updatedAt",13,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","cash_payments","id",1,"integer",NULL,"NO","nextval('cash_payments_id_seq'::regclass)"
+"COLUMNS","cash_payments","name",2,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","created_at",3,"timestamp with time zone",NULL,"NO",NULL
+"COLUMNS","cash_payments","amount",4,"double precision",NULL,"NO",NULL
+"COLUMNS","cash_payments","merchant_fee",5,"double precision",NULL,"YES",NULL
+"COLUMNS","cash_payments","customer_fee",6,"double precision",NULL,"YES",NULL
+"COLUMNS","cash_payments","customer_name",7,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","customer_phone",8,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","entete_trans_type",9,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","psp_name",10,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","payment_category",11,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","payment_means",12,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","payment_reference",13,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","merchant_reference",14,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","trn_status",15,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","tr_id",16,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","cust_country",17,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","aggregation_mt",18,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","total_nom_marchand",19,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","total_marchand",20,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","merchant_id",21,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","name_first",22,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","point_de_vente",23,"character varying",255,"YES",NULL
+"COLUMNS","cash_payments","date",24,"date",NULL,"YES",NULL
+"COLUMNS","cash_payments","createdAt",25,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","cash_payments","updatedAt",26,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","reconciliations","id",1,"integer",NULL,"NO","nextval('reconciliations_id_seq'::regclass)"
+"COLUMNS","reconciliations","date",2,"character varying",255,"NO",NULL
+"COLUMNS","reconciliations","data",3,"text",NULL,"NO",NULL
+"COLUMNS","reconciliations","cashPaymentData",4,"text",NULL,"YES",NULL
+"COLUMNS","reconciliations","comments",5,"text",NULL,"YES",NULL
+"COLUMNS","reconciliations","calculated",6,"boolean",NULL,"YES","true"
+"COLUMNS","reconciliations","version",7,"integer",NULL,"YES","1"
+"COLUMNS","reconciliations","createdAt",8,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","reconciliations","updatedAt",9,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","stock_json_data","id",1,"integer",NULL,"NO","nextval('stock_json_data_id_seq'::regclass)"
+"COLUMNS","stock_json_data","stock_date",2,"date",NULL,"NO",NULL
+"COLUMNS","stock_json_data","stock_type",3,"character varying",20,"NO",NULL
+"COLUMNS","stock_json_data","json_data",4,"jsonb",NULL,"NO",NULL
+"COLUMNS","stock_json_data","created_at",5,"timestamp with time zone",NULL,"YES","now()"
+"COLUMNS","stock_json_data","updated_at",6,"timestamp with time zone",NULL,"YES","now()"
+"COLUMNS","stocks","id",1,"integer",NULL,"NO","nextval('stocks_id_seq'::regclass)"
+"COLUMNS","stocks","date",2,"character varying",255,"NO",NULL
+"COLUMNS","stocks","type_stock",3,"character varying",255,"NO",NULL
+"COLUMNS","stocks","point_vente",4,"character varying",255,"NO",NULL
+"COLUMNS","stocks","produit",5,"character varying",255,"NO",NULL
+"COLUMNS","stocks","quantite",6,"double precision",NULL,"NO","0"
+"COLUMNS","stocks","prix_unitaire",7,"double precision",NULL,"NO","0"
+"COLUMNS","stocks","total",8,"double precision",NULL,"NO","0"
+"COLUMNS","stocks","commentaire",9,"text",NULL,"YES",NULL
+"COLUMNS","stocks","createdAt",10,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","stocks","updatedAt",11,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","transferts","id",1,"integer",NULL,"NO","nextval('transferts_id_seq'::regclass)"
+"COLUMNS","transferts","date",2,"character varying",255,"NO",NULL
+"COLUMNS","transferts","point_vente",3,"character varying",255,"NO",NULL
+"COLUMNS","transferts","produit",4,"character varying",255,"NO",NULL
+"COLUMNS","transferts","quantite",5,"double precision",NULL,"NO","0"
+"COLUMNS","transferts","prix_unitaire",6,"double precision",NULL,"NO","0"
+"COLUMNS","transferts","total",7,"double precision",NULL,"NO","0"
+"COLUMNS","transferts","impact",8,"character varying",255,"NO",NULL
+"COLUMNS","transferts","commentaire",9,"text",NULL,"YES",NULL
+"COLUMNS","transferts","createdAt",10,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","transferts","updatedAt",11,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","ventes","id",1,"integer",NULL,"NO","nextval('ventes_id_seq'::regclass)"
+"COLUMNS","ventes","mois",2,"character varying",255,"NO",NULL
+"COLUMNS","ventes","date",3,"character varying",255,"NO",NULL
+"COLUMNS","ventes","semaine",4,"character varying",255,"YES",NULL
+"COLUMNS","ventes","point_vente",5,"character varying",255,"NO",NULL
+"COLUMNS","ventes","preparation",6,"character varying",255,"YES",NULL
+"COLUMNS","ventes","categorie",7,"character varying",255,"NO",NULL
+"COLUMNS","ventes","produit",8,"character varying",255,"NO",NULL
+"COLUMNS","ventes","prix_unit",9,"numeric",NULL,"NO",NULL
+"COLUMNS","ventes","nombre",10,"numeric",NULL,"NO","0"
+"COLUMNS","ventes","montant",11,"numeric",NULL,"NO","0"
+"COLUMNS","ventes","createdAt",12,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","ventes","updatedAt",13,"timestamp with time zone",NULL,"YES",NULL
+"COLUMNS","ventes","creance",14,"boolean",NULL,"YES","false"
+"COLUMNS","ventes","nom_client",15,"character varying",255,"YES",NULL
+"COLUMNS","ventes","adresse_client",16,"text",NULL,"YES",NULL
+"COLUMNS","ventes","numero_client",17,"character varying",255,"YES",NULL

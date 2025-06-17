@@ -2126,7 +2126,7 @@ app.get('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => {
 app.post('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => {
     try {
         const { accountId } = req.params;
-        const { delivery_date, article_count, amount, description } = req.body;
+        const { delivery_date, article_count, unit_price, amount, description } = req.body;
         const created_by = req.session.user.id;
         
         // Vérifier que le compte est de type partenaire
@@ -2156,10 +2156,10 @@ app.post('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => 
         }
         
         const result = await pool.query(`
-            INSERT INTO partner_deliveries (account_id, delivery_date, article_count, amount, description, created_by)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO partner_deliveries (account_id, delivery_date, article_count, unit_price, amount, description, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
-        `, [accountId, delivery_date, parseInt(article_count), parseInt(amount), description, created_by]);
+        `, [accountId, delivery_date, parseInt(article_count), parseInt(unit_price), parseInt(amount), description, created_by]);
         
         res.json({ 
             message: 'Livraison ajoutée avec succès (en attente de validation)', 

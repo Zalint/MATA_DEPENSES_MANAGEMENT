@@ -4257,6 +4257,21 @@ function handleAccountSelectionChange() {
 
 
 
+// Fonction pour calculer automatiquement le montant de livraison
+function calculateDeliveryAmount() {
+    const articleCount = document.getElementById('delivery-article-count').value;
+    const unitPrice = document.getElementById('delivery-unit-price').value;
+    const amountField = document.getElementById('delivery-amount');
+    
+    if (articleCount && unitPrice) {
+        const calculatedAmount = parseInt(articleCount) * parseInt(unitPrice);
+        amountField.value = calculatedAmount;
+        amountField.placeholder = `${calculatedAmount} FCFA (calculé)`;
+    } else {
+        amountField.placeholder = "Calculé automatiquement";
+    }
+}
+
 function setupPartnerEventListeners() {
     // Formulaire d'ajout de livraison
     const addDeliveryForm = document.getElementById('addDeliveryForm');
@@ -4267,6 +4282,7 @@ function setupPartnerEventListeners() {
             const formData = {
                 delivery_date: document.getElementById('delivery-date').value,
                 article_count: parseInt(document.getElementById('delivery-article-count').value),
+                unit_price: parseInt(document.getElementById('delivery-unit-price').value),
                 amount: parseInt(document.getElementById('delivery-amount').value),
                 description: document.getElementById('delivery-description').value
             };
@@ -4491,6 +4507,7 @@ function displayDeliveries(deliveries) {
         row.innerHTML = `
             <td>${formatDate(delivery.delivery_date)}</td>
             <td>${delivery.article_count}</td>
+            <td>${delivery.unit_price ? formatCurrency(delivery.unit_price) + ' × ' + delivery.article_count : '-'}</td>
             <td>${formatCurrency(delivery.amount)}</td>
             <td>${delivery.description}</td>
             <td>${delivery.created_by_name}</td>

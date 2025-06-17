@@ -1,0 +1,116 @@
+"section","table_name","column_name","ordinal_position","data_type","character_maximum_length","is_nullable","column_default"
+"COLUMNS","accounts","id",1,"integer",NULL,"NO","nextval('accounts_id_seq'::regclass)"
+"COLUMNS","accounts","user_id",2,"integer",NULL,"YES",NULL
+"COLUMNS","accounts","current_balance",3,"integer",NULL,"NO","0"
+"COLUMNS","accounts","total_credited",4,"integer",NULL,"NO","0"
+"COLUMNS","accounts","total_spent",5,"integer",NULL,"NO","0"
+"COLUMNS","accounts","created_by",6,"integer",NULL,"YES",NULL
+"COLUMNS","accounts","is_active",7,"boolean",NULL,"YES","true"
+"COLUMNS","accounts","created_at",8,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","accounts","updated_at",9,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","accounts","account_name",10,"character varying",100,"NO",NULL
+"COLUMNS","accounts","account_type",11,"character varying",20,"YES","'classique'::character varying"
+"COLUMNS","accounts","access_restricted",12,"boolean",NULL,"YES","false"
+"COLUMNS","accounts","allowed_roles",13,"ARRAY",NULL,"YES",NULL
+"COLUMNS","accounts","category_type",14,"character varying",100,"YES",NULL
+"COLUMNS","accounts","can_credit_users",15,"ARRAY",NULL,"YES",NULL
+"COLUMNS","credit_history","id",1,"integer",NULL,"NO","nextval('credit_history_id_seq'::regclass)"
+"COLUMNS","credit_history","account_id",2,"integer",NULL,"YES",NULL
+"COLUMNS","credit_history","credited_by",3,"integer",NULL,"YES",NULL
+"COLUMNS","credit_history","amount",4,"integer",NULL,"NO",NULL
+"COLUMNS","credit_history","description",5,"text",NULL,"YES",NULL
+"COLUMNS","credit_history","created_at",6,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","expense_categories","id",1,"integer",NULL,"NO","nextval('expense_categories_id_seq'::regclass)"
+"COLUMNS","expense_categories","name",2,"character varying",100,"NO",NULL
+"COLUMNS","expense_categories","description",3,"text",NULL,"YES",NULL
+"COLUMNS","expense_categories","created_at",4,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","expenses","id",1,"integer",NULL,"NO","nextval('expenses_id_seq'::regclass)"
+"COLUMNS","expenses","user_id",2,"integer",NULL,"YES",NULL
+"COLUMNS","expenses","category_id",3,"integer",NULL,"YES",NULL
+"COLUMNS","expenses","amount",4,"numeric",NULL,"NO",NULL
+"COLUMNS","expenses","description",5,"text",NULL,"NO",NULL
+"COLUMNS","expenses","expense_date",6,"date",NULL,"NO",NULL
+"COLUMNS","expenses","created_at",7,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","expenses","expense_type",8,"character varying",50,"YES",NULL
+"COLUMNS","expenses","category",9,"character varying",50,"YES",NULL
+"COLUMNS","expenses","subcategory",10,"character varying",50,"YES",NULL
+"COLUMNS","expenses","social_network_detail",11,"character varying",50,"YES",NULL
+"COLUMNS","expenses","designation",12,"character varying",255,"YES",NULL
+"COLUMNS","expenses","supplier",13,"character varying",255,"YES",NULL
+"COLUMNS","expenses","quantity",14,"numeric",NULL,"YES",NULL
+"COLUMNS","expenses","unit_price",15,"integer",NULL,"YES",NULL
+"COLUMNS","expenses","total",16,"integer",NULL,"YES",NULL
+"COLUMNS","expenses","predictable",17,"character varying",10,"YES",NULL
+"COLUMNS","expenses","justification_filename",18,"character varying",255,"YES",NULL
+"COLUMNS","expenses","justification_path",19,"character varying",500,"YES",NULL
+"COLUMNS","expenses","account_id",20,"integer",NULL,"YES",NULL
+"COLUMNS","expenses","selected_for_invoice",21,"boolean",NULL,"YES","false"
+"COLUMNS","expenses","requires_validation",22,"boolean",NULL,"YES","false"
+"COLUMNS","expenses","validation_status",23,"character varying",20,"YES","'pending'::character varying"
+"COLUMNS","expenses","is_partner_expense",24,"boolean",NULL,"YES","false"
+"COLUMNS","partner_account_directors","id",1,"integer",NULL,"NO","nextval('partner_account_directors_id_seq'::regclass)"
+"COLUMNS","partner_account_directors","account_id",2,"integer",NULL,"YES",NULL
+"COLUMNS","partner_account_directors","user_id",3,"integer",NULL,"YES",NULL
+"COLUMNS","partner_account_directors","assigned_at",4,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","partner_deliveries","id",1,"integer",NULL,"NO","nextval('partner_deliveries_id_seq'::regclass)"
+"COLUMNS","partner_deliveries","account_id",2,"integer",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","delivery_date",3,"date",NULL,"NO",NULL
+"COLUMNS","partner_deliveries","article_count",4,"integer",NULL,"NO",NULL
+"COLUMNS","partner_deliveries","amount",5,"integer",NULL,"NO",NULL
+"COLUMNS","partner_deliveries","description",6,"text",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","created_by",7,"integer",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","created_at",8,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","partner_deliveries","is_validated",9,"boolean",NULL,"YES","false"
+"COLUMNS","partner_deliveries","validated_by",10,"integer",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","validated_at",11,"timestamp without time zone",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","validation_status",12,"character varying",20,"YES","'pending'::character varying"
+"COLUMNS","partner_deliveries","first_validated_by",13,"integer",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","first_validated_at",14,"timestamp without time zone",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","rejection_comment",15,"text",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","rejected_by",16,"integer",NULL,"YES",NULL
+"COLUMNS","partner_deliveries","rejected_at",17,"timestamp without time zone",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","account_id",1,"integer",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","account_name",2,"character varying",100,"YES",NULL
+"COLUMNS","partner_delivery_summary","current_balance",3,"integer",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","total_credited",4,"integer",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","total_delivered",5,"bigint",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","total_articles",6,"bigint",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","delivery_count",7,"bigint",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","pending_second_validation",8,"bigint",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","rejected_deliveries",9,"bigint",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","remaining_balance",10,"bigint",NULL,"YES",NULL
+"COLUMNS","partner_delivery_summary","delivery_percentage",11,"numeric",NULL,"YES",NULL
+"COLUMNS","partner_expense_validations","id",1,"integer",NULL,"NO","nextval('partner_expense_validations_id_seq'::regclass)"
+"COLUMNS","partner_expense_validations","expense_id",2,"integer",NULL,"YES",NULL
+"COLUMNS","partner_expense_validations","validated_by",3,"integer",NULL,"YES",NULL
+"COLUMNS","partner_expense_validations","validation_type",4,"character varying",20,"NO",NULL
+"COLUMNS","partner_expense_validations","validation_comment",5,"text",NULL,"YES",NULL
+"COLUMNS","partner_expense_validations","validated_at",6,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","remboursements","id",1,"integer",NULL,"NO","nextval('remboursements_id_seq'::regclass)"
+"COLUMNS","remboursements","nom_client",2,"character varying",255,"NO",NULL
+"COLUMNS","remboursements","numero_tel",3,"character varying",30,"NO",NULL
+"COLUMNS","remboursements","date",4,"date",NULL,"NO",NULL
+"COLUMNS","remboursements","action",5,"character varying",20,"NO",NULL
+"COLUMNS","remboursements","commentaire",6,"text",NULL,"YES",NULL
+"COLUMNS","remboursements","montant",7,"integer",NULL,"NO",NULL
+"COLUMNS","transfer_history","id",1,"integer",NULL,"NO","nextval('transfer_history_id_seq'::regclass)"
+"COLUMNS","transfer_history","source_id",2,"integer",NULL,"YES",NULL
+"COLUMNS","transfer_history","destination_id",3,"integer",NULL,"YES",NULL
+"COLUMNS","transfer_history","montant",4,"integer",NULL,"NO",NULL
+"COLUMNS","transfer_history","transferred_by",5,"integer",NULL,"YES",NULL
+"COLUMNS","transfer_history","created_at",6,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","users","id",1,"integer",NULL,"NO","nextval('users_id_seq'::regclass)"
+"COLUMNS","users","username",2,"character varying",50,"NO",NULL
+"COLUMNS","users","password_hash",3,"character varying",255,"NO",NULL
+"COLUMNS","users","role",4,"character varying",20,"NO",NULL
+"COLUMNS","users","full_name",5,"character varying",100,"NO",NULL
+"COLUMNS","users","created_at",6,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","users","email",7,"character varying",255,"YES",NULL
+"COLUMNS","users","is_active",8,"boolean",NULL,"YES","true"
+"COLUMNS","users","updated_at",9,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
+"COLUMNS","wallets","id",1,"integer",NULL,"NO","nextval('wallets_id_seq'::regclass)"
+"COLUMNS","wallets","user_id",2,"integer",NULL,"YES",NULL
+"COLUMNS","wallets","week_start_date",3,"date",NULL,"NO",NULL
+"COLUMNS","wallets","initial_amount",4,"numeric",NULL,"NO",NULL
+"COLUMNS","wallets","current_balance",5,"numeric",NULL,"NO",NULL
+"COLUMNS","wallets","created_at",6,"timestamp without time zone",NULL,"YES","CURRENT_TIMESTAMP"
