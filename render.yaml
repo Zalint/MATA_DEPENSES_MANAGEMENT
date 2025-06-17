@@ -1,0 +1,42 @@
+services:
+  # Web Service
+  - type: web
+    name: depenses-management
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: DB_HOST
+        fromDatabase:
+          name: depenses-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: depenses-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: depenses-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: depenses-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: depenses-db
+          property: password
+
+databases:
+  # PostgreSQL Database
+  - name: depenses-db
+    databaseName: depenses_management
+    plan: starter 

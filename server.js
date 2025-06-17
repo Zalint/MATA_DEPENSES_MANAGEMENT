@@ -19,6 +19,7 @@ const pool = new Pool({
     database: process.env.DB_NAME || 'depenses_management',
     password: process.env.DB_PASSWORD || 'bonea2024',
     port: process.env.DB_PORT || 5432,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
 // Configuration de multer pour l'upload de fichiers
@@ -71,10 +72,15 @@ app.use('/uploads', express.static('uploads')); // Servir les fichiers uploadés
 
 // Configuration des sessions
 app.use(session({
-    secret: 'your-secret-key-here',
+    secret: process.env.SESSION_SECRET || 'your-secret-key-here-change-in-production',
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 heures
+    cookie: { 
+        secure: process.env.NODE_ENV === 'production', 
+        maxAge: 24 * 60 * 60 * 1000,
+        httpOnly: true,
+        sameSite: 'strict'
+    } // 24 heures
 }));
 
 // Middleware d'authentification
@@ -2994,8 +3000,26 @@ app.put('/api/admin/users/:userId/reset-password', requireAdminAuth, async (req,
     }
 });
 
+// Health check endpoint for Render
+app.get('/health', (req, res) => {
+    res.status(200).json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // Démarrage du serveur
 app.listen(PORT, () => {
     console.log(`Serveur démarré sur le port ${PORT}`);
-    console.log(`Accédez à l'application sur http://localhost:${PORT}`);
+    console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`Accédez à l'application sur http://localhost:${PORT}`);
+    }
 }); 

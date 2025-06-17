@@ -1,198 +1,302 @@
-# Application de Gestion des Dépenses
+# 💰 Mata Group - Expense Management System
 
-Une application web complète pour la gestion des dépenses des directeurs avec tableau de bord en temps réel pour le suivi du cash burn.
+A comprehensive expense management application built with Node.js, Express, and PostgreSQL, optimized for mobile devices (iPhone & Android).
 
-## Fonctionnalités
+## 🚀 Features
 
-### Pour les Directeurs
-- ✅ Connexion sécurisée avec profil directeur
-- ✅ Enregistrement quotidien des dépenses avec catégorisation (en FCFA)
-- ✅ Consultation de l'historique de leurs dépenses
-- ✅ Visualisation de leur portefeuille hebdomadaire
+- **User Management**: Multi-role system (Directeur, Directeur Général, PCA)
+- **Expense Tracking**: Complete expense management with categories and subcategories
+- **Account Management**: Multiple account types with balance tracking
+- **Partner Management**: Delivery tracking and validation system
+- **Mobile Responsive**: Optimized for iPhone and Android devices
+- **48-Hour Edit Restriction**: Time-based editing restrictions for directors
+- **File Upload**: Justification document support
+- **Dashboard Analytics**: Real-time expense tracking and reporting
 
-### Pour le Directeur Général et PCA
-- ✅ Connexion avec privilèges administrateur
-- ✅ Dashboard de suivi en temps réel du cash burn (en FCFA) :
-  - Cash burn quotidien
-  - Cash burn depuis lundi
-  - Cash burn du mois
-- ✅ Graphiques de répartition des dépenses par catégorie et par directeur
-- ✅ Allocation de budget hebdomadaire pour chaque directeur (en FCFA)
-- ✅ Vue globale de toutes les dépenses
+## 📱 Mobile Optimization
 
-## Technologies Utilisées
+- **Touch-Friendly Interface**: 44px minimum touch targets
+- **Responsive Design**: Mobile-first approach with breakpoints
+- **iOS/Android Specific**: Platform-specific optimizations
+- **Hamburger Menu**: Slide-out navigation for mobile
+- **Safe Area Support**: iPhone notch and home indicator support
 
-- **Frontend** : HTML5, CSS3, JavaScript (Vanilla)
-- **Backend** : Node.js avec Express
-- **Base de données** : PostgreSQL
-- **Authentification** : Sessions avec bcrypt pour le hashage des mots de passe
-- **Design** : Interface moderne et responsive
-- **Monnaie** : Franc CFA (XOF) - montants en entiers
+## 🛠 Technology Stack
 
-## Installation
+- **Backend**: Node.js, Express.js
+- **Database**: PostgreSQL
+- **Frontend**: Vanilla JavaScript, CSS3
+- **Authentication**: Session-based with bcrypt
+- **File Upload**: Multer middleware
+- **Deployment**: Render.com
 
-### Prérequis
-- Node.js (version 14 ou supérieure)
-- PostgreSQL (version 12 ou supérieure)
-- npm ou yarn
+## 📋 Prerequisites
 
-### Étapes d'installation
+- Node.js 18+ 
+- PostgreSQL 12+
+- npm or yarn
 
-1. **Cloner ou télécharger le projet**
+## 🚀 Deployment on Render - Step by Step
+
+### Step 1: Prepare Your Repository
+
+1. **Create a GitHub Repository**
    ```bash
-   cd depenses-management
+   git init
+   git add .
+   git commit -m "Initial commit"
+   git branch -M main
+   git remote add origin https://github.com/YOUR_USERNAME/depenses-management.git
+   git push -u origin main
    ```
 
-2. **Installer les dépendances**
+### Step 2: Set Up Render Account
+
+1. Go to [render.com](https://render.com)
+2. Sign up/Login with your GitHub account
+3. Connect your GitHub repository
+
+### Step 3: Create PostgreSQL Database
+
+1. **In Render Dashboard:**
+   - Click "New +" → "PostgreSQL"
+   - **Name**: `depenses-db`
+   - **Database**: `depenses_management`
+   - **User**: `depenses_user`
+   - **Region**: Choose closest to your users
+   - **Plan**: Starter ($7/month) or Free (limited)
+
+2. **Note the Database Details:**
+   - External Database URL
+   - Internal Database URL
+   - Host, Port, Database Name, Username, Password
+
+### Step 4: Initialize Database Schema
+
+1. **Connect to your database** using the External Database URL:
    ```bash
-   npm install
+   psql "postgresql://username:password@host:port/database"
    ```
 
-3. **Configurer PostgreSQL**
-   - Créer une base de données nommée `depenses_management`
-   - Exécuter le script SQL d'initialisation :
+2. **Run the schema file:**
    ```bash
-   psql -d depenses_management -f database.sql
+   \i database_schema.sql
    ```
 
-4. **Configuration des variables d'environnement (optionnel)**
-   Créer un fichier `.env` à la racine du projet :
-   ```env
-   DB_USER=postgres
-   DB_HOST=localhost
-   DB_NAME=depenses_management
-   DB_PASSWORD=votre_mot_de_passe
-   DB_PORT=5432
-   PORT=3000
+   Or copy and paste the contents of `database_schema.sql` into the psql terminal.
+
+3. **Verify tables were created:**
+   ```sql
+   \dt
    ```
 
-5. **Démarrer l'application**
-   ```bash
-   npm start
-   ```
-   
-   Pour le développement avec rechargement automatique :
-   ```bash
-   npm run dev
-   ```
+### Step 5: Create Web Service
 
-6. **Accéder à l'application**
-   Ouvrez votre navigateur et allez sur : `http://localhost:3000`
+1. **In Render Dashboard:**
+   - Click "New +" → "Web Service"
+   - Connect your GitHub repository
+   - **Name**: `depenses-management`
+   - **Environment**: `Node`
+   - **Region**: Same as database
+   - **Branch**: `main`
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
 
-## Comptes de Test
+### Step 6: Configure Environment Variables
 
-L'application est livrée avec des comptes de test prêts à utiliser :
+Add these environment variables in Render:
 
-### Directeur Général
-- **Utilisateur** : `admin`
-- **Mot de passe** : `password123`
-- **Rôle** : Directeur Général (accès dashboard et gestion portefeuilles)
+```
+NODE_ENV=production
+PORT=10000
+SESSION_SECRET=[Generate a random 32-character string]
+DB_HOST=[Your database host from Step 3]
+DB_PORT=[Your database port, usually 5432]
+DB_NAME=depenses_management
+DB_USER=[Your database username]
+DB_PASSWORD=[Your database password]
+```
 
-### PCA
-- **Utilisateur** : `pca`
-- **Mot de passe** : `password123`
-- **Rôle** : Président du Conseil (accès dashboard et gestion portefeuilles)
+### Step 7: Deploy
 
-### Directeurs
-- **Utilisateur** : `directeur1` | **Mot de passe** : `password123` | **Nom** : Directeur Commercial
-- **Utilisateur** : `directeur2` | **Mot de passe** : `password123` | **Nom** : Directeur Technique
-- **Utilisateur** : `directeur3` | **Mot de passe** : `password123` | **Nom** : Directeur Marketing
+1. Click "Create Web Service"
+2. Render will automatically build and deploy your application
+3. Monitor the build logs for any errors
 
-## Utilisation
+### Step 8: Verify Deployment
 
-### Workflow typique
+1. **Access your application** at the provided Render URL
+2. **Test login** with default credentials:
+   - **DG**: `Ousmane` / `password123`
+   - **PCA**: `Saliou` / `password123`
+   - **Director**: `Nadou` / `password123`
 
-1. **Le Directeur Général/PCA se connecte** et alloue un budget hebdomadaire à chaque directeur
-2. **Les directeurs se connectent** et enregistrent leurs dépenses quotidiennes
-3. **Le Directeur Général/PCA consulte** le dashboard pour suivre :
-   - Les dépenses du jour
-   - Les dépenses depuis lundi
-   - Les dépenses du mois
-   - La répartition par catégorie et par directeur
+## 🗄️ Database Schema
 
-### Fonctionnalités détaillées
+### Core Tables
 
-#### Dashboard (Admin uniquement)
-- **Statistiques en temps réel** : Cartes avec les montants de cash burn
-- **Graphiques interactifs** : Visualisation des dépenses par catégorie et par directeur
-- **Mise à jour automatique** : Les données se rafraîchissent en temps réel
+#### Users Table
+```sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    username VARCHAR(50) UNIQUE NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100),
+    email VARCHAR(100),
+    role VARCHAR(20) CHECK (role IN ('directeur', 'directeur_general', 'pca')),
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
-#### Gestion des Dépenses
-- **Ajout facile** : Formulaire simple avec catégories prédéfinies
-- **Historique complet** : Liste filtrée par date
-- **Catégorisation** : 8 catégories prédéfinies (Transport, Repas, Fournitures, etc.)
-- **Montants en FCFA** : Saisie en francs CFA sans décimales
+#### Accounts Table
+```sql
+CREATE TABLE accounts (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id),
+    account_name VARCHAR(100) NOT NULL,
+    current_balance DECIMAL(15,2) DEFAULT 0,
+    total_credited DECIMAL(15,2) DEFAULT 0,
+    total_spent DECIMAL(15,2) DEFAULT 0,
+    account_type VARCHAR(20) DEFAULT 'classique',
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
-#### Gestion des Portefeuilles (Admin uniquement)
-- **Allocation hebdomadaire** : Attribution de budget pour la semaine courante en FCFA
-- **Suivi des soldes** : Visualisation des budgets initiaux et soldes actuels
-- **Mise à jour automatique** : Les soldes se mettent à jour lors des dépenses
+#### Expenses Table
+```sql
+CREATE TABLE expenses (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    account_id INTEGER REFERENCES accounts(id),
+    designation TEXT NOT NULL,
+    supplier VARCHAR(100),
+    total DECIMAL(15,2) NOT NULL,
+    expense_date DATE NOT NULL,
+    expense_type VARCHAR(50),
+    category VARCHAR(100),
+    subcategory VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
 
-## Structure de la Base de Données
+### Additional Tables
+- `credit_history` - Account credit tracking
+- `partner_deliveries` - Partner delivery management
+- `partner_directors` - Partner-director assignments
 
-### Tables principales
-- `users` : Utilisateurs avec rôles (directeur, directeur_general, pca)
-- `wallets` : Portefeuilles hebdomadaires des directeurs
-- `expenses` : Dépenses enregistrées par les directeurs
-- `expense_categories` : Catégories de dépenses prédéfinies
+## 🔧 Configuration
 
-### Sécurité
-- Mots de passe hashés avec bcrypt
-- Sessions sécurisées
-- Contrôle d'accès basé sur les rôles
-- Validation des données côté serveur
+### Environment Variables
 
-## API Endpoints
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `NODE_ENV` | Environment mode | `production` |
+| `PORT` | Server port | `10000` |
+| `DB_HOST` | Database host | `dpg-xxx.oregon-postgres.render.com` |
+| `DB_PORT` | Database port | `5432` |
+| `DB_NAME` | Database name | `depenses_management` |
+| `DB_USER` | Database user | `depenses_user` |
+| `DB_PASSWORD` | Database password | `your_password` |
+| `SESSION_SECRET` | Session encryption key | `random_32_char_string` |
 
-### Authentification
-- `POST /api/login` - Connexion
-- `POST /api/logout` - Déconnexion
-- `GET /api/user` - Informations utilisateur
-
-### Dépenses
-- `GET /api/expenses` - Liste des dépenses (filtrées par rôle)
-- `POST /api/expenses` - Ajouter une dépense
-- `GET /api/categories` - Liste des catégories
-
-### Portefeuilles (Admin uniquement)
-- `GET /api/wallets` - Liste des portefeuilles
-- `POST /api/wallets` - Créer/Mettre à jour un portefeuille
-
-### Dashboard (Admin uniquement)
-- `GET /api/dashboard/stats` - Statistiques pour le dashboard
-
-### Utilisateurs (Admin uniquement)
-- `GET /api/users` - Liste des directeurs
-
-## Responsive Design
-
-L'application est entièrement responsive et s'adapte à tous les écrans :
-- **Desktop** : Interface complète avec sidebar
-- **Tablette** : Adaptation de la mise en page
-- **Mobile** : Navigation optimisée et interface tactile
-
-## Support
-
-Pour toute question ou problème, consultez les logs de l'application ou vérifiez :
-1. La connexion à la base de données PostgreSQL
-2. Les permissions utilisateur dans PostgreSQL
-3. La configuration des ports (3000 par défaut)
-
-## Développement
-
-### Scripts disponibles
-- `npm start` : Démarrage en production
-- `npm run dev` : Démarrage en développement avec nodemon
-
-### Structure du projet
+### File Structure
 ```
 depenses-management/
 ├── public/
-│   ├── index.html      # Interface utilisateur
-│   ├── styles.css      # Styles CSS
-│   └── app.js          # Logique JavaScript
-├── server.js           # Serveur Node.js/Express
-├── database.sql        # Script d'initialisation DB
-├── package.json        # Dépendances et scripts
-└── README.md          # Documentation
-``` 
+│   ├── index.html          # Main HTML file
+│   ├── app.js             # Frontend JavaScript
+│   ├── styles.css         # Mobile-responsive CSS
+│   └── categories_config.json
+├── uploads/               # File upload directory
+├── server.js             # Main server file
+├── package.json          # Dependencies
+├── database_schema.sql   # Database schema
+├── render.yaml          # Render configuration
+└── README.md           # This file
+```
+
+## 🔐 Default Users
+
+| Username | Password | Role | Full Name |
+|----------|----------|------|-----------|
+| `Ousmane` | `password123` | Directeur Général | Ousmane SECK |
+| `Saliou` | `password123` | PCA | Saliou DOUCOURE |
+| `Mame Diarra` | `password123` | Directeur | Mame Diarra NDIAYE |
+| `Papi` | `password123` | Directeur | Massata DIOP |
+| `Nadou` | `password123` | Directeur | Nadou BA |
+| `Madieye` | `password123` | Directeur | Madieye SECK |
+| `Babacar` | `password123` | Directeur | Babacar DIENE |
+
+## 📱 Mobile Features
+
+- **Responsive Navigation**: Hamburger menu for mobile
+- **Touch Optimization**: 44px minimum touch targets
+- **iOS Support**: Safe area handling for notched devices
+- **Android Support**: Material design elements
+- **Table Scrolling**: Horizontal scroll for data tables
+- **Form Optimization**: Large input fields and buttons
+
+## 🛡️ Security Features
+
+- **Password Hashing**: bcrypt with salt rounds
+- **Session Management**: Secure session handling
+- **Role-Based Access**: Multi-level permission system
+- **Input Validation**: Server-side validation
+- **SQL Injection Protection**: Parameterized queries
+
+## 🔄 Maintenance
+
+### Database Backup
+```bash
+pg_dump "postgresql://username:password@host:port/database" > backup.sql
+```
+
+### Database Restore
+```bash
+psql "postgresql://username:password@host:port/database" < backup.sql
+```
+
+### Update Dependencies
+```bash
+npm update
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+1. **Database Connection Error**
+   - Verify environment variables
+   - Check database status in Render dashboard
+   - Ensure database is in same region as web service
+
+2. **Build Failures**
+   - Check Node.js version compatibility
+   - Verify package.json dependencies
+   - Review build logs in Render
+
+3. **File Upload Issues**
+   - Ensure uploads directory exists
+   - Check file size limits
+   - Verify multer configuration
+
+### Logs
+Access logs in Render dashboard under "Logs" tab for debugging.
+
+## 📞 Support
+
+For technical support or questions:
+- Check Render documentation: [render.com/docs](https://render.com/docs)
+- Review application logs in Render dashboard
+- Verify database connectivity and schema
+
+## 📄 License
+
+MIT License - see LICENSE file for details.
+
+---
+
+**Mata Group Expense Management System** - Built with ❤️ for efficient expense tracking and management. 
