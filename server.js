@@ -76,10 +76,10 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: { 
-        secure: process.env.NODE_ENV === 'production', 
+        secure: false, // Set to false for now to fix session issues on Render
         maxAge: 24 * 60 * 60 * 1000,
         httpOnly: true,
-        sameSite: 'strict'
+        sameSite: 'lax' // Changed from 'strict' to 'lax' for better compatibility
     } // 24 heures
 }));
 
@@ -3020,6 +3020,6 @@ app.listen(PORT, () => {
     console.log(`Serveur démarré sur le port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     if (process.env.NODE_ENV !== 'production') {
-        console.log(`Accédez à l'application sur http://localhost:${PORT}`);
+    console.log(`Accédez à l'application sur http://localhost:${PORT}`);
     }
 }); 
