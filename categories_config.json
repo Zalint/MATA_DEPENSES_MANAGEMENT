@@ -97,6 +97,47 @@
         { "id": "deplacement", "name": "Déplacement" },
         { "id": "autres_mk", "name": "Autres" }
       ]
+    },
+    {
+      "id": "tresorerie",
+      "name": "Tresorerie",
+      "categories": [
+        {
+          "id": "linguere_tresorerie",
+          "name": "Linguere",
+          "subcategories": [
+            { "id": "poulet", "name": "Poulet" },
+            { "id": "oeuf", "name": "Oeuf" },
+            { "id": "ovin_tresorerie", "name": "Ovin" },
+            { "id": "bovin_tresorerie", "name": "Bovin" },
+            { "id": "autres_tresorerie", "name": "Autres" }
+          ]
+        },
+        {
+          "id": "Dakar_tresorerie",
+          "name": "Dakar",
+          "subcategories": [
+            { "id": "poulet_dakar", "name": "Poulet" },
+            { "id": "oeuf_dakar", "name": "Oeuf" },
+            { "id": "ovin_dakar", "name": "Ovin" },
+            { "id": "bovin_dakar", "name": "Bovin" },
+            { "id": "autres_dakar", "name": "Autres" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fournisseur",
+      "name": "Fournisseur",
+      "categories": [
+        {
+          "id": "fournisseur_cat",
+          "name": "Fournisseur",
+          "subcategories": [
+            { "id": "fournisseur_subcat", "name": "Fournisseur" }
+          ]
+        }
+      ]
     }
   ]
 } 

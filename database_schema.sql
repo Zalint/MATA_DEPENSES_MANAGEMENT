@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     total_credited DECIMAL(15,2) DEFAULT 0,
     total_spent DECIMAL(15,2) DEFAULT 0,
     description TEXT,
-    account_type VARCHAR(20) DEFAULT 'classique' CHECK (account_type IN ('classique', 'creance', 'fournisseur', 'partenaire', 'statut', 'Ajustement')),
+    account_type VARCHAR(20) DEFAULT 'classique' CHECK (account_type IN ('classique', 'partenaire', 'statut', 'Ajustement')),
     creditors TEXT, -- JSON string for creditor information
     category_type VARCHAR(50),
     is_active BOOLEAN DEFAULT true,
@@ -360,4 +360,34 @@ CREATE INDEX IF NOT EXISTS idx_expenses_supplier_search ON expenses USING gin(to
 -- =====================================================
 
 -- Verify installation
-SELECT 'Database schema created successfully!' as status; 
+SELECT 'Database schema created successfully!' as status;
+
+-- Table pour les opérations de remboursement/dette
+CREATE TABLE IF NOT EXISTS remboursements (
+    id SERIAL PRIMARY KEY,
+    nom_client VARCHAR(255) NOT NULL,
+    numero_tel VARCHAR(30) NOT NULL,
+    date DATE NOT NULL,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('remboursement', 'dette')),
+    commentaire TEXT,
+    montant INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_remboursements_numero_tel ON remboursements(numero_tel);
+CREATE INDEX IF NOT EXISTS idx_remboursements_date ON remboursements(date);
+
+-- =====================================================
+-- NEW TABLE FOR CREDIT PERMISSIONS
+-- =====================================================
+CREATE TABLE IF NOT EXISTS account_credit_permissions (
+    id SERIAL PRIMARY KEY,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    granted_by INTEGER REFERENCES users(id),
+    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, user_id)
+);
+
+-- Create indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_credit_permissions_account ON account_credit_permissions(account_id);
+CREATE INDEX IF NOT EXISTS idx_credit_permissions_user ON account_credit_permissions(user_id); 

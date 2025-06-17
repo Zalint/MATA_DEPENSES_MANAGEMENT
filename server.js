@@ -100,6 +100,14 @@ const requireAdminAuth = (req, res, next) => {
     }
 };
 
+// Middleware pour DG/PCA uniquement
+function requireSuperAdmin(req, res, next) {
+    if (!req.session.user || !['directeur_general', 'pca'].includes(req.session.user.role)) {
+        return res.status(403).json({ error: 'Accès refusé' });
+    }
+    next();
+}
+
 // Routes d'authentification
 app.post('/api/login', async (req, res) => {
     try {
@@ -328,122 +336,32 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
 app.get('/api/accounts', requireAuth, async (req, res) => {
     try {
         console.log('Récupération des comptes pour utilisateur:', req.session.user.username, 'Role:', req.session.user.role);
-        
         let query = `
             SELECT a.id, a.account_name, a.user_id, a.current_balance, a.total_credited, a.total_spent,
                    a.is_active, a.created_at, a.updated_at, 
                    COALESCE(a.account_type, 'classique') as account_type,
-                   a.category_type, a.access_restricted, a.allowed_roles, a.created_by
+                   a.category_type, a.access_restricted, a.allowed_roles, a.created_by,
+                   u.full_name as user_name, u.username
             FROM accounts a
+            LEFT JOIN users u ON a.user_id = u.id
             WHERE 1=1
         `;
         let params = [];
-        
         if (req.session.user.role === 'directeur') {
-            // Les directeurs ne voient que LEURS PROPRES comptes actifs uniquement
             query += ' AND a.is_active = true AND a.user_id = $1';
             params.push(req.session.user.id);
         } else if (req.session.user.role === 'directeur_general' || req.session.user.role === 'pca') {
             // Les admins voient tous les comptes (actifs et inactifs)
-            // Pas de filtre supplémentaire
         } else {
-            // Pour les autres rôles, ne montrer que les comptes actifs non restreints + comptes Ajustement
             query += ' AND a.is_active = true AND (a.access_restricted = false OR a.access_restricted IS NULL OR a.account_type = \'Ajustement\')';
         }
-        
         query += ' ORDER BY COALESCE(a.account_type, \'classique\'), a.account_name';
-        
         console.log('Requête SQL:', query);
         console.log('Paramètres:', params);
-        
         const result = await pool.query(query, params);
         console.log('Comptes trouvés:', result.rows.length);
-        
-        // Calculer les vrais totaux pour chaque compte et ajouter les informations utilisateur
-        const accountsWithDetails = await Promise.all(result.rows.map(async (account) => {
-            try {
-            // Calculer le total réellement dépensé pour ce compte
-            const expensesResult = await pool.query(
-                'SELECT COALESCE(SUM(total), 0) as real_total_spent FROM expenses WHERE account_id = $1',
-                [account.id]
-            );
-            
-            const realTotalSpent = parseInt(expensesResult.rows[0].real_total_spent) || 0;
-            const realCurrentBalance = account.total_credited - realTotalSpent;
-                
-                // Récupérer les informations utilisateur si nécessaire
-                let userInfo = null;
-                if (account.user_id) {
-                    const userResult = await pool.query(
-                        'SELECT username, full_name FROM users WHERE id = $1',
-                        [account.user_id]
-                    );
-                    if (userResult.rows.length > 0) {
-                        userInfo = userResult.rows[0];
-                    }
-                }
-                
-                // Pour les comptes créance, récupérer les créditeurs
-                let creditors = null;
-                if (account.account_type === 'creance') {
-                    try {
-                        const creditorsResult = await pool.query(
-                            `SELECT ac.*, u.full_name, u.username, u.role 
-                             FROM account_creditors ac 
-                             JOIN users u ON ac.user_id = u.id 
-                             WHERE ac.account_id = $1`,
-                            [account.id]
-                        );
-                        creditors = creditorsResult.rows;
-                    } catch (creditorError) {
-                        console.log('Table account_creditors non trouvée, ignorée pour le compte', account.id);
-                        creditors = null;
-                    }
-                }
-                
-                // Pour les comptes partenaires, récupérer les directeurs assignés
-                let partnerDirectors = null;
-                if (account.account_type === 'partenaire') {
-                    try {
-                        const directorsResult = await pool.query(
-                            `SELECT pad.user_id, u.username, u.full_name
-                             FROM partner_account_directors pad 
-                             JOIN users u ON pad.user_id = u.id 
-                             WHERE pad.account_id = $1
-                             ORDER BY u.username`,
-                            [account.id]
-                        );
-                        partnerDirectors = directorsResult.rows;
-                    } catch (directorError) {
-                        console.log('Erreur récupération directeurs partenaires pour compte', account.id, ':', directorError.message);
-                        partnerDirectors = null;
-                    }
-                }
-            
-            return {
-                ...account,
-                total_spent: realTotalSpent,
-                    current_balance: realCurrentBalance,
-                    user_name: userInfo ? userInfo.full_name : null,
-                    username: userInfo ? userInfo.username : null,
-                    creditors: creditors,
-                    partner_directors: partnerDirectors
-                };
-            } catch (accountError) {
-                console.error('Erreur traitement compte:', account.id, accountError);
-                return {
-                    ...account,
-                    total_spent: account.total_spent || 0,
-                    current_balance: account.current_balance || 0,
-                    user_name: null,
-                    username: null,
-                    creditors: null
-                };
-            }
-        }));
-        
-        console.log('Comptes avec détails:', accountsWithDetails.length);
-        res.json(accountsWithDetails);
+        // Retourner les comptes sans recalcul dynamique
+        res.json(result.rows);
     } catch (error) {
         console.error('Erreur récupération comptes:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -716,6 +634,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                 account: row.name,
                 spent: parseInt(row.spent),
                 total_credited: parseInt(row.total_credited || 0),
+                current_balance: parseInt(row.current_balance || 0), // Ajouter current_balance
                 amount: parseInt(row.spent) // Pour compatibilité avec le code existant
             })),
             category_breakdown: categoryBurn.rows.map(row => ({
@@ -1765,11 +1684,11 @@ app.get('/', (req, res) => {
 // Route pour créer/assigner un compte à un directeur
 app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
     try {
-        const { user_id, account_name, initial_amount, description, account_type, creditors, category_type } = req.body;
+        const { user_id, account_name, initial_amount, description, account_type, creditors, category_type, credit_permission_user_id } = req.body;
         const created_by = req.session.user.id;
         
         // Validation du type de compte
-        const validTypes = ['classique', 'creance', 'fournisseur', 'partenaire', 'statut', 'Ajustement'];
+        const validTypes = ['classique', 'partenaire', 'statut', 'Ajustement'];
         if (account_type && !validTypes.includes(account_type)) {
             return res.status(400).json({ error: 'Type de compte invalide' });
         }
@@ -1777,7 +1696,7 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
         const finalAccountType = account_type || 'classique';
         
         // Pour les comptes spéciaux (sauf créance), user_id peut être null
-        if (finalAccountType === 'classique' || finalAccountType === 'creance') {
+        if (finalAccountType === 'classique' || finalAccountType === 'partenaire' || finalAccountType === 'statut' || finalAccountType === 'Ajustement') {
         // Vérifier que l'utilisateur existe et est un directeur
         const userResult = await pool.query(
             'SELECT * FROM users WHERE id = $1 AND role = $2',
@@ -1806,17 +1725,28 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
             `INSERT INTO accounts (user_id, account_name, current_balance, total_credited, total_spent, created_by, account_type, access_restricted, allowed_roles, category_type) 
              VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9) RETURNING *`,
             [
-                finalAccountType === 'fournisseur' || finalAccountType === 'partenaire' || finalAccountType === 'statut' || finalAccountType === 'Ajustement' ? null : user_id,
+                finalAccountType === 'partenaire' || finalAccountType === 'statut' || finalAccountType === 'Ajustement' ? null : user_id,
                 account_name, 
                 parseInt(initial_amount) || 0, 
                 parseInt(initial_amount) || 0, 
                 created_by,
                 finalAccountType,
-                finalAccountType === 'fournisseur' || finalAccountType === 'Ajustement', // access_restricted pour fournisseur et Ajustement
-                finalAccountType === 'fournisseur' || finalAccountType === 'Ajustement' ? ['directeur_general', 'pca'] : null,
+                finalAccountType === 'Ajustement', // access_restricted seulement pour Ajustement
+                finalAccountType === 'Ajustement' ? ['directeur_general', 'pca'] : null,
                 finalAccountType === 'classique' ? category_type : null
             ]
         );
+        
+        const newAccount = accountResult.rows[0];
+
+        // Si une permission de crédit est spécifiée pour un compte classique, l'ajouter
+        if (newAccount.account_type === 'classique' && credit_permission_user_id) {
+            console.log(`[API] Granting credit permission for account ${newAccount.id} to user ${credit_permission_user_id}`);
+            await pool.query(
+                'INSERT INTO account_credit_permissions (account_id, user_id, granted_by) VALUES ($1, $2, $3)',
+                [newAccount.id, credit_permission_user_id, created_by]
+            );
+        }
         
         // Pour les comptes créance, ajouter les créditeurs
         if (finalAccountType === 'creance' && creditors && creditors.length > 0) {
@@ -1832,7 +1762,7 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
         if (initial_amount && parseInt(initial_amount) > 0) {
             await pool.query(
                 'INSERT INTO credit_history (account_id, credited_by, amount, description) VALUES ($1, $2, $3, $4)',
-                [accountResult.rows[0].id, created_by, parseInt(initial_amount), description || 'Création du compte avec solde initial']
+                [newAccount.id, created_by, parseInt(initial_amount), description || 'Création du compte avec solde initial']
             );
         }
         
@@ -1840,7 +1770,7 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
         
         res.json({ 
             message: 'Compte créé avec succès', 
-            account: accountResult.rows[0]
+            account: newAccount
         });
     } catch (error) {
         await pool.query('ROLLBACK');
@@ -2022,11 +1952,9 @@ app.get('/api/users/without-account', requireAdminAuth, async (req, res) => {
 // Route pour obtenir les types de comptes disponibles
 app.get('/api/accounts/types', requireAuth, (req, res) => {
     const accountTypes = [
-        { id: 'classique', name: 'Compte Classique', description: 'Compte standard assigné à un directeur' },
-        { id: 'creance', name: 'Compte Créance', description: 'Compte avec créditeurs multiples (DG + directeur assigné)' },
-        { id: 'fournisseur', name: 'Compte Fournisseur', description: 'Compte accessible uniquement au DG/PCA' },
-        { id: 'partenaire', name: 'Compte Partenaire', description: 'Compte accessible à tous' },
-        { id: 'statut', name: 'Compte Statut', description: 'Compte où le crédit écrase le solde existant' },
+        { id: 'classique', name: 'Compte Classique', description: 'Compte standard assigné à un directeur. Le DG peut donner des permissions de crédit.' },
+        { id: 'partenaire', name: 'Compte Partenaire', description: 'Compte accessible à tous les utilisateurs' },
+        { id: 'statut', name: 'Compte Statut', description: 'Compte où le crédit écrase le solde existant (DG/PCA uniquement)' },
         { id: 'Ajustement', name: 'Compte Ajustement', description: 'Compte spécial pour les ajustements comptables (DG/PCA uniquement)' }
     ];
     res.json(accountTypes);
@@ -3022,4 +2950,347 @@ app.listen(PORT, () => {
     if (process.env.NODE_ENV !== 'production') {
     console.log(`Accédez à l'application sur http://localhost:${PORT}`);
     }
-}); 
+});
+
+// Route pour ajouter une opération de remboursement/dette
+app.post('/api/remboursements', requireAuth, async (req, res) => {
+    try {
+        const { nom_client, numero_tel, date, action, commentaire, montant } = req.body;
+        console.log('Received remboursement request:', { nom_client, numero_tel, date, action, commentaire, montant });
+        
+        // Validate required fields
+        const missingFields = [];
+        if (!nom_client) missingFields.push('nom_client');
+        if (!numero_tel) missingFields.push('numero_tel');
+        if (!date) missingFields.push('date');
+        if (!action) missingFields.push('action');
+        if (!montant) missingFields.push('montant');
+        
+        if (missingFields.length > 0) {
+            console.log('Missing required fields:', missingFields);
+            return res.status(400).json({ error: `Champs obligatoires manquants: ${missingFields.join(', ')}` });
+        }
+
+        if (!['remboursement', 'dette'].includes(action)) {
+            console.log('Invalid action:', action);
+            return res.status(400).json({ error: 'Action invalide. Doit être "remboursement" ou "dette".' });
+        }
+
+        const result = await pool.query(
+            `INSERT INTO remboursements (nom_client, numero_tel, date, action, commentaire, montant)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+            [nom_client, numero_tel, date, action, commentaire, montant]
+        );
+        console.log('Operation created:', result.rows[0]);
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Detailed error in remboursements:', error);
+        res.status(500).json({ error: 'Erreur serveur: ' + error.message });
+    }
+});
+
+// Route pour lister les opérations de remboursement/dette (avec filtres)
+app.get('/api/remboursements', requireAuth, async (req, res) => {
+    try {
+        const { numero_tel, date_debut, date_fin } = req.query;
+        let query = 'SELECT * FROM remboursements WHERE 1=1';
+        const params = [];
+        let idx = 1;
+        if (numero_tel) {
+            query += ` AND numero_tel = $${idx++}`;
+            params.push(numero_tel);
+        }
+        if (date_debut) {
+            query += ` AND date >= $${idx++}`;
+            params.push(date_debut);
+        }
+        if (date_fin) {
+            query += ` AND date <= $${idx++}`;
+            params.push(date_fin);
+        }
+        query += ' ORDER BY date DESC, id DESC';
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération remboursements:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour la synthèse par client sur une plage de dates
+app.get('/api/remboursements/synthese', requireAuth, async (req, res) => {
+    try {
+        const { date_debut, date_fin } = req.query;
+        let query = `SELECT nom_client, numero_tel,
+            SUM(CASE WHEN action = 'remboursement' THEN montant ELSE -montant END) AS total,
+            MAX(date) AS dernier_paiement
+            FROM remboursements WHERE 1=1`;
+        const params = [];
+        let idx = 1;
+        if (date_debut) {
+            query += ` AND date >= $${idx++}`;
+            params.push(date_debut);
+        }
+        if (date_fin) {
+            query += ` AND date <= $${idx++}`;
+            params.push(date_fin);
+        }
+        query += ' GROUP BY nom_client, numero_tel ORDER BY nom_client';
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur synthèse remboursements:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour ajouter une permission de crédit pour un compte classique
+app.post('/api/accounts/:accountId/credit-permissions', requireAdminAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const { user_id } = req.body;
+        const granted_by = req.session.user.id;
+
+        // Vérifier que le compte existe et est de type classique
+        const accountCheck = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1 AND account_type = $2',
+            [accountId, 'classique']
+        );
+
+        if (accountCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte classique non trouvé' });
+        }
+
+        // Vérifier que l'utilisateur existe et est un directeur
+        const userCheck = await pool.query(
+            'SELECT * FROM users WHERE id = $1 AND role = $2',
+            [user_id, 'directeur']
+        );
+
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Directeur non trouvé' });
+        }
+
+        // Ajouter la permission
+        await pool.query(
+            'INSERT INTO account_credit_permissions (account_id, user_id, granted_by) VALUES ($1, $2, $3)',
+            [accountId, user_id, granted_by]
+        );
+
+        res.json({ message: 'Permission de crédit accordée avec succès' });
+    } catch (error) {
+        console.error('Erreur lors de l\'ajout de la permission:', error);
+        res.status(500).json({ error: 'Erreur lors de l\'ajout de la permission' });
+    }
+});
+
+// Route pour retirer une permission de crédit
+app.delete('/api/accounts/:accountId/credit-permissions/:userId', requireAdminAuth, async (req, res) => {
+    try {
+        const { accountId, userId } = req.params;
+
+        await pool.query(
+            'DELETE FROM account_credit_permissions WHERE account_id = $1 AND user_id = $2',
+            [accountId, userId]
+        );
+
+        res.json({ message: 'Permission de crédit retirée avec succès' });
+    } catch (error) {
+        console.error('Erreur lors du retrait de la permission:', error);
+        res.status(500).json({ error: 'Erreur lors du retrait de la permission' });
+    }
+});
+
+// Route pour lister les permissions de crédit d'un compte
+app.get('/api/accounts/:accountId/credit-permissions', requireAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+
+        const result = await pool.query(
+            `SELECT acp.*, u.full_name, u.role, ug.full_name as granted_by_name
+             FROM account_credit_permissions acp
+             JOIN users u ON acp.user_id = u.id
+             JOIN users ug ON acp.granted_by = ug.id
+             WHERE acp.account_id = $1`,
+            [accountId]
+        );
+
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur lors de la récupération des permissions:', error);
+        res.status(500).json({ error: 'Erreur lors de la récupération des permissions' });
+    }
+});
+
+// Modifier la vérification des permissions de crédit dans la route de crédit
+app.post('/api/accounts/:id/credit', requireAuth, async (req, res) => {
+    try {
+        const accountId = req.params.id;
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+
+        // Vérifier le type de compte et les permissions
+        const accountResult = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1',
+            [accountId]
+        );
+
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte non trouvé' });
+        }
+
+        const account = accountResult.rows[0];
+        let canCredit = false;
+
+        switch (account.account_type) {
+            case 'classique':
+                // Vérifier si l'utilisateur est DG/PCA ou a une permission spéciale
+                canCredit = userRole === 'directeur_general' || userRole === 'pca' ||
+                    (await pool.query(
+                        'SELECT 1 FROM account_credit_permissions WHERE account_id = $1 AND user_id = $2',
+                        [accountId, userId]
+                    )).rows.length > 0;
+                break;
+            case 'partenaire':
+                canCredit = true; // Tout le monde peut créditer
+                break;
+            case 'statut':
+            case 'Ajustement':
+                canCredit = userRole === 'directeur_general' || userRole === 'pca';
+                break;
+        }
+
+        if (!canCredit) {
+            return res.status(403).json({ error: 'Vous n\'avez pas la permission de créditer ce compte' });
+        }
+
+        // Continuer avec la logique de crédit existante...
+    } catch (error) {
+        console.error('Erreur lors de la vérification des permissions:', error);
+        res.status(500).json({ error: 'Erreur lors de la vérification des permissions' });
+    }
+});
+
+// Route de transfert de solde entre comptes
+app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
+    const { source_id, destination_id, montant } = req.body;
+    if (!source_id || !destination_id || !montant || source_id === destination_id) {
+        return res.status(400).json({ error: 'Champs invalides' });
+    }
+    const montantInt = parseInt(montant);
+    if (montantInt <= 0) {
+        return res.status(400).json({ error: 'Montant invalide' });
+    }
+    try {
+        // Vérifier les comptes
+        const accounts = await pool.query('SELECT id, account_type, is_active, current_balance FROM accounts WHERE id = ANY($1)', [[source_id, destination_id]]);
+        if (accounts.rows.length !== 2) {
+            return res.status(404).json({ error: 'Comptes non trouvés' });
+        }
+        const source = accounts.rows.find(a => a.id == source_id);
+        const dest = accounts.rows.find(a => a.id == destination_id);
+        console.log('[Transfert] Début:', { source_id, destination_id, montantInt });
+        console.log('[Transfert] Soldes AVANT:', { source: source.current_balance, dest: dest.current_balance });
+        const allowedTypes = ['classique', 'Ajustement', 'statut'];
+        if (!source.is_active || !dest.is_active || !allowedTypes.includes(source.account_type) || !allowedTypes.includes(dest.account_type)) {
+            return res.status(400).json({ error: 'Type ou statut de compte non autorisé' });
+        }
+        if (source.current_balance < montantInt) {
+            return res.status(400).json({ error: 'Solde insuffisant sur le compte source' });
+        }
+        // Début transaction
+        await pool.query('BEGIN');
+        // Débiter le compte source
+        await pool.query('UPDATE accounts SET current_balance = current_balance - $1, total_spent = total_spent + $1 WHERE id = $2', [montantInt, source_id]);
+        // Créditer le compte destination
+        await pool.query('UPDATE accounts SET current_balance = current_balance + $1, total_credited = total_credited + $1 WHERE id = $2', [montantInt, destination_id]);
+        // Journaliser le transfert (créer la table si besoin)
+        await pool.query(`CREATE TABLE IF NOT EXISTS transfer_history (
+            id SERIAL PRIMARY KEY,
+            source_id INTEGER REFERENCES accounts(id),
+            destination_id INTEGER REFERENCES accounts(id),
+            montant INTEGER NOT NULL,
+            transferred_by INTEGER REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )`);
+        await pool.query('INSERT INTO transfer_history (source_id, destination_id, montant, transferred_by) VALUES ($1, $2, $3, $4)', [source_id, destination_id, montantInt, req.session.user.id]);
+        // Vérifier les soldes après
+        const sourceAfter = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [source_id]);
+        const destAfter = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [destination_id]);
+        console.log('[Transfert] Soldes APRES:', { source: sourceAfter.rows[0].current_balance, dest: destAfter.rows[0].current_balance });
+        await pool.query('COMMIT');
+        res.json({ success: true });
+    } catch (e) {
+        await pool.query('ROLLBACK');
+        console.error('Erreur transfert:', e);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer l'historique des transferts
+app.get('/api/transfers', requireAuth, async (req, res) => {
+    try {
+        const { start_date, end_date } = req.query;
+        
+        // D'abord vérifier si la table existe et combien de transferts on a
+        const countQuery = 'SELECT COUNT(*) as count FROM transfer_history';
+        const countResult = await pool.query(countQuery);
+        
+        if (parseInt(countResult.rows[0].count) === 0) {
+            res.json({
+                transfers: [],
+                period: { start_date: null, end_date: null }
+            });
+            return;
+        }
+        
+        // Si des dates sont spécifiées, les utiliser, sinon récupérer les 20 derniers transferts
+        let query, queryParams = [];
+        
+        if (start_date && end_date) {
+            query = `
+                SELECT 
+                    th.id,
+                    th.montant,
+                    th.created_at,
+                    a_source.account_name as source_account,
+                    a_dest.account_name as destination_account,
+                    u.full_name as transferred_by
+                FROM transfer_history th
+                JOIN accounts a_source ON th.source_id = a_source.id
+                JOIN accounts a_dest ON th.destination_id = a_dest.id
+                JOIN users u ON th.transferred_by = u.id
+                WHERE DATE(th.created_at) >= $1 AND DATE(th.created_at) <= $2
+                ORDER BY th.created_at DESC
+                LIMIT 20
+            `;
+            queryParams = [start_date, end_date];
+        } else {
+            query = `
+                SELECT 
+                    th.id,
+                    th.montant,
+                    th.created_at,
+                    a_source.account_name as source_account,
+                    a_dest.account_name as destination_account,
+                    u.full_name as transferred_by
+                FROM transfer_history th
+                JOIN accounts a_source ON th.source_id = a_source.id
+                JOIN accounts a_dest ON th.destination_id = a_dest.id
+                JOIN users u ON th.transferred_by = u.id
+                ORDER BY th.created_at DESC
+                LIMIT 20
+            `;
+        }
+        
+        const result = await pool.query(query, queryParams);
+        
+        res.json({
+            transfers: result.rows,
+            period: { start_date: start_date || null, end_date: end_date || null }
+        });
+    } catch (error) {
+        console.error('Erreur récupération transferts:', error);
+        res.status(500).json({ error: 'Erreur serveur: ' + error.message });
+    }
+});

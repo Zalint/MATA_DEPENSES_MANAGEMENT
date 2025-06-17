@@ -93,6 +93,14 @@
                             <i class="fas fa-handshake"></i> Suivi Partenaires
                         </a>
                     </li>
+                    <!--<li><a href="#" data-section="remboursements" class="nav-link">
+                        <i class="fas fa-money-bill-wave"></i> Remboursements
+                    </a></li>-->
+                    <li id="transfert-menu" style="display: none;">
+                        <a href="#" data-section="transfert" class="nav-link">
+                            <i class="fas fa-exchange-alt"></i> Transfert
+                        </a>
+                    </li>
                 </ul>
             </aside>
 
@@ -108,8 +116,8 @@
                                 <i class="fas fa-calendar-day"></i>
                             </div>
                             <div class="stat-content">
-                                <h3>Cash Burn Aujourd'hui</h3>
-                                <p class="stat-value" id="daily-burn">0 FCFA</p>
+                                <h3>Solde</h3>
+                                <p class="stat-value" id="solde-amount">0 FCFA</p>
                             </div>
                         </div>
                         
@@ -143,6 +151,13 @@
                         <div class="form-group">
                             <label for="dashboard-end-date">Date de fin</label>
                             <input type="date" id="dashboard-end-date">
+                        </div>
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="show-zero-accounts" onchange="onShowZeroAccountsChange()">
+                                <span class="checkmark"></span>
+                                Afficher les comptes avec zéro dépenses
+                            </label>
                         </div>
                         <button id="filter-dashboard" class="btn btn-primary">Actualiser</button>
                         <button id="reset-dashboard" class="btn btn-secondary">Aujourd'hui</button>
@@ -202,6 +217,13 @@
                         </div>
                         
                         <div class="chart-card">
+                            <h3>Transferts</h3>
+                            <div id="transfers-list"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="charts-grid">
+                        <div class="chart-card">
                             <h3>Dépenses par Catégorie</h3>
                             <div id="category-chart"></div>
                         </div>
@@ -214,14 +236,14 @@
                     
                     <div class="filters">
                         <div class="form-row">
-                            <div class="form-group">
-                                <label for="filter-start-date">Date de début</label>
-                                <input type="date" id="filter-start-date">
-                            </div>
-                            <div class="form-group">
-                                <label for="filter-end-date">Date de fin</label>
-                                <input type="date" id="filter-end-date">
-                            </div>
+                        <div class="form-group">
+                            <label for="filter-start-date">Date de début</label>
+                            <input type="date" id="filter-start-date">
+                        </div>
+                        <div class="form-group">
+                            <label for="filter-end-date">Date de fin</label>
+                            <input type="date" id="filter-end-date">
+                        </div>
                             <div class="form-group">
                                 <label for="filter-account">Compte</label>
                                 <select id="filter-account">
@@ -295,7 +317,7 @@
 
                     <div class="table-container">
                         <div class="mobile-table-scroll">
-                            <table id="expenses-table">
+                        <table id="expenses-table">
                             <thead>
                                 <tr>
                                     <th>
@@ -546,8 +568,6 @@
                             <select id="accountType" onchange="handleAccountTypeChange()" required>
                                 <option value="">Sélectionner un type</option>
                                 <option value="classique">Compte Classique</option>
-                                <option value="creance">Compte Créance</option>
-                                <option value="fournisseur">Compte Fournisseur</option>
                                 <option value="partenaire">Compte Partenaire</option>
                                 <option value="statut">Compte Statut</option>
                                 <option value="Ajustement">Compte Ajustement</option>
@@ -562,33 +582,32 @@
                             </select>
                         </div>
                         
-                        <!-- Champ pour le type de catégorie (comptes classiques seulement) -->
+                        <!-- Nouveau champ pour le type de catégorie (pour comptes classiques) -->
                         <div class="form-group" id="categoryTypeGroup" style="display: none;">
-                            <label>Type de Catégorie</label>
+                            <label>Type de Catégorie de Dépenses</label>
                             <select id="categoryTypeSelect">
                                 <option value="">Sélectionner un type de catégorie</option>
                             </select>
-                            <small class="form-help">Définit le type de dépenses autorisées pour ce compte</small>
+                            <small class="form-help">Optionnel: Restreint les types de dépenses pour ce compte.</small>
                         </div>
                         
-                        <!-- Section pour les créditeurs du compte créance -->
-                        <div id="creditorsSection" style="display: none;">
-                            <h4>Créditeurs du Compte Créance</h4>
-                            <div class="form-group">
-                                <label>Directeur Général (créditeur automatique)</label>
-                                <input type="text" value="Directeur Général" disabled>
-                            </div>
-                            <div class="form-group" id="assignedDirectorGroup">
-                                <label>Directeur Créditeur</label>
-                                <select id="creanceDirectorSelect">
-                                    <option value="">Sélectionner le directeur créditeur</option>
-                                </select>
-                            </div>
+                        <!-- Nouveau champ pour la permission de crédit (pour comptes classiques) -->
+                        <div class="form-group" id="creditPermissionGroup" style="display: none;">
+                            <label>Donner la Permission de Crédit à (Optionnel)</label>
+                            <select id="creditPermissionDirectorSelect">
+                                <option value="">Aucun directeur supplémentaire</option>
+                            </select>
+                            <small class="form-help">Permet à un directeur de créditer ce compte en plus du DG/PCA.</small>
+                        </div>
+
+                        <!-- Section pour afficher/gérer les permissions (pour la modification) -->
+                        <div id="permissionsSection" style="display: none;">
+                            <div id="creditPermissionsContainer"></div>
                         </div>
                         
                         <div class="form-group">
-                            <label>Montant initial (FCFA) - Optionnel</label>
-                            <input type="number" id="initialAmount" min="0" placeholder="0">
+                            <label>Montant Initial (optionnel)</label>
+                            <input type="number" id="initialAmount" placeholder="0">
                         </div>
                         
                         <div class="form-group">
@@ -597,7 +616,7 @@
                         </div>
                         
                         <div class="form-actions">
-                            <button type="submit" class="btn btn-success">Créer le Compte</button>
+                        <button type="submit" class="btn btn-success">Créer le Compte</button>
                             <button type="button" class="btn btn-secondary" id="cancelAccountEdit" onclick="resetAccountForm()" style="display: none; margin-left: 10px;">Annuler</button>
                         </div>
                     </form>
@@ -852,6 +871,103 @@
                             <!-- Les utilisateurs seront chargés ici -->
                         </div>
                     </div>
+                </section>
+
+                <!-- Section Remboursements -->
+               <!-- <section id="remboursements-section" class="section">
+                    <h2>Remboursements / Dettes Clients</h2>
+                    <div class="remboursement-form-card">
+                        <h3>Nouvelle opération</h3>
+                        <form id="remboursement-form">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="remb-nom-client">Nom du client</label>
+                                    <input type="text" id="remb-nom-client" name="nom_client" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="remb-numero-tel">Numéro de téléphone (unique)</label>
+                                    <input type="text" id="remb-numero-tel" name="numero_tel" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="remb-date">Date</label>
+                                    <input type="date" id="remb-date" name="date" required>
+                                </div>
+                            </div>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="remb-action">Action</label>
+                                    <select id="remb-action" name="action" required>
+                                        <option value="">Sélectionner</option>
+                                        <option value="remboursement">Remboursement</option>
+                                        <option value="dette">Dette</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="remb-montant">Montant (FCFA)</label>
+                                    <input type="number" id="remb-montant" name="montant" min="1" required>
+                                </div>
+                                <div class="form-group">
+                                    <label for="remb-commentaire">Commentaire</label>
+                                    <input type="text" id="remb-commentaire" name="commentaire">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Ajouter</button>
+                        </form>
+                        <div id="remboursement-form-message" class="form-message"></div>
+                    </div>
+                    <div class="remboursement-synthese-card">
+                        <h3>Synthèse par client</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="synthese-date-debut">Date début</label>
+                                <input type="date" id="synthese-date-debut">
+                            </div>
+                            <div class="form-group">
+                                <label for="synthese-date-fin">Date fin</label>
+                                <input type="date" id="synthese-date-fin">
+                            </div>
+                            <button id="synthese-filtrer" class="btn btn-secondary">Filtrer</button>
+                        </div>
+                        <div class="table-container">
+                            <table id="synthese-table">
+                                <thead>
+                                    <tr>
+                                        <th>Nom du client</th>
+                                        <th>Numéro</th>
+                                        <th>Total (+remboursement -dette)</th>
+                                        <th>Date dernier paiement</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="synthese-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>-->
+
+                <!-- Section Transfert -->
+                <section id="transfert-section" class="section">
+                    <h2>Transfert de Solde</h2>
+                    <form id="transfert-form" class="account-form" style="max-width: 500px; margin: 0 auto;">
+                        <div class="form-group">
+                            <label for="transfert-source">Compte source</label>
+                            <select id="transfert-source" required>
+                                <option value="">Sélectionner un compte</option>
+                            </select>
+                            <small id="solde-source-info" class="form-help" style="font-size: 12px; color: #666; display: none;"></small>
+                        </div>
+                        <div class="form-group">
+                            <label for="transfert-destination">Compte destination</label>
+                            <select id="transfert-destination" required>
+                                <option value="">Sélectionner un compte</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="transfert-montant">Montant à transférer</label>
+                            <input type="number" id="transfert-montant" min="1" step="1" required placeholder="Montant en FCFA">
+                        </div>
+                        <button type="submit" class="btn btn-primary">Transférer</button>
+                        <div id="transfert-notification" class="notification" style="display:none;"></div>
+                    </form>
                 </section>
             </main>
         </div>

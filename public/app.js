@@ -148,6 +148,12 @@ function showSection(sectionName) {
         case 'manage-users':
             loadAllUsers();
             break;
+        case 'remboursements':
+            // La synthèse est chargée via le gestionnaire de menu, ne rien faire ici
+            break;
+        case 'transfert':
+            showTransfertMenuIfAllowed();
+            break;
     }
 }
 
@@ -179,6 +185,7 @@ async function loadInitialData() {
         await loadDashboard();
     }
     setDefaultDate();
+    initTransfertModule();
 }
 
 async function loadCategories() {
@@ -555,58 +562,19 @@ async function loadUsers() {
 
 // Dashboard
 async function loadDashboard() {
-    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca' && currentUser.role !== 'directeur') {
-        return;
-    }
-    
     try {
-        // Récupérer les dates des filtres (vérifier si les éléments existent)
-        const startDateElement = document.getElementById('dashboard-start-date');
-        const endDateElement = document.getElementById('dashboard-end-date');
-        
-        if (!startDateElement || !endDateElement) {
-            console.log('Éléments de filtre dashboard non trouvés, chargement différé');
-            return;
-        }
-        
-        const startDate = startDateElement.value;
-        const endDate = endDateElement.value;
-        
-        console.log('Chargement dashboard pour:', currentUser.username, 'Role:', currentUser.role);
-        console.log('Dates:', startDate, 'à', endDate);
-        
-        let url = '/api/dashboard/stats';
-        const params = new URLSearchParams();
-        
-        if (startDate) params.append('start_date', startDate);
-        if (endDate) params.append('end_date', endDate);
-        
-        if (params.toString()) {
-            url += '?' + params.toString();
-        }
-        
-        console.log('URL de requête:', url);
-        
-        const response = await fetch(url);
-        const stats = await response.json();
-        
-        console.log('Statistiques reçues:', stats);
-        
-        // Mettre à jour les statistiques
-        document.getElementById('daily-burn').textContent = formatCurrency(stats.daily_burn);
-        document.getElementById('weekly-burn').textContent = formatCurrency(stats.weekly_burn);
-        document.getElementById('monthly-burn').textContent = formatCurrency(stats.monthly_burn);
-        
-        // Créer les graphiques
-        createChart('account-chart', stats.account_breakdown, 'account');
-        createChart('category-chart', stats.category_breakdown, 'category');
-        
-        // Mettre à jour les cartes de statistiques
-        await updateStatsCards(startDate, endDate);
-        
+        await loadDashboardData();
+        await loadTransfersCard(); // Ajouter le chargement des transferts
     } catch (error) {
-        console.error('Erreur chargement dashboard:', error);
+        console.error('Erreur lors du chargement du dashboard:', error);
+        showAlert('Erreur lors du chargement du dashboard', 'danger');
     }
+}
+
+// Fonction appelée quand l'option "Afficher les comptes avec zéro dépenses" change
+function onShowZeroAccountsChange() {
+    // Recharger les données du dashboard pour refléter le changement
+    loadDashboardData();
 }
 
 // Fonction pour créer le compte Ajustement et associer les dépenses orphelines
@@ -689,8 +657,18 @@ function createChart(containerId, data, type) {
         return;
     }
     
-    // Filtrer les données avec un montant > 0
-    const filteredData = data.filter(item => item.amount > 0);
+    // Vérifier si on doit afficher les comptes avec zéro dépenses
+    const showZeroAccounts = document.getElementById('show-zero-accounts')?.checked || false;
+    
+    // Filtrer les données selon l'option sélectionnée
+    let filteredData;
+    if (type === 'account' && showZeroAccounts) {
+        // Pour les comptes, si l'option est cochée, afficher tous les comptes
+        filteredData = data;
+    } else {
+        // Sinon, filtrer les données avec un montant > 0 (comportement par défaut)
+        filteredData = data.filter(item => item.amount > 0);
+    }
     
     if (filteredData.length === 0) {
         container.innerHTML = '<p style="text-align: center; color: #666;">Aucune dépense pour cette période</p>';
@@ -752,17 +730,17 @@ function createChart(containerId, data, type) {
         if (type === 'account' && item.total_credited && item.total_credited > 0) {
             const spent = parseInt(item.spent) || 0;
             const totalCredited = parseInt(item.total_credited) || 0;
-            const remaining = totalCredited - spent;
+            const remaining = parseInt(item.current_balance) || 0; // Utiliser current_balance au lieu de totalCredited - spent
             
             row.innerHTML = `
-                <td class="label-cell">${label}</td>
-                <td class="amount-cell spent">
-                    <span class="clickable-amount" onclick="showAccountExpenseDetails('${label}', ${spent})" 
-                          style="cursor: pointer; color: #007bff; text-decoration: underline;" 
-                          title="Cliquer pour voir les détails des dépenses">
-                        ${formatCurrency(spent)}
-                    </span>
+                <td class="label-cell">
+                  <span class="clickable-account-name" onclick="showAccountExpenseDetails('${label}', ${spent}, ${remaining}, ${totalCredited})" 
+                        style="cursor: pointer; color: #007bff; text-decoration: underline;" 
+                        title="Cliquer pour voir les détails des dépenses">
+                    ${label}
+                  </span>
                 </td>
+                <td class="amount-cell spent">${formatCurrency(spent)}</td>
                 <td class="amount-cell remaining">${formatCurrency(remaining)}</td>
                 <td class="amount-cell total">${formatCurrency(totalCredited)}</td>
             `;
@@ -868,7 +846,7 @@ function displayExpenses(expenses) {
                 } else {
                     // Modification normale
                     editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="Modifier la dépense (${Math.floor(remainingHours)}h restantes)">
-                        <i class="fas fa-edit"></i>
+                <i class="fas fa-edit"></i>
                     </button>`;
                 }
             }
@@ -2045,6 +2023,8 @@ async function activateAccount(accountId) {
 // Fonction pour modifier un compte
 async function editAccount(accountId) {
     try {
+        console.log(`[editAccount] Starting edit for account ID: ${accountId}`);
+
         // Récupérer les détails du compte
         const response = await fetch('/api/accounts');
         const accounts = await response.json();
@@ -2052,36 +2032,41 @@ async function editAccount(accountId) {
         
         if (!account) {
             showNotification('Compte non trouvé', 'error');
+            console.error(`[editAccount] Account with ID ${accountId} not found.`);
             return;
         }
+
+        console.log('[editAccount] Found account data:', account);
         
         // Pré-remplir le formulaire avec les données existantes
         document.getElementById('accountName').value = account.account_name;
+        console.log(`[editAccount] Set account name to: "${account.account_name}"`);
+
         document.getElementById('accountType').value = account.account_type || 'classique';
+        console.log(`[editAccount] Set account type to: "${account.account_type || 'classique'}"`);
         
         // Déclencher le changement de type pour afficher les bons champs
+        console.log('[editAccount] Calling handleAccountTypeChange() to update form display.');
         handleAccountTypeChange();
         
         // Attendre un peu pour que les champs se chargent
         setTimeout(() => {
+            console.log('[editAccount] Populating specific fields after timeout.');
             // Pré-remplir les champs spécifiques selon le type
             if (account.account_type === 'classique' && account.category_type) {
                 document.getElementById('categoryTypeSelect').value = account.category_type;
+                console.log(`[editAccount] Set category type to: "${account.category_type}"`);
             }
             
-            if (account.username) {
-                const userSelect = document.getElementById('createDirectorSelect');
-                // Trouver l'option correspondant au username
-                for (let option of userSelect.options) {
-                    if (option.textContent === account.username) {
-                        option.selected = true;
-                        break;
-                    }
-                }
+            if (account.user_id) {
+                document.getElementById('createDirectorSelect').value = account.user_id;
+                console.log(`[editAccount] Set director to user ID: ${account.user_id}`);
             }
             
             document.getElementById('createDescription').value = account.description || '';
-        }, 500);
+            console.log(`[editAccount] Set description.`);
+
+        }, 100); // Reduced timeout
         
         // Changer le texte du bouton et ajouter un attribut pour identifier la modification
         const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
@@ -2089,13 +2074,17 @@ async function editAccount(accountId) {
         submitButton.textContent = 'Modifier le Compte';
         submitButton.dataset.editingId = accountId;
         cancelButton.style.display = 'inline-block';
+        console.log('[editAccount] Changed button to "Modifier le Compte" and set editingId.');
+
         
         // Faire défiler vers le formulaire
         document.getElementById('createAccountForm').scrollIntoView({ behavior: 'smooth' });
+        console.log('[editAccount] Scrolled to form.');
         
         showNotification('Formulaire pré-rempli pour modification', 'info');
         
     } catch (error) {
+        console.error('[editAccount] Error:', error);
         showNotification(`Erreur: ${error.message}`, 'error');
     }
 }
@@ -2283,7 +2272,7 @@ function resetAccountForm() {
     
     // Masquer les sections spécifiques
     document.getElementById('categoryTypeGroup').style.display = 'none';
-    document.getElementById('creditorsSection').style.display = 'none';
+    document.getElementById('permissionsSection').style.display = 'none';
     document.getElementById('userSelectGroup').style.display = 'block';
 }
 
@@ -2477,12 +2466,13 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const accountType = document.getElementById('accountType').value;
         const formData = {
-            user_id: accountType === 'fournisseur' || accountType === 'partenaire' || accountType === 'statut' 
+            user_id: (accountType === 'partenaire' || accountType === 'statut' || accountType === 'Ajustement')
                 ? null : parseInt(document.getElementById('createDirectorSelect').value),
             account_name: document.getElementById('accountName').value,
             initial_amount: parseInt(document.getElementById('initialAmount').value) || 0,
             description: document.getElementById('createDescription').value,
-            account_type: accountType
+            account_type: accountType,
+            credit_permission_user_id: document.getElementById('creditPermissionDirectorSelect').value || null
         };
         
         // Pour les comptes classiques, ajouter le type de catégorie
@@ -2493,24 +2483,12 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
         
-        // Pour les comptes créance, ajouter les créditeurs
-        if (accountType === 'creance') {
-            const dgUser = currentUser.role === 'directeur_general' ? currentUser.id : 1; // Assumons que DG a l'ID 1
-            const assignedDirector = parseInt(document.getElementById('creanceDirectorSelect').value);
-            if (assignedDirector) {
-                formData.creditors = [
-                    { user_id: dgUser, type: 'dg' },
-                    { user_id: assignedDirector, type: 'directeur_assigne' }
-                ];
-            }
-        }
-        
         if (isEditing) {
             // Mode modification
             updateAccount(parseInt(isEditing), formData);
         } else {
             // Mode création
-        createAccount(formData);
+            createAccount(formData);
         }
     });
     
@@ -2663,59 +2641,84 @@ function handleUserAssignmentChange() {
 }
 
 function handleAccountTypeChange() {
+    console.log('[handleAccountTypeChange] Fired.');
     const accountType = document.getElementById('accountType').value;
-    const userSelectGroup = document.getElementById('userSelectGroup');
-    const creditorsSection = document.getElementById('creditorsSection');
-    const categoryTypeGroup = document.getElementById('categoryTypeGroup');
-    const createDirectorSelect = document.getElementById('createDirectorSelect');
-    const creanceDirectorSelect = document.getElementById('creanceDirectorSelect');
+    console.log(`[handleAccountTypeChange] Selected account type: "${accountType}"`);
+
     const helpText = document.getElementById('accountTypeHelp');
+    const userSelectGroup = document.getElementById('userSelectGroup');
+    const createDirectorSelect = document.getElementById('createDirectorSelect');
+    const categoryTypeGroup = document.getElementById('categoryTypeGroup');
+    const permissionsSection = document.getElementById('permissionsSection');
+    const creditPermissionGroup = document.getElementById('creditPermissionGroup');
     
-    // Réinitialiser la visibilité
-    userSelectGroup.style.display = 'block';
-    creditorsSection.style.display = 'none';
+    // Cacher toutes les sections spécifiques
+    console.log('[handleAccountTypeChange] Hiding all specific sections.');
     categoryTypeGroup.style.display = 'none';
-    createDirectorSelect.required = true;
+    permissionsSection.style.display = 'none';
+    creditPermissionGroup.style.display = 'none';
     
+    // Rétablir la visibilité du sélecteur d'utilisateur par défaut
+    userSelectGroup.style.display = 'block';
+    createDirectorSelect.required = true;
+
     // Messages d'aide selon le type
     const helpMessages = {
-        'classique': 'Compte standard assigné à un directeur spécifique',
-        'creance': 'Compte avec deux créditeurs : DG et directeur sélectionné',
-        'fournisseur': 'Compte accessible uniquement au DG et PCA',
-        'partenaire': 'Compte accessible à tous les utilisateurs',
-        'statut': 'Compte où le crédit écrase le solde existant',
-        'Ajustement': 'Compte spécial pour les ajustements comptables (DG/PCA uniquement)'
+        'classique': 'Compte standard assigné à un directeur. Le DG peut donner des permissions de crédit.',
+        'partenaire': 'Compte accessible à tous les utilisateurs.',
+        'statut': 'Compte où le crédit écrase le solde existant (DG/PCA uniquement).',
+        'Ajustement': 'Compte spécial pour les ajustements comptables (DG/PCA uniquement).'
     };
-    
+     
     if (accountType && helpMessages[accountType]) {
         helpText.textContent = helpMessages[accountType];
+        console.log(`[handleAccountTypeChange] Set help text: "${helpMessages[accountType]}"`);
     } else {
         helpText.textContent = 'Sélectionnez d\'abord un type pour voir la description';
+        console.log('[handleAccountTypeChange] Set default help text.');
     }
     
     // Gestion spécifique selon le type
     switch (accountType) {
         case 'classique':
+            console.log('[handleAccountTypeChange] Type is "classique". Showing specific groups.');
             categoryTypeGroup.style.display = 'block';
+            creditPermissionGroup.style.display = 'block';
+            // La section des permissions existantes n'est montrée que pour la modification
+            // permissionsSection.style.display = 'block';
             loadCategoryTypes(); // Charger les types de catégories
+            loadDirectorsForCreditPermission(); // Charger les directeurs pour la permission
             break;
             
-        case 'creance':
-            creditorsSection.style.display = 'block';
-            loadDirectorsForCreance();
-            break;
-            
-        case 'fournisseur':
         case 'partenaire':
         case 'statut':
         case 'Ajustement':
+            console.log(`[handleAccountTypeChange] Type is "${accountType}". Hiding userSelectGroup.`);
             userSelectGroup.style.display = 'none';
             createDirectorSelect.required = false;
             break;
-            
-        default:
-            // Comportement par défaut
-            break;
+    }
+}
+
+async function loadDirectorsForCreditPermission() {
+    try {
+        const response = await fetch('/api/users/directors-for-accounts');
+        if (!response.ok) throw new Error('Failed to fetch directors');
+        const directors = await response.json();
+        
+        const select = document.getElementById('creditPermissionDirectorSelect');
+        select.innerHTML = '<option value="">Aucun directeur supplémentaire</option>'; // Reset
+        
+        directors.forEach(director => {
+            const option = document.createElement('option');
+            option.value = director.id;
+            option.textContent = director.full_name || director.username;
+            select.appendChild(option);
+        });
+        console.log('[loadDirectorsForCreditPermission] Successfully populated directors for credit permission.');
+
+    } catch (error) {
+        console.error('Erreur chargement directeurs pour permission:', error);
     }
 }
 
@@ -2750,45 +2753,33 @@ async function loadDirectorsForCreance() {
 
 // Fonction pour gérer le changement de compte dans le formulaire de crédit
 async function handleCreditAccountChange() {
-    const accountId = document.getElementById('creditAccountSelect').value;
-    const helpText = document.getElementById('creditAccountHelp');
-    const warningDiv = document.getElementById('creditWarning');
-    const warningText = document.getElementById('creditWarningText');
-    const creditButton = document.getElementById('creditButton');
+    const select = document.getElementById('creditAccountSelect');
+    const accountId = select.value;
+    const historyContainer = document.getElementById('special-credit-history-container');
+    const historyBody = document.getElementById('special-credit-history-body');
     
-    if (!accountId) {
-        helpText.textContent = '';
-        warningDiv.style.display = 'none';
-        creditButton.disabled = false;
-        return;
-    }
+    historyContainer.style.display = 'none';
+    historyBody.innerHTML = '';
     
+    if (!accountId) return;
+
     try {
-        // Vérifier si l'utilisateur peut créditer ce compte
-        const response = await fetch(`/api/accounts/${accountId}/can-credit`);
-        const result = await response.json();
+        const response = await fetch(`/api/accounts/${accountId}/special-history`);
+        const history = await response.json();
         
-        if (result.canCredit) {
-            helpText.textContent = `Type: ${result.accountType}`;
-            helpText.style.color = '#28a745';
-            warningDiv.style.display = 'none';
-            creditButton.disabled = false;
-            
-            // Message spécial pour les comptes statut
-            if (result.accountType === 'statut') {
-                warningText.textContent = 'Le crédit va écraser le solde existant (pas d\'addition).';
-                warningDiv.style.display = 'block';
-            }
-        } else {
-            helpText.textContent = result.reason;
-            helpText.style.color = '#dc3545';
-            warningDiv.style.display = 'none';
-            creditButton.disabled = true;
+        if (history.length > 0) {
+            historyBody.innerHTML = history.map(h => `
+                <tr>
+                    <td>${formatDate(h.credit_date)}</td>
+                    <td>${formatCurrency(h.amount)}</td>
+                    <td>${h.credited_by_name}</td>
+                    <td>${h.comment || '-'}</td>
+                </tr>
+            `).join('');
+            historyContainer.style.display = 'block';
         }
     } catch (error) {
-        console.error('Erreur vérification crédit:', error);
-        helpText.textContent = 'Erreur lors de la vérification';
-        helpText.style.color = '#dc3545';
+        console.error('Erreur chargement historique spécial:', error);
     }
 }
 
@@ -3467,7 +3458,7 @@ function setupEditModalEventListeners() {
 }
 
 // Fonction pour afficher les détails des dépenses d'un compte
-async function showAccountExpenseDetails(accountName, totalAmount) {
+async function showAccountExpenseDetails(accountName, totalAmount, remainingAmount, totalCredited) {
     try {
         // Récupérer les dates du dashboard
         const startDate = document.getElementById('dashboard-start-date').value || '2025-01-01';
@@ -3481,7 +3472,7 @@ async function showAccountExpenseDetails(accountName, totalAmount) {
         }
         
         const data = await response.json();
-        displayExpenseDetailsModal(data, totalAmount);
+        displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCredited);
         
     } catch (error) {
         console.error('Erreur récupération détails dépenses:', error);
@@ -3490,33 +3481,36 @@ async function showAccountExpenseDetails(accountName, totalAmount) {
 }
 
 // Fonction pour afficher le modal avec les détails des dépenses
-function displayExpenseDetailsModal(data, totalAmount) {
+function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCredited) {
     // Créer le modal s'il n'existe pas
     let modal = document.getElementById('expense-details-modal');
     if (!modal) {
         modal = createExpenseDetailsModal();
         document.body.appendChild(modal);
     }
-    
     // Populer le contenu du modal
     const modalContent = modal.querySelector('.expense-details-content');
-    
     // En-tête du modal
-    modalContent.querySelector('.modal-header h3').textContent = `Détails des dépenses - ${data.account_name}`;
+    modalContent.querySelector('.modal-header h3').textContent = `Détails - ${data.account_name}`;
     modalContent.querySelector('.period-info').textContent = `Période: ${formatDate(data.period.start_date)} - ${formatDate(data.period.end_date)}`;
-    modalContent.querySelector('.total-amount').textContent = `Total: ${formatCurrency(totalAmount)}`;
-    
+    // Ajoute les montants dans le header
+    let extraAmounts = `<span style='margin-right:20px;'><strong>Total Dépensé:</strong> ${formatCurrency(totalAmount)}</span>`;
+    if (typeof remainingAmount !== 'undefined' && typeof totalCredited !== 'undefined') {
+        extraAmounts += `<span style='margin-right:20px;'><strong>Montant Restant:</strong> ${formatCurrency(remainingAmount)}</span>`;
+        extraAmounts += `<span><strong>Total Crédité:</strong> ${formatCurrency(totalCredited)}</span>`;
+    }
+    modalContent.querySelector('.total-amount').innerHTML = extraAmounts;
+    // Stocker les montants pour le tableau
+    window.modalRemainingAmount = remainingAmount;
+    window.modalTotalCredited = totalCredited;
     // Stocker les dépenses pour le filtrage et tri
     window.modalExpenses = data.expenses || [];
     window.modalCurrentSortField = 'expense_date';
     window.modalCurrentSortDirection = 'desc';
-    
     // Populer les options de filtres
     populateModalFilterOptions(window.modalExpenses);
-    
     // Afficher les dépenses avec tri par défaut
     applyModalFiltersAndDisplay();
-    
     // Afficher le modal
     modal.style.display = 'block';
 }
@@ -3715,8 +3709,10 @@ function createExpenseDetailsModal() {
                                     Prix unitaire <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
                                 </th>
                                 <th class="sortable" data-field="total" style="padding: 12px; text-align: right; cursor: pointer; user-select: none; position: relative;">
-                                    Total <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                    Total Dépensé <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
                                 </th>
+                                <th style="padding: 12px; text-align: right;">Total restant</th>
+                                <th style="padding: 12px; text-align: right;">Total crédité</th>
                                 <th class="sortable" data-field="predictable" style="padding: 12px; text-align: center; cursor: pointer; user-select: none; position: relative;">
                                     Prévisible <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
                                 </th>
@@ -3982,31 +3978,36 @@ function displayModalExpenses(expenses) {
     if (expenses.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" style="text-align: center; padding: 20px; color: #666;">
+                <td colspan="13" style="text-align: center; padding: 20px; color: #666;">
                     Aucune dépense trouvée avec les filtres appliqués.
                 </td>
             </tr>
         `;
         return;
     }
-    
+    // Calcul du total crédité
+    const totalCredited = typeof window.modalTotalCredited !== 'undefined' ? window.modalTotalCredited : 0;
+    // Calcul cumulatif selon l'ordre d'affichage (après tri et filtres)
+    let cumulative = 0;
     tbody.innerHTML = expenses.map(expense => {
-    // Déterminer si c'est une dépense du DG
-    const isDGExpense = currentUser.role === 'directeur' && expense.username !== currentUser.username;
+        const isDGExpense = currentUser.role === 'directeur' && expense.username !== currentUser.username;
         const rowStyle = isDGExpense ? 'font-style: italic; opacity: 0.8;' : '';
-        
+        cumulative += parseInt(expense.total) || 0;
+        const remaining = totalCredited - cumulative;
         return `
             <tr style="${rowStyle}">
                 <td style="padding: 12px;">${formatDate(expense.expense_date)}</td>
                 <td style="padding: 12px;">
                         ${expense.designation || 'Sans désignation'}
-                        ${isDGExpense ? '<span style="color: #007bff; font-size: 0.8rem; margin-left: 8px;">(DG)</span>' : ''}
+                        ${isDGExpense ? '<span style=\"color: #007bff; font-size: 0.8rem; margin-left: 8px;\">(DG)</span>' : ''}
                 </td>
                 <td style="padding: 12px;">${expense.category || 'N/A'}</td>
                 <td style="padding: 12px;">${expense.supplier || 'N/A'}</td>
                 <td style="padding: 12px; text-align: center;">${expense.quantity || 'N/A'}</td>
                 <td style="padding: 12px; text-align: right;">${expense.unit_price ? formatCurrency(expense.unit_price) : 'N/A'}</td>
                 <td style="padding: 12px; text-align: right; font-weight: bold; color: #e74c3c;">${formatCurrency(expense.total)}</td>
+                <td style="padding: 12px; text-align: right; font-weight: bold; color: #2980b9;">${formatCurrency(remaining)}</td>
+                <td style="padding: 12px; text-align: right; font-weight: bold; color: #27ae60;">${typeof window.modalTotalCredited !== 'undefined' ? formatCurrency(window.modalTotalCredited) : '-'}</td>
                 <td style="padding: 12px; text-align: center;">
                     <span class="badge ${expense.predictable === 'oui' ? 'badge-success' : 'badge-warning'}" 
                           style="padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; 
@@ -5500,3 +5501,487 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+// Fonction pour charger les permissions de crédit d'un compte
+async function loadCreditPermissions(accountId) {
+    try {
+        const response = await fetch(`/api/accounts/${accountId}/credit-permissions`);
+        const permissions = await response.json();
+        
+        const permissionsContainer = document.getElementById('creditPermissionsContainer');
+        if (!permissionsContainer) return;
+        
+        permissionsContainer.innerHTML = `
+            <h4>Permissions de Crédit</h4>
+            <table class="permissions-table">
+                <thead>
+                    <tr>
+                        <th>Directeur</th>
+                        <th>Accordé par</th>
+                        <th>Date</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${permissions.map(p => `
+                        <tr>
+                            <td>${p.full_name}</td>
+                            <td>${p.granted_by_name}</td>
+                            <td>${new Date(p.granted_at).toLocaleDateString()}</td>
+                            <td>
+                                <button onclick="removePermission(${accountId}, ${p.user_id})" class="btn-danger">
+                                    Retirer
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+            <button onclick="showAddPermissionForm(${accountId})" class="btn-primary">
+                Ajouter une Permission
+            </button>
+        `;
+    } catch (error) {
+        console.error('Erreur lors du chargement des permissions:', error);
+        showError('Erreur lors du chargement des permissions');
+    }
+}
+
+// Fonction pour ajouter une permission de crédit
+async function addCreditPermission(accountId, userId) {
+    try {
+        const response = await fetch(`/api/accounts/${accountId}/credit-permissions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ user_id: userId })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors de l\'ajout de la permission');
+        }
+        
+        showSuccess('Permission accordée avec succès');
+        loadCreditPermissions(accountId);
+    } catch (error) {
+        console.error('Erreur:', error);
+        showError(error.message);
+    }
+}
+
+// Fonction pour retirer une permission de crédit
+async function removePermission(accountId, userId) {
+    if (!confirm('Êtes-vous sûr de vouloir retirer cette permission ?')) return;
+    
+    try {
+        const response = await fetch(`/api/accounts/${accountId}/credit-permissions/${userId}`, {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors du retrait de la permission');
+        }
+        
+        showSuccess('Permission retirée avec succès');
+        loadCreditPermissions(accountId);
+    } catch (error) {
+        console.error('Erreur:', error);
+        showError(error.message);
+    }
+}
+
+// Fonction pour afficher le formulaire d'ajout de permission
+function showAddPermissionForm(accountId) {
+    // Charger la liste des directeurs
+    fetch('/api/users/directors')
+        .then(response => response.json())
+        .then(directors => {
+            const modal = document.createElement('div');
+            modal.className = 'modal';
+            modal.innerHTML = `
+                <div class="modal-content">
+                    <h3>Ajouter une Permission de Crédit</h3>
+                    <select id="directorSelect">
+                        <option value="">Sélectionner un directeur</option>
+                        ${directors.map(d => `
+                            <option value="${d.id}">${d.full_name}</option>
+                        `).join('')}
+                    </select>
+                    <div class="modal-buttons">
+                        <button onclick="addCreditPermission(${accountId}, document.getElementById('directorSelect').value)" class="btn-primary">
+                            Ajouter
+                        </button>
+                        <button onclick="this.closest('.modal').remove()" class="btn-secondary">
+                            Annuler
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        })
+        .catch(error => {
+            console.error('Erreur:', error);
+            showError('Erreur lors du chargement des directeurs');
+        });
+}
+
+// ... existing code ...
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        notif.style.display = 'none';
+        const sourceId = form['transfert-source'].value;
+        const destId = form['transfert-destination'].value;
+        const montant = parseInt(form['transfert-montant'].value);
+        if (!sourceId || !destId || !montant || sourceId === destId) {
+            notif.textContent = 'Veuillez remplir tous les champs correctement.';
+            notif.className = 'notification error';
+            notif.style.display = 'block';
+            return;
+        }
+        // Vérifier le solde max
+        const sourceOpt = form['transfert-source'].options[form['transfert-source'].selectedIndex];
+        const solde = parseInt(sourceOpt.dataset.solde) || 0;
+        if (montant > solde) {
+            notif.textContent = 'Le montant dépasse le solde disponible.';
+            notif.className = 'notification error';
+            notif.style.display = 'block';
+            return;
+        }
+        // Appel API réel
+        try {
+            const resp = await fetch('/api/transfert', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source_id: sourceId, destination_id: destId, montant })
+            });
+            const data = await resp.json();
+            if (resp.ok && data.success) {
+                notif.textContent = 'Transfert effectué avec succès.';
+                notif.className = 'notification success';
+                notif.style.display = 'block';
+                form.reset();
+                document.getElementById('solde-source-info').style.display = 'none';
+                await loadTransfertAccounts();
+                // Mettre à jour le dashboard si affiché
+                const dashboardSection = document.getElementById('dashboard-section');
+                if (dashboardSection && dashboardSection.classList.contains('active') && typeof loadDashboard === 'function') {
+                    await loadDashboard();
+                }
+            } else {
+                notif.textContent = data.error || 'Erreur lors du transfert.';
+                notif.className = 'notification error';
+                notif.style.display = 'block';
+            }
+        } catch (err) {
+            notif.textContent = 'Erreur réseau ou serveur.';
+            notif.className = 'notification error';
+            notif.style.display = 'block';
+        }
+    });
+// ... existing code ...
+
+// Initialisation du module Transfert
+function initTransfertModule() {
+    // Affiche le menu seulement pour DG/PCA
+    const transfertMenu = document.getElementById('transfert-menu');
+    if (!transfertMenu) return;
+    if (currentUser && (currentUser.role === 'directeur_general' || currentUser.role === 'pca')) {
+        transfertMenu.style.display = '';
+    } else {
+        transfertMenu.style.display = 'none';
+    }
+    // Navigation
+    const navLink = transfertMenu.querySelector('a');
+    if (navLink) {
+        navLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            showSection('transfert');
+        });
+    }
+    // Masquer la section au départ
+    const section = document.getElementById('transfert-section');
+    if (section) section.classList.remove('active');
+    // Remplir les comptes
+    loadTransfertAccounts();
+    // Attacher l'écouteur du formulaire UNE SEULE FOIS
+    const form = document.getElementById('transfert-form');
+    if (form && !form.dataset.listenerAttached) {
+        form.addEventListener('submit', handleTransfertSubmit);
+        form.dataset.listenerAttached = 'true';
+    }
+}
+
+async function handleTransfertSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const notif = document.getElementById('transfert-notification');
+    notif.style.display = 'none';
+    const sourceId = form['transfert-source'].value;
+    const destId = form['transfert-destination'].value;
+    const montant = parseInt(form['transfert-montant'].value);
+    console.log('[Transfert] Submit:', { sourceId, destId, montant });
+    if (!sourceId || !destId || !montant || sourceId === destId) {
+        notif.textContent = 'Veuillez remplir tous les champs correctement.';
+        notif.className = 'notification error';
+        notif.style.display = 'block';
+        return;
+    }
+    // Vérifier le solde max
+    const sourceOpt = form['transfert-source'].options[form['transfert-source'].selectedIndex];
+    const solde = parseInt(sourceOpt.dataset.solde) || 0;
+    console.log('[Transfert] Solde source affiché:', solde);
+    if (montant > solde) {
+        notif.textContent = 'Le montant dépasse le solde disponible.';
+        notif.className = 'notification error';
+        notif.style.display = 'block';
+        return;
+    }
+    // Appel API réel
+    try {
+        const resp = await fetch('/api/transfert', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_id: sourceId, destination_id: destId, montant })
+        });
+        const data = await resp.json();
+        console.log('[Transfert] Réponse API:', data);
+        if (resp.ok && data.success) {
+            notif.textContent = 'Transfert effectué avec succès.';
+            notif.className = 'notification success';
+            notif.style.display = 'block';
+            form.reset();
+            document.getElementById('solde-source-info').style.display = 'none';
+            await loadTransfertAccounts();
+        } else {
+            notif.textContent = data.error || 'Erreur lors du transfert.';
+            notif.className = 'notification error';
+            notif.style.display = 'block';
+        }
+    } catch (err) {
+        notif.textContent = 'Erreur réseau ou serveur.';
+        notif.className = 'notification error';
+        notif.style.display = 'block';
+        console.error('[Transfert] Erreur réseau/serveur:', err);
+    }
+}
+
+async function loadTransfertAccounts() {
+    const sourceSelect = document.getElementById('transfert-source');
+    const destSelect = document.getElementById('transfert-destination');
+    if (!sourceSelect || !destSelect) return;
+    sourceSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
+    destSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
+    try {
+        const resp = await fetch('/api/accounts');
+        const accounts = await resp.json();
+        console.log('[Transfert] Comptes reçus:', accounts);
+        // Filtrer les comptes autorisés
+        const allowedTypes = ['classique', 'statut', 'Ajustement'];
+        const filtered = accounts.filter(acc => allowedTypes.includes(acc.account_type) && acc.is_active);
+        filtered.forEach(acc => {
+            const opt1 = document.createElement('option');
+            opt1.value = acc.id;
+            opt1.textContent = acc.account_name + ' (' + parseInt(acc.current_balance).toLocaleString() + ' FCFA)';
+            opt1.dataset.solde = acc.current_balance;
+            sourceSelect.appendChild(opt1);
+            const opt2 = document.createElement('option');
+            opt2.value = acc.id;
+            opt2.textContent = acc.account_name + ' (' + parseInt(acc.current_balance).toLocaleString() + ' FCFA)';
+            destSelect.appendChild(opt2);
+            console.log('[Transfert] Option ajoutée:', acc.account_name, acc.current_balance);
+        });
+        // Empêcher de choisir le même compte
+        sourceSelect.addEventListener('change', function() {
+            const val = this.value;
+            Array.from(destSelect.options).forEach(opt => {
+                opt.disabled = (opt.value === val && val !== '');
+            });
+            // Afficher le solde du compte source
+            const soldeInfo = document.getElementById('solde-source-info');
+            if (soldeInfo) {
+                const opt = this.options[this.selectedIndex];
+                if (opt && opt.dataset.solde) {
+                    soldeInfo.textContent = 'Solde disponible : ' + parseInt(opt.dataset.solde).toLocaleString() + ' FCFA';
+                    soldeInfo.style.display = 'block';
+                    console.log('[Transfert] Solde affiché pour', opt.textContent, ':', opt.dataset.solde);
+                } else {
+                    soldeInfo.style.display = 'none';
+                }
+            }
+        });
+        // Réinitialiser le solde info si on change de compte destination
+        destSelect.addEventListener('change', function() {
+            const soldeInfo = document.getElementById('solde-source-info');
+            if (soldeInfo) soldeInfo.style.display = 'block';
+        });
+    } catch (e) {
+        console.error('[Transfert] Erreur chargement comptes transfert:', e);
+    }
+}
+
+// Fonction pour charger les données de transferts
+async function loadTransfersCard() {
+    try {
+        const response = await fetch('/api/transfers');
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Erreur lors du chargement des transferts');
+        }
+        
+        const transfersContainer = document.getElementById('transfers-list');
+        
+        if (!transfersContainer) {
+            console.error('Element transfers-list non trouvé !');
+            return;
+        }
+        
+        if (data.transfers.length === 0) {
+            transfersContainer.innerHTML = '<p class="text-muted">Aucun transfert récent</p>';
+            return;
+        }
+        
+        // Créer le tableau des transferts
+        let transfersHTML = `
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>De</th>
+                            <th>Vers</th>
+                            <th>Montant</th>
+                            <th>Par</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        `;
+        
+        data.transfers.forEach(transfer => {
+            const date = new Date(transfer.created_at).toLocaleDateString('fr-FR');
+            const montant = Number(transfer.montant).toLocaleString('fr-FR') + ' FCFA';
+            
+            transfersHTML += `
+                <tr>
+                    <td>${date}</td>
+                    <td class="text-primary">${transfer.source_account}</td>
+                    <td class="text-success">${transfer.destination_account}</td>
+                    <td class="fw-bold">${montant}</td>
+                    <td class="text-muted small">${transfer.transferred_by}</td>
+                </tr>
+            `;
+        });
+        
+        transfersHTML += `
+                    </tbody>
+                </table>
+            </div>
+        `;
+        
+        transfersContainer.innerHTML = transfersHTML;
+        
+    } catch (error) {
+        console.error('Erreur chargement transferts:', error);
+        const transfersContainer = document.getElementById('transfers-list');
+        if (transfersContainer) {
+            transfersContainer.innerHTML = 
+                '<div class="alert alert-warning">Erreur lors du chargement des transferts</div>';
+        }
+    }
+}
+
+// ... existing code ...
+
+// Fonction pour charger les données du dashboard
+async function loadDashboardData() {
+    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca' && currentUser.role !== 'directeur') {
+        return;
+    }
+    
+    try {
+        // Récupérer les dates des filtres (vérifier si les éléments existent)
+        const startDateElement = document.getElementById('dashboard-start-date');
+        const endDateElement = document.getElementById('dashboard-end-date');
+        
+        if (!startDateElement || !endDateElement) {
+            console.log('Éléments de filtre dashboard non trouvés, chargement différé');
+            return;
+        }
+        
+        const startDate = startDateElement.value;
+        const endDate = endDateElement.value;
+        
+        console.log('Chargement dashboard pour:', currentUser.username, 'Role:', currentUser.role);
+        console.log('Dates:', startDate, 'à', endDate);
+        
+        let url = '/api/dashboard/stats';
+        const params = new URLSearchParams();
+        
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        console.log('URL de requête:', url);
+        
+        const response = await fetch(url);
+        const stats = await response.json();
+        
+        console.log('Statistiques reçues:', stats);
+        
+        // Mettre à jour les statistiques
+        document.getElementById('weekly-burn').textContent = formatCurrency(stats.weekly_burn);
+        document.getElementById('monthly-burn').textContent = formatCurrency(stats.monthly_burn);
+
+        // Calculer le solde (somme des Montant Restant des comptes classique, statut, Ajustement)
+        let solde = 0;
+        if (Array.isArray(stats.account_breakdown)) {
+            stats.account_breakdown.forEach(acc => {
+                const name = (acc.account || '').toLowerCase();
+                if (
+                    name.includes('classique') ||
+                    name.includes('statut') ||
+                    name.includes('ajustement') ||
+                    (!name.includes('partenaire') && !name.includes('fournisseur'))
+                ) {
+                    if (typeof acc.remaining !== 'undefined') {
+                        solde += parseInt(acc.remaining) || 0;
+                    } else if (typeof acc.current_balance !== 'undefined') {
+                        solde += parseInt(acc.current_balance) || 0;
+                    } else if (typeof acc.total_credited !== 'undefined' && typeof acc.spent !== 'undefined') {
+                        solde += (parseInt(acc.total_credited) || 0) - (parseInt(acc.spent) || 0);
+                    }
+                }
+            });
+        }
+        document.getElementById('solde-amount').textContent = formatCurrency(solde);
+        
+        // Créer les graphiques
+        createChart('account-chart', stats.account_breakdown, 'account');
+        createChart('category-chart', stats.category_breakdown, 'category');
+        
+        // Mettre à jour les cartes de statistiques
+        await updateStatsCards(startDate, endDate);
+        
+    } catch (error) {
+        console.error('Erreur chargement dashboard:', error);
+    }
+}
+
+// Fonction principale pour charger le dashboard
+async function loadDashboard() {
+    try {
+        await loadDashboardData();
+        await loadTransfersCard(); // Ajouter le chargement des transferts
+    } catch (error) {
+        console.error('Erreur lors du chargement du dashboard:', error);
+        showAlert('Erreur lors du chargement du dashboard', 'danger');
+    }
+}
+
+// ... existing code ...
