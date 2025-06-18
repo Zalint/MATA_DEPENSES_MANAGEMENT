@@ -94,7 +94,7 @@ function showApp() {
     document.getElementById('user-role').textContent = currentUser.role.replace('_', ' ');
     
     // Afficher le menu admin si nécessaire
-    if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         document.getElementById('admin-menu').style.display = 'block';
         document.getElementById('admin-users-menu').style.display = 'block';
         document.getElementById('user-column').style.display = 'table-cell';
@@ -129,7 +129,7 @@ function showSection(sectionName) {
         case 'manage-accounts':
             loadAccounts();
             loadUsersWithoutAccount();
-            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+            if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
             loadAccountsForCredit();
             loadCreditHistory();
             }
@@ -137,7 +137,7 @@ function showSection(sectionName) {
         case 'add-expense':
             loadCategories();
             setDefaultDate();
-            if (currentUser.role === 'directeur' || currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+            if (['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
                 loadAccountBalance();
                 loadUserAccounts();
             }
@@ -175,7 +175,7 @@ async function loadInitialData() {
         dashboardEndDate.value = endDate;
     }
     
-    if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         await loadUsers();
         // Afficher le formulaire d'ajustement pour DG/PCA
         document.getElementById('adjustment-form-container').style.display = 'block';
@@ -187,7 +187,7 @@ async function loadInitialData() {
             transfersChartCard.style.display = 'none';
         }
     }
-    if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'directeur') {
+    if (['directeur_general', 'pca', 'admin'] || ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         await loadDashboard();
     }
     setDefaultDate();
@@ -669,11 +669,21 @@ function createChart(containerId, data, type) {
     
     // Filtrer les données selon l'option sélectionnée
     let filteredData;
-    if (type === 'account' && showZeroAccounts) {
-        // Pour les comptes, si l'option est cochée, afficher tous les comptes
-        filteredData = data;
+    if (type === 'account') {
+        if (showZeroAccounts) {
+            // Pour les comptes, si l'option est cochée, afficher tous les comptes
+            filteredData = data;
+        } else {
+            // Pour les comptes, afficher ceux qui ont des dépenses OU un solde > 0
+            filteredData = data.filter(item => {
+                const spent = parseInt(item.spent) || parseInt(item.amount) || 0;
+                const balance = parseInt(item.current_balance) || 0;
+                const totalCredited = parseInt(item.total_credited) || 0;
+                return spent > 0 || balance > 0 || totalCredited > 0;
+            });
+        }
     } else {
-        // Sinon, filtrer les données avec un montant > 0 (comportement par défaut)
+        // Pour les catégories, filtrer les données avec un montant > 0 (comportement par défaut)
         filteredData = data.filter(item => item.amount > 0);
     }
     
@@ -799,7 +809,7 @@ function displayExpenses(expenses) {
     const tbody = document.getElementById('expenses-tbody');
     tbody.innerHTML = '';
     
-    const colSpan = currentUser.role !== 'directeur' ? '16' : '15';
+    const colSpan = ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) ? '16' : '15';
     
     if (expenses.length === 0) {
         tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center;">Aucune dépense trouvée</td></tr>`;
@@ -812,7 +822,7 @@ function displayExpenses(expenses) {
         row.dataset.expenseId = expense.id;
         
         // Déterminer si c'est une dépense faite par le DG sur le compte d'un directeur
-        const isDGExpenseOnDirectorAccount = currentUser.role === 'directeur' && 
+        const isDGExpenseOnDirectorAccount = ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) && 
                                              expense.username !== currentUser.username;
         
         // Ajouter une classe CSS ou un style pour les dépenses du DG
@@ -832,10 +842,10 @@ function displayExpenses(expenses) {
         // Bouton pour modifier la dépense avec vérification des restrictions
         let editButton = '';
         
-        if (isDGExpenseOnDirectorAccount && currentUser.role === 'directeur') {
+        if (isDGExpenseOnDirectorAccount && ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
             // Dépense du DG sur compte directeur - pas d'édition
             editButton = '<span style="color: #999;" title="Seul le Directeur Général peut modifier cette dépense"><i class="fas fa-lock"></i></span>';
-        } else if (currentUser.role === 'directeur') {
+        } else if (['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
             // Vérifier la restriction de 48 heures pour les directeurs
             const expenseDate = new Date(expense.created_at);
             const now = new Date();
@@ -857,8 +867,8 @@ function displayExpenses(expenses) {
                     </button>`;
                 }
             }
-        } else {
-            // DG et PCA peuvent toujours modifier
+        } else if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+            // DG, PCA et Admin peuvent toujours modifier
             editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="Modifier la dépense">
                 <i class="fas fa-edit"></i>
             </button>`;
@@ -884,8 +894,13 @@ function displayExpenses(expenses) {
             <td>${justificationButton}</td>
             <td title="${expense.account_name || ''}">${expense.account_name ? (expense.account_name.length > 15 ? expense.account_name.substring(0, 15) + '...' : expense.account_name) : '-'}</td>
             <td>${expense.username || '-'}${isDGExpenseOnDirectorAccount ? ' <small style="color: #007bff;">(DG)</small>' : ''}</td>
-            ${currentUser.role !== 'directeur' ? `<td>${expense.user_name}</td>` : ''}
-            <td>${editButton}</td>
+            ${['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) ? `<td>${expense.user_name}</td>` : ''}
+            <td>
+                <div class="action-buttons">
+                    ${editButton}
+                    ${generateDeleteButton(expense, isDGExpenseOnDirectorAccount)}
+                </div>
+            </td>
         `;
         
         // Les lignes ne sont plus marquées comme sélectionnées automatiquement
@@ -931,6 +946,88 @@ async function downloadJustification(expenseId) {
             throw new Error(error.error);
         }
     } catch (error) {
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// Fonction pour générer le bouton de suppression
+function generateDeleteButton(expense, isDGExpenseOnDirectorAccount) {
+    // Même logique que pour le bouton d'édition
+    let deleteButton = '';
+    
+    if (isDGExpenseOnDirectorAccount && currentUser.role === 'directeur') {
+        // Dépense du DG sur compte directeur - seuls les directeurs simples ne peuvent pas supprimer
+        deleteButton = '<span style="color: #999;" title="Seul le Directeur Général peut supprimer cette dépense"><i class="fas fa-lock"></i></span>';
+    } else if (currentUser.role === 'directeur') {
+        // Vérifier la restriction de 48 heures pour les directeurs simples (leurs propres dépenses)
+        const expenseDate = new Date(expense.created_at);
+        const now = new Date();
+        const hoursDifference = (now - expenseDate) / (1000 * 60 * 60);
+        
+        if (hoursDifference > 48) {
+            deleteButton = '<span style="color: #dc3545;" title="Suppression non autorisée - Plus de 48 heures écoulées"><i class="fas fa-clock"></i></span>';
+        } else {
+            const remainingHours = 48 - hoursDifference;
+            if (remainingHours <= 12) {
+                // Avertissement - proche de la limite
+                deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteExpense(${expense.id})" title="⚠️ Il reste ${Math.floor(remainingHours)}h${Math.floor((remainingHours % 1) * 60)}min pour supprimer">
+                    <i class="fas fa-trash"></i> <i class="fas fa-exclamation-triangle" style="font-size: 0.7em;"></i>
+                </button>`;
+            } else {
+                // Suppression normale
+                deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteExpense(${expense.id})" title="Supprimer la dépense (${Math.floor(remainingHours)}h restantes)">
+                    <i class="fas fa-trash"></i>
+                </button>`;
+            }
+        }
+    } else if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        // DG, PCA et Admin peuvent toujours supprimer
+        deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteExpense(${expense.id})" title="Supprimer la dépense">
+            <i class="fas fa-trash"></i>
+        </button>`;
+    }
+    
+    return deleteButton;
+}
+
+// Fonction pour supprimer une dépense
+async function deleteExpense(expenseId) {
+    // Demander confirmation
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette dépense ? Cette action est irréversible.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/expenses/${expenseId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showNotification(result.message, 'success');
+            // Recharger les dépenses
+            await loadExpenses();
+            
+            // Recharger le dashboard si affiché
+            const dashboardSection = document.getElementById('dashboard-section');
+            if (dashboardSection && dashboardSection.classList.contains('active') && typeof loadDashboard === 'function') {
+                await loadDashboard();
+            }
+            
+            // Recharger la liste des comptes si affichée
+            if (typeof loadAccounts === 'function') {
+                const accountsSection = document.getElementById('manage-accounts-section');
+                if (accountsSection && accountsSection.classList.contains('active')) {
+                    await loadAccounts();
+                }
+            }
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (error) {
+        console.error('Erreur suppression dépense:', error);
         showNotification(`Erreur: ${error.message}`, 'error');
     }
 }
@@ -1438,7 +1535,7 @@ async function loadAccounts() {
         
         displayAccounts(accounts);
         
-        if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+        if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         await loadAccountsForCredit();
         }
         
@@ -1898,21 +1995,25 @@ function displayAccountsTable(accounts) {
         const statusText = account.is_active ? 'Actif' : 'Inactif';
         // Boutons d'actions selon les permissions et l'état du compte
         let actionButtons = '';
-        
-        if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
-            // Bouton modifier (toujours disponible pour les admins)
+        if (currentUser.role === 'admin') {
+            // Admin-only delete button
+            actionButtons += `<button class="btn btn-danger btn-sm me-1" style="background:#e74c3c;border:none;" onclick="deleteAccountAdmin(${account.id})" title="Supprimer définitivement (admin)">
+                <i class="fas fa-trash" style="color:white;"></i>
+            </button>`;
+            // Admin-only reset button
+            actionButtons += `<button class="btn btn-warning btn-sm me-1" style="background:#f39c12;border:none;" onclick="resetAccountAdmin(${account.id})" title="Vider le compte (admin)">
+                <i class="fas fa-undo" style="color:white;"></i>
+            </button>`;
+        }
+        if (["directeur_general", "pca", "admin"].includes(currentUser.role)) {
             actionButtons += `<button class="btn btn-primary btn-sm me-1" onclick="editAccount(${account.id})" title="Modifier">
                 <i class="fas fa-edit"></i>
             </button>`;
-            
-            // Bouton supprimer (seulement si aucune dépense)
             if (account.total_spent === 0) {
                 actionButtons += `<button class="btn btn-warning btn-sm me-1" onclick="deleteAccount(${account.id})" title="Supprimer">
                     <i class="fas fa-trash"></i>
                 </button>`;
             }
-            
-            // Bouton activer/désactiver
             if (account.is_active) {
                 actionButtons += `<button class="btn btn-danger btn-sm" onclick="deactivateAccount(${account.id})" title="Désactiver">
                     <i class="fas fa-ban"></i>
@@ -2126,7 +2227,7 @@ async function deleteAccount(accountId) {
             showNotification('Compte supprimé avec succès !', 'success');
             await loadAccounts();
             await loadUsersWithoutAccount();
-            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+            if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
                 await loadAccountsForCredit();
                 await loadCreditHistory();
             }
@@ -2157,26 +2258,129 @@ function displayCreditHistory(credits) {
     tbody.innerHTML = '';
     
     if (credits.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center;">Aucun crédit trouvé</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Aucun crédit trouvé</td></tr>';
         return;
     }
     
     credits.forEach(credit => {
         const row = document.createElement('tr');
+        
+        // Générer le bouton de suppression selon les permissions
+        const deleteButton = generateCreditDeleteButton(credit);
+        
         row.innerHTML = `
             <td>${formatDate(credit.created_at)}</td>
             <td>${credit.account_name}</td>
             <td>${formatCurrency(parseInt(credit.amount))}</td>
             <td>${credit.credited_by_name}</td>
             <td>${credit.description || 'N/A'}</td>
+            <td style="text-align: center;">${deleteButton}</td>
         `;
         tbody.appendChild(row);
     });
 }
 
+// Fonction pour générer le bouton de suppression d'un crédit
+function generateCreditDeleteButton(credit) {
+    let deleteButton = '';
+    
+    // Vérifier les permissions
+    const canDelete = canDeleteCredit(credit);
+    
+    if (canDelete.allowed) {
+        if (canDelete.timeWarning) {
+            // Avertissement - proche de la limite de 48h pour les directeurs
+            deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteCredit(${credit.id})" title="${canDelete.timeWarning}">
+                <i class="fas fa-trash" style="color: #fbbf24;"></i>
+            </button>`;
+        } else {
+            // Suppression normale
+            deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteCredit(${credit.id})" title="Supprimer ce crédit">
+                <i class="fas fa-trash"></i>
+            </button>`;
+        }
+    } else {
+        // Pas autorisé
+        deleteButton = `<span style="color: #dc3545;" title="${canDelete.reason}"><i class="fas fa-lock"></i></span>`;
+    }
+    
+    return deleteButton;
+}
+
+// Fonction pour vérifier si un crédit peut être supprimé
+function canDeleteCredit(credit) {
+    // Admin, DG, PCA peuvent toujours supprimer
+    if (['admin', 'directeur_general', 'pca'].includes(currentUser.role)) {
+        return { allowed: true };
+    }
+    
+    // Directeurs simples : vérifier s'ils ont les droits de crédit sur ce compte ET dans les 48h
+    if (currentUser.role === 'directeur') {
+        // TODO: Vérifier les permissions de crédit du directeur sur ce compte
+        // Pour l'instant, on vérifie juste les 48h
+        const creditDate = new Date(credit.created_at);
+        const now = new Date();
+        const hoursDifference = (now - creditDate) / (1000 * 60 * 60);
+        
+        if (hoursDifference > 48) {
+            return {
+                allowed: false,
+                reason: `Suppression non autorisée - Plus de 48 heures écoulées (${Math.floor(hoursDifference)}h)`
+            };
+        }
+        
+        const remainingHours = 48 - hoursDifference;
+        if (remainingHours <= 12) {
+            return {
+                allowed: true,
+                timeWarning: `⚠️ Il reste ${Math.floor(remainingHours)}h${Math.floor((remainingHours % 1) * 60)}min pour supprimer`
+            };
+        }
+        
+        return { allowed: true };
+    }
+    
+    return {
+        allowed: false,
+        reason: 'Suppression non autorisée pour votre rôle'
+    };
+}
+
+// Fonction pour supprimer un crédit
+async function deleteCredit(creditId) {
+    // Demander confirmation
+    const confirmMessage = 'Êtes-vous sûr de vouloir supprimer ce crédit ?\n\nCette action est irréversible et affectera le solde du compte.';
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/credit-history/${creditId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            showNotification('Crédit supprimé avec succès !', 'success');
+            // Recharger l'historique des crédits
+            await loadCreditHistory();
+            // Recharger les comptes pour mettre à jour les soldes
+            if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+                await loadAccountsForCredit();
+            }
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        console.error('Erreur suppression crédit:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
 // Fonction pour charger le solde du compte (pour les directeurs)
 async function loadAccountBalance() {
-    if (currentUser.role !== 'directeur') return;
+    if (['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) return;
     
     try {
         const response = await fetch('/api/account/balance');
@@ -2228,7 +2432,7 @@ async function createAccount(formData) {
             resetAccountForm();
             await loadAccounts();
             await loadUsersWithoutAccount();
-            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
             await loadAccountsForCredit();
             await loadCreditHistory();
             }
@@ -2255,7 +2459,7 @@ async function updateAccount(accountId, formData) {
             resetAccountForm();
             await loadAccounts();
             await loadUsersWithoutAccount();
-            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+            if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
                 await loadAccountsForCredit();
                 await loadCreditHistory();
             }
@@ -2793,7 +2997,7 @@ async function handleCreditAccountChange() {
 // Fonction pour charger les comptes de l'utilisateur connecté (pour les dépenses)
 async function loadUserAccounts() {
     // Permettre aux directeurs, directeurs généraux et PCA de voir leurs comptes
-    if (currentUser.role !== 'directeur' && currentUser.role !== 'directeur_general' && currentUser.role !== 'pca') {
+    if (currentUser.role !== 'directeur' && currentUser.role !== 'directeur_general' && currentUser.role !== 'pca' && currentUser.role !== 'admin') {
         console.log('Utilisateur non autorisé, pas de chargement de comptes');
         return;
     }
@@ -4313,7 +4517,7 @@ async function loadPartnerSummary() {
         displayPartnerSummary(partnerSummary);
         
         // Charger aussi la configuration si admin
-        if (currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+        if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
             await loadPartnerConfiguration();
         }
     } catch (error) {
@@ -4453,9 +4657,9 @@ function canValidateDelivery(delivery) {
     console.log('Directeurs assignés au compte:', window.currentAccountDirectors);
     console.log('Rôle utilisateur:', currentUser.role);
     
-    // Le DG peut toujours valider
-    if (currentUser.role === 'directeur_general') {
-        console.log('Utilisateur est DG, peut valider');
+    // Le DG et Admin peuvent toujours valider
+    if (currentUser.role === 'directeur_general' || currentUser.role === 'admin') {
+        console.log('Utilisateur est DG/Admin, peut valider');
         return true;
     }
     
@@ -4709,7 +4913,7 @@ async function validateDelivery(deliveryId) {
 
 // Charger la configuration des comptes partenaires (Admin)
 async function loadPartnerConfiguration() {
-    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca') {
+    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca' && currentUser.role !== 'admin') {
         return;
     }
     
@@ -4830,22 +5034,41 @@ function displayPartnerConfiguration(partnerAccounts, directors) {
 // Mettre à jour les directeurs assignés à un compte partenaire
 async function updatePartnerDirectors(accountId) {
     try {
-        const director1 = document.getElementById(`director1-${accountId}`).value;
-        const director2 = document.getElementById(`director2-${accountId}`).value;
+        // Vérifier que les éléments existent avant de les utiliser
+        const director1Element = document.getElementById(`director1-${accountId}`);
+        const director2Element = document.getElementById(`director2-${accountId}`);
+        
+        if (!director1Element || !director2Element) {
+            throw new Error('Éléments de sélection des directeurs non trouvés');
+        }
+        
+        const director1 = director1Element.value;
+        const director2 = director2Element.value;
         
         const directorIds = [director1, director2].filter(id => id && id !== '');
         
         // Récupérer les noms des directeurs sélectionnés pour la confirmation
-        const director1Name = director1 ? document.getElementById(`director1-${accountId}`).selectedOptions[0].text : 'Aucun';
-        const director2Name = director2 ? document.getElementById(`director2-${accountId}`).selectedOptions[0].text : 'Aucun';
+        const director1Name = director1 ? director1Element.selectedOptions[0].text : 'Aucun';
+        const director2Name = director2 ? director2Element.selectedOptions[0].text : 'Aucun';
         
-        // Récupérer le nom du compte
-        const accountName = document.querySelector(`#director1-${accountId}`).closest('.partner-account-config').querySelector('h5').textContent;
+        // Récupérer le nom du compte de manière sécurisée
+        let accountName = 'Compte partenaire';
+        try {
+            const accountConfig = director1Element.closest('.partner-account-config');
+            if (accountConfig) {
+                const h5Element = accountConfig.querySelector('h5');
+                if (h5Element) {
+                    accountName = h5Element.textContent.trim();
+                }
+            }
+        } catch (e) {
+            console.warn('Impossible de récupérer le nom du compte:', e);
+        }
         
         // Message de confirmation
         const confirmMessage = `Êtes-vous sûr de vouloir mettre à jour les directeurs pour le compte "${accountName}" ?\n\n` +
-                              `Directeur 1: ${director1Name}\n` +
-                              `Directeur 2: ${director2Name}\n\n` +
+                              `Directeur Principal: ${director1Name}\n` +
+                              `Directeur Secondaire: ${director2Name}\n\n` +
                               `Cette action modifiera les permissions d'accès au compte.`;
         
         // Demander confirmation
@@ -4868,6 +5091,7 @@ async function updatePartnerDirectors(accountId) {
             throw new Error(error.error);
         }
     } catch (error) {
+        console.error('Erreur dans updatePartnerDirectors:', error);
         showNotification(`Erreur: ${error.message}`, 'error');
     }
 }
@@ -5712,7 +5936,7 @@ function initTransfertModule() {
     // Affiche le menu seulement pour DG/PCA
     const transfertMenu = document.getElementById('transfert-menu');
     if (!transfertMenu) return;
-    if (currentUser && (currentUser.role === 'directeur_general' || currentUser.role === 'pca')) {
+    if (currentUser && (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin')) {
         transfertMenu.style.display = '';
     } else {
         transfertMenu.style.display = 'none';
@@ -5883,7 +6107,7 @@ async function loadTransfersCard() {
     // Masquer les transferts pour les directeurs simples
     const transfersChartCard = document.getElementById('transfers-chart-card');
     
-    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca') {
+    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca' && currentUser.role !== 'admin') {
         if (transfersChartCard) {
             transfersChartCard.style.display = 'none';
         }
@@ -5968,7 +6192,7 @@ async function loadTransfersCard() {
 
 // Fonction pour charger les données du dashboard
 async function loadDashboardData() {
-    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca' && currentUser.role !== 'directeur') {
+    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca' && currentUser.role !== 'directeur' && currentUser.role !== 'admin') {
         return;
     }
     
@@ -6092,8 +6316,8 @@ async function initDirectorCreditModule() {
             console.error('Erreur vérification permissions crédit:', error);
             creditMenu.style.display = 'none';
         }
-    } else if (currentUser && (currentUser.role === 'directeur_general' || currentUser.role === 'pca')) {
-        // DG/PCA voient toujours le menu
+    } else if (currentUser && (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin')) {
+        // DG/PCA/Admin voient toujours le menu
         creditMenu.style.display = '';
         
         const navLink = creditMenu.querySelector('a');
@@ -6190,23 +6414,143 @@ async function loadDirectorCreditHistory() {
         tbody.innerHTML = '';
         
         if (history.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666;">Aucun crédit effectué</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #666;">Aucun crédit effectué</td></tr>';
             return;
         }
         
         history.forEach(credit => {
             const row = document.createElement('tr');
+            
+            // Générer le bouton de suppression selon les permissions
+            const deleteButton = generateDirectorCreditDeleteButton(credit);
+            
             row.innerHTML = `
                 <td>${formatDate(credit.credit_date)}</td>
                 <td>${credit.account_name}</td>
                 <td><strong>${formatCurrency(credit.amount)}</strong></td>
                 <td>${credit.comment || '-'}</td>
+                <td style="text-align: center;">${deleteButton}</td>
             `;
             tbody.appendChild(row);
         });
         
     } catch (error) {
         console.error('Erreur chargement historique crédit:', error);
+    }
+}
+
+// Fonction pour générer le bouton de suppression d'un crédit de directeur
+function generateDirectorCreditDeleteButton(credit) {
+    let deleteButton = '';
+    
+    // Vérifier les permissions
+    const canDelete = canDeleteDirectorCredit(credit);
+    
+    if (canDelete.allowed) {
+        if (canDelete.timeWarning) {
+            // Avertissement - proche de la limite de 48h pour les directeurs
+            deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteDirectorCredit(${credit.id})" title="${canDelete.timeWarning}">
+                <i class="fas fa-trash" style="color: #fbbf24;"></i>
+            </button>`;
+        } else {
+            // Suppression normale
+            deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteDirectorCredit(${credit.id})" title="Supprimer ce crédit">
+                <i class="fas fa-trash"></i>
+            </button>`;
+        }
+    } else {
+        // Pas autorisé
+        deleteButton = `<span style="color: #dc3545;" title="${canDelete.reason}"><i class="fas fa-lock"></i></span>`;
+    }
+    
+    return deleteButton;
+}
+
+// Fonction pour vérifier si un crédit de directeur peut être supprimé
+function canDeleteDirectorCredit(credit) {
+    // Admin, DG, PCA peuvent toujours supprimer
+    if (['admin', 'directeur_general', 'pca'].includes(currentUser.role)) {
+        return { allowed: true };
+    }
+    
+    // Directeurs simples : vérifier s'ils ont créé ce crédit ET dans les 48h
+    if (currentUser.role === 'directeur') {
+        // Vérifier si c'est le directeur qui a créé ce crédit
+        if (credit.credited_by !== currentUser.id) {
+            return {
+                allowed: false,
+                reason: 'Vous ne pouvez supprimer que vos propres crédits'
+            };
+        }
+        
+        // Vérifier les 48h
+        const creditDate = new Date(credit.created_at || credit.credit_date);
+        const now = new Date();
+        const hoursDifference = (now - creditDate) / (1000 * 60 * 60);
+        
+        if (hoursDifference > 48) {
+            return {
+                allowed: false,
+                reason: `Suppression non autorisée - Plus de 48 heures écoulées (${Math.floor(hoursDifference)}h)`
+            };
+        }
+        
+        const remainingHours = 48 - hoursDifference;
+        if (remainingHours <= 12) {
+            return {
+                allowed: true,
+                timeWarning: `⚠️ Il reste ${Math.floor(remainingHours)}h${Math.floor((remainingHours % 1) * 60)}min pour supprimer`
+            };
+        }
+        
+        return { allowed: true };
+    }
+    
+    return {
+        allowed: false,
+        reason: 'Suppression non autorisée pour votre rôle'
+    };
+}
+
+// Fonction pour supprimer un crédit de directeur
+async function deleteDirectorCredit(creditId) {
+    // Demander confirmation
+    const confirmMessage = 'Êtes-vous sûr de vouloir supprimer ce crédit ?\n\nCette action est irréversible et affectera le solde du compte.';
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/director/credit-history/${creditId}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            showDirectorCreditNotification('Crédit supprimé avec succès !', 'success');
+            // Recharger l'historique des crédits du directeur
+            await loadDirectorCreditHistory();
+            // Recharger les comptes créditables pour mettre à jour les soldes
+            await loadDirectorCreditableAccounts();
+            
+            // Mettre à jour les autres interfaces si nécessaire
+            if (typeof loadAccounts === 'function') {
+                await loadAccounts();
+            }
+            
+            if (typeof loadDashboard === 'function') {
+                const dashboardSection = document.getElementById('dashboard-section');
+                if (dashboardSection && dashboardSection.classList.contains('active')) {
+                    await loadDashboard();
+                }
+            }
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        console.error('Erreur suppression crédit directeur:', error);
+        showDirectorCreditNotification(`Erreur: ${error.message}`, 'error');
     }
 }
 
@@ -6291,3 +6635,49 @@ function showDirectorCreditNotification(message, type = 'info') {
 }
 
 // ... existing code ...
+
+// Admin-only: Delete account with backup
+async function deleteAccountAdmin(accountId) {
+    if (!confirm('Êtes-vous sûr de vouloir SUPPRIMER DÉFINITIVEMENT ce compte ? Cette action est irréversible et une sauvegarde sera créée.')) {
+        return;
+    }
+    try {
+        const response = await fetch(`/api/admin/accounts/${accountId}/delete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'Suppression admin via interface' })
+        });
+        const result = await response.json();
+        if (response.ok && result.success) {
+            showNotification(result.message || 'Compte supprimé avec sauvegarde', 'success');
+            await loadAccounts();
+        } else {
+            showNotification(result.message || 'Erreur lors de la suppression', 'error');
+        }
+    } catch (error) {
+        showNotification('Erreur lors de la suppression du compte', 'error');
+    }
+}
+
+// Admin-only: Reset (empty) account with backup
+async function resetAccountAdmin(accountId) {
+    if (!confirm('Êtes-vous sûr de vouloir VIDER ce compte ? Toutes les opérations seront supprimées, une sauvegarde sera créée.')) {
+        return;
+    }
+    try {
+        const response = await fetch(`/api/admin/accounts/${accountId}/empty`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason: 'Remise à zéro admin via interface' })
+        });
+        const result = await response.json();
+        if (response.ok && result.success) {
+            showNotification(result.message || 'Compte vidé avec sauvegarde', 'success');
+            await loadAccounts();
+        } else {
+            showNotification(result.message || 'Erreur lors de la remise à zéro', 'error');
+        }
+    } catch (error) {
+        showNotification('Erreur lors de la remise à zéro du compte', 'error');
+    }
+}

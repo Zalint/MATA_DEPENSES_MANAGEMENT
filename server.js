@@ -9,6 +9,11 @@ const fs = require('fs');
 const multer = require('multer');
 const PDFDocument = require('pdfkit');
 
+// Fonction utilitaire pour formater la monnaie
+function formatCurrency(amount) {
+    return parseInt(amount).toLocaleString('fr-FR') + ' FCFA';
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -93,7 +98,7 @@ const requireAuth = (req, res, next) => {
 };
 
 const requireAdminAuth = (req, res, next) => {
-    if (req.session.user && (req.session.user.role === 'directeur_general' || req.session.user.role === 'pca')) {
+    if (req.session.user && (['directeur_general', 'pca', 'admin'].includes(req.session.user.role))) {
         next();
     } else {
         res.status(403).json({ error: 'Accès refusé - Privilèges insuffisants' });
@@ -102,7 +107,7 @@ const requireAdminAuth = (req, res, next) => {
 
 // Middleware pour DG/PCA uniquement
 function requireSuperAdmin(req, res, next) {
-    if (!req.session.user || !['directeur_general', 'pca'].includes(req.session.user.role)) {
+    if (!req.session.user || !['directeur_general', 'pca', 'admin'].includes(req.session.user.role)) {
         return res.status(403).json({ error: 'Accès refusé' });
     }
     next();
@@ -371,7 +376,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
         if (req.session.user.role === 'directeur') {
             query += ' AND a.is_active = true AND a.user_id = $1';
             params.push(req.session.user.id);
-        } else if (req.session.user.role === 'directeur_general' || req.session.user.role === 'pca') {
+        } else if (req.session.user.role === 'directeur_general' || req.session.user.role === 'pca' || req.session.user.role === 'admin') {
             // Les admins voient tous les comptes (actifs et inactifs)
         } else {
             query += ' AND a.is_active = true AND (a.access_restricted = false OR a.access_restricted IS NULL OR a.account_type = \'Ajustement\')';
@@ -505,7 +510,7 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
         if (req.session.user.role === 'directeur') {
             // Les directeurs voient leurs propres dépenses ET les dépenses faites par le DG sur leurs comptes
             query += ` WHERE (e.user_id = $1 OR (a.user_id = $1 AND e.user_id IN (
-                SELECT id FROM users WHERE role IN ('directeur_general', 'pca')
+                SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin')
             )))`;
             params.push(user_id);
         } else {
@@ -537,10 +542,13 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
 // Routes pour les utilisateurs
 app.get('/api/users', requireAdminAuth, async (req, res) => {
     try {
-        const result = await pool.query(
-            'SELECT id, username, role, full_name FROM users WHERE role = $1 ORDER BY username',
-            ['directeur']
-        );
+        let result;
+        const role = req.session.user.role;
+        if (['admin', 'directeur_general', 'pca'].includes(role)) {
+            result = await pool.query('SELECT id, username, role, full_name FROM users ORDER BY username');
+        } else {
+            result = await pool.query('SELECT id, username, role, full_name FROM users WHERE role = $1 ORDER BY username', ['directeur']);
+        }
         res.json(result.rows);
     } catch (error) {
         console.error('Erreur récupération utilisateurs:', error);
@@ -572,7 +580,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         const isDirector = req.session.user.role === 'directeur';
         const userFilter = isDirector ? ` AND (e.user_id = $2 OR (EXISTS (
             SELECT 1 FROM accounts a WHERE a.id = e.account_id AND a.user_id = $2
-        ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca'))))` : '';
+        ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin'))))` : '';
         const userParam = isDirector ? [req.session.user.id] : [];
         
         // Cash burn du jour
@@ -634,7 +642,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         if (isDirector) {
             categoryBurnQuery += ` AND (e.user_id = $3 OR (EXISTS (
                 SELECT 1 FROM accounts a WHERE a.id = e.account_id AND a.user_id = $3
-            ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca'))))`;
+            ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin'))))`;
             categoryParams.push(req.session.user.id);
         }
         
@@ -696,7 +704,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             const whereClause = spentParams.length > 0 ? ' AND' : ' WHERE';
             totalSpentQuery += `${whereClause} (e.user_id = $${spentParams.length + 1} OR (EXISTS (
                 SELECT 1 FROM accounts a WHERE a.id = e.account_id AND a.user_id = $${spentParams.length + 1}
-            ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca'))))`;
+            ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin'))))`;
             spentParams.push(userId);
         }
         
@@ -1024,7 +1032,7 @@ app.get('/api/accounts/:accountName/expenses', requireAuth, async (req, res) => 
         if (req.session.user.role === 'directeur') {
             // Les directeurs voient leurs propres dépenses ET les dépenses faites par le DG sur leurs comptes
             query += ` AND (e.user_id = $4 OR (a.user_id = $4 AND e.user_id IN (
-                SELECT id FROM users WHERE role IN ('directeur_general', 'pca')
+                SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin')
             )))`;
             params.push(userId);
         }
@@ -1531,7 +1539,7 @@ app.put('/api/expenses/:id', requireAuth, async (req, res) => {
             return res.status(404).json({ error: 'Dépense non trouvée ou non autorisée' });
         }
         
-        // Vérifier la restriction de 48 heures pour les directeurs réguliers
+        // Vérifier la restriction de 48 heures pour les directeurs réguliers (pas pour admin, DG, PCA)
         if (req.session.user.role === 'directeur') {
             const expenseCreatedAt = new Date(existingExpense.rows[0].created_at);
             const now = new Date();
@@ -1564,7 +1572,7 @@ app.put('/api/expenses/:id', requireAuth, async (req, res) => {
             
             account = accountResult.rows[0];
             
-            // Vérifier l'autorisation pour les directeurs
+            // Vérifier l'autorisation pour les directeurs (admin, DG, PCA peuvent modifier sur tous les comptes)
             if (req.session.user.role === 'directeur' && account.user_id !== userId) {
                 return res.status(403).json({ error: 'Vous ne pouvez pas dépenser sur ce compte' });
             }
@@ -1620,8 +1628,7 @@ app.put('/api/expenses/:id', requireAuth, async (req, res) => {
                 total = $10,
                 predictable = $11,
                 description = $12,
-                expense_date = $13,
-                updated_at = CURRENT_TIMESTAMP
+                expense_date = $13
             WHERE id = $14
             RETURNING *
         `, [
@@ -1652,6 +1659,218 @@ app.put('/api/expenses/:id', requireAuth, async (req, res) => {
         await pool.query('ROLLBACK');
         console.error('Erreur modification dépense:', error);
         res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour supprimer une dépense
+app.delete('/api/expenses/:id', requireAuth, async (req, res) => {
+    try {
+        const expenseId = req.params.id;
+        const userId = req.session.user.id;
+        
+        // Vérifier que la dépense existe
+        let checkQuery = 'SELECT e.*, a.account_name FROM expenses e LEFT JOIN accounts a ON e.account_id = a.id WHERE e.id = $1';
+        let checkParams = [expenseId];
+        
+        // Pour les directeurs simples, vérifier qu'ils possèdent la dépense
+        if (req.session.user.role === 'directeur') {
+            checkQuery += ' AND e.user_id = $2';
+            checkParams.push(userId);
+        }
+        
+        const existingExpense = await pool.query(checkQuery, checkParams);
+        
+        if (existingExpense.rows.length === 0) {
+            return res.status(404).json({ error: 'Dépense non trouvée ou non autorisée' });
+        }
+        
+        const expense = existingExpense.rows[0];
+        
+        // Vérifier la restriction de 48 heures pour les directeurs réguliers (pas pour admin, DG, PCA)
+        if (req.session.user.role === 'directeur') {
+            const expenseCreatedAt = new Date(expense.created_at);
+            const now = new Date();
+            const hoursDifference = (now - expenseCreatedAt) / (1000 * 60 * 60);
+            
+            if (hoursDifference > 48) {
+                return res.status(403).json({ 
+                    error: `Suppression non autorisée. Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures. Les directeurs ne peuvent supprimer une dépense que dans les 48 heures suivant sa création.` 
+                });
+            }
+        }
+        
+        await pool.query('BEGIN');
+        
+        // Restaurer le solde du compte si la dépense était associée à un compte
+        if (expense.account_id) {
+            const expenseAmount = parseInt(expense.total) || 0;
+            await pool.query(
+                `UPDATE accounts SET 
+                    current_balance = current_balance + $1,
+                    total_spent = total_spent - $1
+                WHERE id = $2`,
+                [expenseAmount, expense.account_id]
+            );
+        }
+        
+        // Supprimer la dépense
+        await pool.query('DELETE FROM expenses WHERE id = $1', [expenseId]);
+        
+        await pool.query('COMMIT');
+        
+        res.json({
+            message: `Dépense supprimée avec succès. Le solde du compte "${expense.account_name}" a été restauré.`
+        });
+        
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('Erreur suppression dépense:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour supprimer un crédit (pour admin/DG/PCA)
+app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
+    try {
+        const creditId = req.params.id;
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+        
+        // Vérifier que le crédit existe
+        const existingCredit = await pool.query(
+            'SELECT ch.*, a.account_name FROM credit_history ch JOIN accounts a ON ch.account_id = a.id WHERE ch.id = $1',
+            [creditId]
+        );
+        
+        if (existingCredit.rows.length === 0) {
+            return res.status(404).json({ error: 'Crédit non trouvé' });
+        }
+        
+        const credit = existingCredit.rows[0];
+        
+        // Vérifications des permissions selon le rôle
+        if (!['admin', 'directeur_general', 'pca'].includes(userRole)) {
+            return res.status(403).json({ error: 'Accès non autorisé' });
+        }
+        
+        // Supprimer le crédit et mettre à jour le solde du compte
+        await pool.query('BEGIN');
+        
+        try {
+            // Supprimer le crédit
+            await pool.query('DELETE FROM credit_history WHERE id = $1', [creditId]);
+            
+            // Recalculer le total crédité et le solde du compte
+            const accountStats = await pool.query(`
+                UPDATE accounts 
+                SET 
+                    total_credited = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0),
+                    current_balance = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0) - 
+                                    COALESCE((SELECT SUM(total) FROM expenses WHERE account_id = $1), 0)
+                WHERE id = $1
+                RETURNING account_name, current_balance, total_credited
+            `, [credit.account_id]);
+            
+            await pool.query('COMMIT');
+            
+            console.log(`[Admin] Crédit ${creditId} supprimé par ${req.session.user.username}`);
+            
+            res.json({ 
+                success: true, 
+                message: `Crédit de ${formatCurrency(credit.amount)} sur ${credit.account_name} supprimé avec succès`,
+                account: accountStats.rows[0]
+            });
+            
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+        
+    } catch (error) {
+        console.error('Erreur suppression crédit (admin):', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+    }
+});
+
+// Route pour supprimer un crédit de directeur
+app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => {
+    try {
+        const creditId = req.params.id;
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+        
+        // Vérifier que le crédit existe dans special_credit_history
+        const existingCredit = await pool.query(
+            'SELECT sch.*, a.account_name FROM special_credit_history sch JOIN accounts a ON sch.account_id = a.id WHERE sch.id = $1',
+            [creditId]
+        );
+        
+        if (existingCredit.rows.length === 0) {
+            return res.status(404).json({ error: 'Crédit non trouvé' });
+        }
+        
+        const credit = existingCredit.rows[0];
+        
+        // Vérifications des permissions selon le rôle
+        if (['admin', 'directeur_general', 'pca'].includes(userRole)) {
+            // Admin/DG/PCA peuvent supprimer n'importe quel crédit
+        } else if (userRole === 'directeur') {
+            // Les directeurs ne peuvent supprimer que leurs propres crédits et dans les 48h
+            if (credit.credited_by !== userId) {
+                return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres crédits' });
+            }
+            
+            const creditDate = new Date(credit.created_at);
+            const now = new Date();
+            const hoursDifference = (now - creditDate) / (1000 * 60 * 60);
+            
+            if (hoursDifference > 48) {
+                return res.status(403).json({ 
+                    error: `Suppression non autorisée - Plus de 48 heures écoulées (${Math.floor(hoursDifference)}h)`
+                });
+            }
+        } else {
+            return res.status(403).json({ error: 'Accès non autorisé' });
+        }
+        
+        // Supprimer le crédit et mettre à jour le solde du compte
+        await pool.query('BEGIN');
+        
+        try {
+            // Supprimer le crédit
+            await pool.query('DELETE FROM special_credit_history WHERE id = $1', [creditId]);
+            
+            // Recalculer le solde du compte en prenant en compte tous les types de crédits
+            const accountStats = await pool.query(`
+                UPDATE accounts 
+                SET 
+                    total_credited = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0) +
+                                   COALESCE((SELECT SUM(amount) FROM special_credit_history WHERE account_id = $1), 0),
+                    current_balance = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0) +
+                                    COALESCE((SELECT SUM(amount) FROM special_credit_history WHERE account_id = $1), 0) -
+                                    COALESCE((SELECT SUM(total) FROM expenses WHERE account_id = $1), 0)
+                WHERE id = $1
+                RETURNING account_name, current_balance, total_credited
+            `, [credit.account_id]);
+            
+            await pool.query('COMMIT');
+            
+            console.log(`[Directeur] Crédit ${creditId} supprimé par ${req.session.user.username}`);
+            
+            res.json({ 
+                success: true, 
+                message: `Crédit de ${formatCurrency(credit.amount)} sur ${credit.account_name} supprimé avec succès`,
+                account: accountStats.rows[0]
+            });
+            
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+        
+    } catch (error) {
+        console.error('Erreur suppression crédit (directeur):', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
     }
 });
 
@@ -2067,12 +2286,12 @@ app.get('/api/accounts/:accountId/can-credit', requireAuth, async (req, res) => 
             case 'fournisseur':
             case 'statut':
             case 'Ajustement':
-                canCredit = userRole === 'directeur_general' || userRole === 'pca';
-                reason = canCredit ? '' : 'Seuls le DG et le PCA peuvent créditer ce type de compte';
+                canCredit = userRole === 'directeur_general' || userRole === 'pca' || userRole === 'admin';
+                reason = canCredit ? '' : 'Seuls le DG, le PCA et l\'admin peuvent créditer ce type de compte';
                 break;
                 
             case 'creance':
-                if (userRole === 'directeur_general') {
+                if (userRole === 'directeur_general' || userRole === 'admin') {
                     canCredit = true;
                 } else {
                     const creditorResult = await pool.query(
@@ -2162,7 +2381,7 @@ app.post('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => 
         
         // Vérifier les permissions (DG ou directeurs assignés)
         const userRole = req.session.user.role;
-        let isAuthorized = userRole === 'directeur_general';
+        let isAuthorized = userRole === 'directeur_general' || userRole === 'admin';
         
         if (!isAuthorized && userRole === 'directeur') {
             const directorResult = await pool.query(
@@ -2220,7 +2439,7 @@ app.post('/api/partner/deliveries/:deliveryId/first-validate', requireAuth, asyn
         // Vérifier les autorisations
         let canValidate = false;
         
-        if (userRole === 'directeur_general') {
+        if (userRole === 'directeur_general' || userRole === 'admin') {
             canValidate = true;
         } else if (userRole === 'directeur') {
             const directorResult = await pool.query(
@@ -2959,6 +3178,22 @@ app.get('/health', (req, res) => {
     });
 });
 
+// =====================================================
+// ADMIN ROUTES
+// =====================================================
+
+// Import admin endpoints
+const adminEndpoints = require('./admin_endpoints');
+
+// Admin routes - Delete account with backup
+app.post('/api/admin/accounts/:id/delete', adminEndpoints.requireAdmin, adminEndpoints.deleteAccount);
+
+// Admin routes - Empty account with backup  
+app.post('/api/admin/accounts/:id/empty', adminEndpoints.requireAdmin, adminEndpoints.emptyAccount);
+
+// Admin routes - Get account backups
+app.get('/api/admin/backups', adminEndpoints.requireAdmin, adminEndpoints.getAccountBackups);
+
 // Root endpoint
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -3158,8 +3393,8 @@ app.get('/api/director/crediteable-accounts', requireAuth, async (req, res) => {
         `;
         let params = [];
         
-        if (userRole === 'directeur_general' || userRole === 'pca') {
-            // DG et PCA voient tous les comptes
+        if (userRole === 'directeur_general' || userRole === 'pca' || userRole === 'admin') {
+            // DG, PCA et admin voient tous les comptes
             query += ` ORDER BY a.account_name`;
         } else if (userRole === 'directeur') {
             // Directeurs voient seulement les comptes pour lesquels ils ont une permission
