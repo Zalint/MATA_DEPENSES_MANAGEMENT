@@ -6,7 +6,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="theme-color" content="#667eea">
-    <title>Gestion des Dépenses</title>
+    <title>MataBanq</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
 </head>
@@ -44,8 +44,8 @@
                 <button class="mobile-menu-toggle" id="mobile-menu-toggle">
                     <i class="fas fa-bars"></i>
                 </button>
-                <i class="fas fa-wallet"></i>
-                <span>Gestion des Dépenses</span>
+                <!--<img src="matabanq_logo.svg" alt="MataBanq Logo" class="app-logo">-->
+                <span class="brand-title">MataBanq</span>
             </div>
             <div class="nav-user">
                 <span id="user-name"></span>
@@ -65,7 +65,7 @@
             <aside class="sidebar" id="sidebar">
                 <ul class="nav-menu">
                     <li><a href="#" data-section="dashboard" class="nav-link active">
-                        <i class="fas fa-chart-dashboard"></i> Dashboard
+                        <i class="fas fa-tachometer-alt"></i> Tableau de bord
                     </a></li>
                     <li><a href="#" data-section="expenses" class="nav-link">
                         <i class="fas fa-receipt"></i> Mes Dépenses
@@ -106,9 +106,9 @@
 
             <!-- Zone de contenu -->
             <main class="content">
-                <!-- Dashboard -->
+                <!-- Tableau de bord -->
                 <section id="dashboard-section" class="section active">
-                    <h2>Dashboard de Suivi</h2>
+                    <h2>Tableau de bord de Suivi</h2>
                     
                     <div class="stats-grid">
                         <div class="stat-card">
@@ -900,11 +900,12 @@
                     </form>
 
                     <!-- Liste des utilisateurs existants -->
-                    <div class="users-list">
+                    <div class="users-list-section">
                         <h3>Utilisateurs Existants</h3>
                         
                         <!-- Filtres -->
-                        <div class="filters-container" style="margin-bottom: 20px;">
+                        <div class="user-filters">
+                            <h4>Filtres</h4>
                             <div class="form-row">
                                 <div class="form-group">
                                     <label>Filtrer par Statut</label>
@@ -926,7 +927,7 @@
                                 </div>
                                 
                                 <div class="form-group">
-                                    <button type="button" class="btn btn-secondary" onclick="clearUserFilters()" style="margin-top: 25px;">
+                                    <button type="button" class="btn" onclick="clearUserFilters()">
                                         Effacer les filtres
                                     </button>
                                 </div>
