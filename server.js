@@ -595,7 +595,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         const monthlyBurnQuery = `SELECT COALESCE(SUM(e.total), 0) as total FROM expenses e WHERE e.expense_date >= $1${userFilter}`;
         const monthlyBurn = await pool.query(monthlyBurnQuery, [month_start, ...userParam]);
         
-        // Dépenses par compte (période sélectionnée) avec total crédité
+        // Dépenses par compte (période sélectionnée) avec total crédité, sauf dépôts et partenaires
         let accountBurnQuery = `
             SELECT 
                 a.account_name as name,
@@ -603,10 +603,10 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                 a.total_credited,
                 a.current_balance
             FROM accounts a
-            JOIN users u ON a.user_id = u.id
+            LEFT JOIN users u ON a.user_id = u.id
             LEFT JOIN expenses e ON a.id = e.account_id 
                 AND e.expense_date >= $1 AND e.expense_date <= $2
-            WHERE a.is_active = true`;
+            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire'`;
         
         let accountParams = [startDate, endDate];
         
@@ -713,11 +713,11 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         
 
         
-        // 2. Montant Restant Total (soldes actuels de tous les comptes)
+        // 2. Montant Restant Total (soldes actuels de tous les comptes, sauf dépôts et partenaires)
         let totalRemainingQuery = `
             SELECT COALESCE(SUM(a.current_balance), 0) as total 
             FROM accounts a 
-            WHERE a.is_active = true
+            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire'
         `;
         let remainingParams = [];
         
@@ -729,11 +729,11 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         const totalRemainingResult = await pool.query(totalRemainingQuery, remainingParams);
         const totalRemaining = parseInt(totalRemainingResult.rows[0].total);
         
-        // 3. Total Crédité avec Dépenses (comptes qui ont eu des dépenses)
+        // 3. Total Crédité avec Dépenses (comptes qui ont eu des dépenses, sauf dépôts et partenaires)
         let creditedWithExpensesQuery = `
             SELECT COALESCE(SUM(DISTINCT a.total_credited), 0) as total 
             FROM accounts a
-            WHERE a.is_active = true 
+            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire'
             AND EXISTS (
                 SELECT 1 FROM expenses e WHERE e.account_id = a.id
         `;
@@ -754,11 +754,11 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         const creditedWithExpensesResult = await pool.query(creditedWithExpensesQuery, creditedExpensesParams);
         const totalCreditedWithExpenses = parseInt(creditedWithExpensesResult.rows[0].total);
         
-        // 4. Total Crédité Général (tous les comptes actifs)
+        // 4. Total Crédité Général (tous les comptes actifs, sauf dépôts et partenaires)
         let totalCreditedQuery = `
             SELECT COALESCE(SUM(a.total_credited), 0) as total 
             FROM accounts a 
-            WHERE a.is_active = true
+            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire'
         `;
         let creditedParams = [];
         
@@ -770,11 +770,45 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         const totalCreditedResult = await pool.query(totalCreditedQuery, creditedParams);
         const totalCreditedGeneral = parseInt(totalCreditedResult.rows[0].total);
         
+        // 5. Solde des comptes depot
+        let depotBalanceQuery = `
+            SELECT COALESCE(SUM(a.current_balance), 0) as total 
+            FROM accounts a 
+            WHERE a.is_active = true AND a.account_type = 'depot'
+        `;
+        let depotParams = [];
+        
+        if (isDirector) {
+            depotBalanceQuery += ` AND a.user_id = $1`;
+            depotParams = [userId];
+        }
+        
+        const depotBalanceResult = await pool.query(depotBalanceQuery, depotParams);
+        const totalDepotBalance = parseInt(depotBalanceResult.rows[0].total);
+        
+        // 6. Solde des comptes partenaire
+        let partnerBalanceQuery = `
+            SELECT COALESCE(SUM(a.current_balance), 0) as total 
+            FROM accounts a 
+            WHERE a.is_active = true AND a.account_type = 'partenaire'
+        `;
+        let partnerParams = [];
+        
+        if (isDirector) {
+            partnerBalanceQuery += ` AND a.user_id = $1`;
+            partnerParams = [userId];
+        }
+        
+        const partnerBalanceResult = await pool.query(partnerBalanceQuery, partnerParams);
+        const totalPartnerBalance = parseInt(partnerBalanceResult.rows[0].total);
+        
         res.json({
             totalSpent,
             totalRemaining,
             totalCreditedWithExpenses,
             totalCreditedGeneral,
+            totalDepotBalance,
+            totalPartnerBalance,
             period: {
                 start_date: start_date || null,
                 end_date: end_date || null
@@ -1928,23 +1962,23 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
         const created_by = req.session.user.id;
         
         // Validation du type de compte
-        const validTypes = ['classique', 'partenaire', 'statut', 'Ajustement'];
+        const validTypes = ['classique', 'partenaire', 'statut', 'Ajustement', 'depot'];
         if (account_type && !validTypes.includes(account_type)) {
             return res.status(400).json({ error: 'Type de compte invalide' });
         }
         
         const finalAccountType = account_type || 'classique';
         
-        // Pour les comptes spéciaux (sauf créance), user_id peut être null
-        if (finalAccountType === 'classique' || finalAccountType === 'partenaire' || finalAccountType === 'statut' || finalAccountType === 'Ajustement') {
-        // Vérifier que l'utilisateur existe et est un directeur
-        const userResult = await pool.query(
-            'SELECT * FROM users WHERE id = $1 AND role = $2',
-            [user_id, 'directeur']
-        );
-        
-        if (userResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Directeur non trouvé' });
+        // Vérifier le directeur seulement pour les comptes classiques
+        if (finalAccountType === 'classique' && user_id) {
+            // Vérifier que l'utilisateur existe et est un directeur
+            const userResult = await pool.query(
+                'SELECT * FROM users WHERE id = $1 AND role = $2',
+                [user_id, 'directeur']
+            );
+            
+            if (userResult.rows.length === 0) {
+                return res.status(404).json({ error: 'Directeur non trouvé' });
             }
         }
         
@@ -1965,7 +1999,7 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
             `INSERT INTO accounts (user_id, account_name, current_balance, total_credited, total_spent, created_by, account_type, access_restricted, allowed_roles, category_type) 
              VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9) RETURNING *`,
             [
-                finalAccountType === 'partenaire' || finalAccountType === 'statut' || finalAccountType === 'Ajustement' ? null : user_id,
+                finalAccountType === 'partenaire' || finalAccountType === 'statut' || finalAccountType === 'Ajustement' || finalAccountType === 'depot' ? null : user_id,
                 account_name, 
                 parseInt(initial_amount) || 0, 
                 parseInt(initial_amount) || 0, 

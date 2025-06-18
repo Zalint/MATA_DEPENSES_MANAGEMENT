@@ -634,6 +634,8 @@ async function updateStatsCards(startDate, endDate) {
         document.getElementById('total-remaining-amount').textContent = formatCurrency(stats.totalRemaining || 0);
         document.getElementById('total-credited-with-expenses').textContent = formatCurrency(stats.totalCreditedWithExpenses || 0);
         document.getElementById('total-credited-general').textContent = formatCurrency(stats.totalCreditedGeneral || 0);
+        document.getElementById('total-depot-balance').textContent = formatCurrency(stats.totalDepotBalance || 0);
+        document.getElementById('total-partner-balance').textContent = formatCurrency(stats.totalPartnerBalance || 0);
         
         // Mettre à jour les périodes
         const periodText = startDate && endDate ? 
@@ -652,6 +654,8 @@ async function updateStatsCards(startDate, endDate) {
         document.getElementById('total-remaining-amount').textContent = '0 FCFA';
         document.getElementById('total-credited-with-expenses').textContent = '0 FCFA';
         document.getElementById('total-credited-general').textContent = '0 FCFA';
+        document.getElementById('total-depot-balance').textContent = '0 FCFA';
+        document.getElementById('total-partner-balance').textContent = '0 FCFA';
     }
 }
 
@@ -1608,6 +1612,7 @@ function displayAccounts(accounts) {
                         <option value="partenaire">🤝 Partenaire</option>
                         <option value="statut">📊 Statut</option>
                         <option value="Ajustement">⚖️ Ajustement</option>
+                        <option value="depot">🏦 Dépôt</option>
                     </select>
                 </div>
                 
@@ -2677,7 +2682,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const accountType = document.getElementById('accountType').value;
         const formData = {
-            user_id: (accountType === 'partenaire' || accountType === 'statut' || accountType === 'Ajustement')
+            user_id: (accountType === 'partenaire' || accountType === 'statut' || accountType === 'Ajustement' || accountType === 'depot')
                 ? null : parseInt(document.getElementById('createDirectorSelect').value),
             account_name: document.getElementById('accountName').value,
             initial_amount: parseInt(document.getElementById('initialAmount').value) || 0,
@@ -2878,7 +2883,8 @@ function handleAccountTypeChange() {
         'classique': 'Compte standard assigné à un directeur. Le DG peut donner des permissions de crédit.',
         'partenaire': 'Compte accessible à tous les utilisateurs.',
         'statut': 'Compte où le crédit écrase le solde existant (DG/PCA uniquement).',
-        'Ajustement': 'Compte spécial pour les ajustements comptables (DG/PCA uniquement).'
+        'Ajustement': 'Compte spécial pour les ajustements comptables (DG/PCA uniquement).',
+        'depot': 'Compte dépôt exclu du calcul de solde global (DG/PCA uniquement).'
     };
      
     if (accountType && helpMessages[accountType]) {
@@ -2904,6 +2910,7 @@ function handleAccountTypeChange() {
         case 'partenaire':
         case 'statut':
         case 'Ajustement':
+        case 'depot':
             console.log(`[handleAccountTypeChange] Type is "${accountType}". Hiding userSelectGroup.`);
             userSelectGroup.style.display = 'none';
             createDirectorSelect.required = false;
@@ -6242,7 +6249,7 @@ async function loadDashboardData() {
                     name.includes('classique') ||
                     name.includes('statut') ||
                     name.includes('ajustement') ||
-                    (!name.includes('partenaire') && !name.includes('fournisseur'))
+                    (!name.includes('partenaire') && !name.includes('fournisseur') && !name.includes('depot'))
                 ) {
                     if (typeof acc.remaining !== 'undefined') {
                         solde += parseInt(acc.remaining) || 0;
