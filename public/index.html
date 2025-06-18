@@ -73,6 +73,11 @@
                     <li><a href="#" data-section="add-expense" class="nav-link">
                         <i class="fas fa-plus"></i> Ajouter Dépense
                     </a></li>
+                    <li id="credit-menu" style="display: none;">
+                        <a href="#" data-section="credit-account" class="nav-link">
+                            <i class="fas fa-credit-card"></i> Créditer Compte
+                        </a>
+                    </li>
                     <li id="admin-menu" style="display: none;">
                         <a href="#" data-section="manage-accounts" class="nav-link">
                             <i class="fas fa-users-cog"></i> Gérer Comptes
@@ -211,7 +216,7 @@
                             <div id="account-chart"></div>
                         </div>
                         
-                        <div class="chart-card">
+                        <div class="chart-card" id="transfers-chart-card" style="display: none;">
                             <h3>Transferts</h3>
                             <div id="transfers-list"></div>
                         </div>
@@ -541,6 +546,65 @@
                         </div>
                     </div>
 
+                </section>
+
+                <!-- Créditer Compte (Directeurs avec permissions) -->
+                <section id="credit-account-section" class="section">
+                    <h2>Créditer un Compte</h2>
+                    
+                    <div class="credit-form-card">
+                        <form id="directorCreditForm" class="account-form" style="max-width: 600px; margin: 0 auto;">
+                            <div class="form-group">
+                                <label for="director-credit-account">Compte</label>
+                                <select id="director-credit-account" required>
+                                    <option value="">Sélectionner un compte</option>
+                                </select>
+                                <small class="form-help" id="director-credit-help"></small>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="director-credit-amount">Montant (FCFA)</label>
+                                <input type="number" id="director-credit-amount" min="1" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="director-credit-date">Date</label>
+                                <input type="date" id="director-credit-date" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="director-credit-comment">Commentaire</label>
+                                <textarea id="director-credit-comment" placeholder="Ex: Budget mensuel, remboursement..." required></textarea>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button type="submit" class="btn btn-success">
+                                    <i class="fas fa-credit-card"></i> Créditer le Compte
+                                </button>
+                            </div>
+                        </form>
+                        
+                        <div id="director-credit-notification" class="notification" style="display:none;"></div>
+                        
+                        <!-- Historique des crédits du directeur -->
+                        <div class="director-credit-history" style="margin-top: 30px;">
+                            <h3>Mes Crédits Récents</h3>
+                            <div class="table-container">
+                                <table id="director-credit-history-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Compte</th>
+                                            <th>Montant</th>
+                                            <th>Commentaire</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="director-credit-history-tbody">
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Gérer les comptes (Admin uniquement) -->

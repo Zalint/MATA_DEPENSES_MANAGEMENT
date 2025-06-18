@@ -180,12 +180,19 @@ async function loadInitialData() {
         // Afficher le formulaire d'ajustement pour DG/PCA
         document.getElementById('adjustment-form-container').style.display = 'block';
         setupAdjustmentForm();
+    } else {
+        // Masquer la section transferts pour les directeurs simples
+        const transfersChartCard = document.getElementById('transfers-chart-card');
+        if (transfersChartCard) {
+            transfersChartCard.style.display = 'none';
+        }
     }
     if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'directeur') {
         await loadDashboard();
     }
     setDefaultDate();
     initTransfertModule();
+    await initDirectorCreditModule();
 }
 
 async function loadCategories() {
@@ -5871,8 +5878,23 @@ async function loadTransfertAccounts() {
     }
 }
 
-// Fonction pour charger les données de transferts
+// Fonction pour charger les données de transferts (DG/PCA uniquement)
 async function loadTransfersCard() {
+    // Masquer les transferts pour les directeurs simples
+    const transfersChartCard = document.getElementById('transfers-chart-card');
+    
+    if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca') {
+        if (transfersChartCard) {
+            transfersChartCard.style.display = 'none';
+        }
+        return; // Ne pas charger les transferts pour les directeurs simples
+    }
+    
+    // Afficher la section pour DG/PCA
+    if (transfersChartCard) {
+        transfersChartCard.style.display = 'block';
+    }
+    
     try {
         const response = await fetch('/api/transfers');
         const data = await response.json();
@@ -6031,6 +6053,241 @@ async function loadDashboard() {
         console.error('Erreur lors du chargement du dashboard:', error);
         showAlert('Erreur lors du chargement du dashboard', 'danger');
     }
+}
+
+// === MODULE DE CREDIT POUR DIRECTEURS ===
+
+// Initialiser le module de crédit pour directeurs
+async function initDirectorCreditModule() {
+    const creditMenu = document.getElementById('credit-menu');
+    if (!creditMenu) return;
+    
+    // Vérifier si l'utilisateur a des permissions de crédit
+    if (currentUser && currentUser.role === 'directeur') {
+        try {
+            const response = await fetch('/api/director/crediteable-accounts');
+            const accounts = await response.json();
+            
+            if (accounts.length > 0) {
+                // Le directeur a des permissions, afficher le menu
+                creditMenu.style.display = '';
+                
+                // Configurer le gestionnaire de navigation
+                const navLink = creditMenu.querySelector('a');
+                if (navLink) {
+                    navLink.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        showSection('credit-account');
+                        loadDirectorCreditData();
+                    });
+                }
+                
+                // Initialiser le formulaire
+                setupDirectorCreditForm();
+            } else {
+                // Pas de permissions, masquer le menu
+                creditMenu.style.display = 'none';
+            }
+        } catch (error) {
+            console.error('Erreur vérification permissions crédit:', error);
+            creditMenu.style.display = 'none';
+        }
+    } else if (currentUser && (currentUser.role === 'directeur_general' || currentUser.role === 'pca')) {
+        // DG/PCA voient toujours le menu
+        creditMenu.style.display = '';
+        
+        const navLink = creditMenu.querySelector('a');
+        if (navLink) {
+            navLink.addEventListener('click', function(e) {
+                e.preventDefault();
+                showSection('credit-account');
+                loadDirectorCreditData();
+            });
+        }
+        
+        setupDirectorCreditForm();
+    } else {
+        creditMenu.style.display = 'none';
+    }
+}
+
+// Charger les données pour le module de crédit directeur
+async function loadDirectorCreditData() {
+    await loadDirectorCreditableAccounts();
+    await loadDirectorCreditHistory();
+    
+    // Initialiser la date du jour
+    const dateInput = document.getElementById('director-credit-date');
+    if (dateInput) {
+        dateInput.value = new Date().toISOString().split('T')[0];
+    }
+}
+
+// Charger les comptes que le directeur peut créditer
+async function loadDirectorCreditableAccounts() {
+    try {
+        const response = await fetch('/api/director/crediteable-accounts');
+        const accounts = await response.json();
+        
+        const accountSelect = document.getElementById('director-credit-account');
+        if (!accountSelect) return;
+        
+        accountSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
+        
+        accounts.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            
+            const typeBadge = account.account_type.charAt(0).toUpperCase() + account.account_type.slice(1);
+            const balance = parseInt(account.current_balance).toLocaleString('fr-FR');
+            
+            option.textContent = `${account.account_name} [${typeBadge}] (${balance} FCFA)`;
+            option.dataset.accountType = account.account_type;
+            option.dataset.balance = account.current_balance;
+            
+            accountSelect.appendChild(option);
+        });
+        
+        // Gestionnaire de changement de compte
+        accountSelect.addEventListener('change', function() {
+            const helpText = document.getElementById('director-credit-help');
+            const selectedOption = this.options[this.selectedIndex];
+            
+            if (selectedOption.value) {
+                const accountType = selectedOption.dataset.accountType;
+                const balance = parseInt(selectedOption.dataset.balance).toLocaleString('fr-FR');
+                
+                let helpMessage = `Solde actuel: ${balance} FCFA`;
+                
+                if (accountType === 'statut') {
+                    helpMessage += ' - ⚠️ Le crédit écrasera le solde existant';
+                }
+                
+                helpText.textContent = helpMessage;
+                helpText.style.display = 'block';
+            } else {
+                helpText.style.display = 'none';
+            }
+        });
+        
+        console.log(`Chargé ${accounts.length} comptes créditables pour ${currentUser.username}`);
+        
+    } catch (error) {
+        console.error('Erreur chargement comptes créditables:', error);
+        showNotification('Erreur lors du chargement des comptes', 'error');
+    }
+}
+
+// Charger l'historique des crédits du directeur
+async function loadDirectorCreditHistory() {
+    try {
+        const response = await fetch('/api/director/credit-history');
+        const history = await response.json();
+        
+        const tbody = document.getElementById('director-credit-history-tbody');
+        if (!tbody) return;
+        
+        tbody.innerHTML = '';
+        
+        if (history.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666;">Aucun crédit effectué</td></tr>';
+            return;
+        }
+        
+        history.forEach(credit => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${formatDate(credit.credit_date)}</td>
+                <td>${credit.account_name}</td>
+                <td><strong>${formatCurrency(credit.amount)}</strong></td>
+                <td>${credit.comment || '-'}</td>
+            `;
+            tbody.appendChild(row);
+        });
+        
+    } catch (error) {
+        console.error('Erreur chargement historique crédit:', error);
+    }
+}
+
+// Configurer le formulaire de crédit directeur
+function setupDirectorCreditForm() {
+    const form = document.getElementById('directorCreditForm');
+    if (!form || form.dataset.listenerAttached) return;
+    
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const accountId = document.getElementById('director-credit-account').value;
+        const amount = document.getElementById('director-credit-amount').value;
+        const creditDate = document.getElementById('director-credit-date').value;
+        const comment = document.getElementById('director-credit-comment').value;
+        
+        if (!accountId || !amount || !creditDate || !comment) {
+            showDirectorCreditNotification('Veuillez remplir tous les champs', 'error');
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/accounts/${accountId}/credit`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    amount: parseInt(amount),
+                    credit_date: creditDate,
+                    description: comment
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+                showDirectorCreditNotification(result.message, 'success');
+                
+                // Réinitialiser le formulaire
+                form.reset();
+                document.getElementById('director-credit-date').value = new Date().toISOString().split('T')[0];
+                document.getElementById('director-credit-help').style.display = 'none';
+                
+                // Recharger les données
+                await loadDirectorCreditData();
+                
+                // Mettre à jour les autres interfaces si nécessaire
+                if (typeof loadAccounts === 'function') {
+                    await loadAccounts();
+                }
+                
+                if (typeof loadDashboard === 'function') {
+                    const dashboardSection = document.getElementById('dashboard-section');
+                    if (dashboardSection && dashboardSection.classList.contains('active')) {
+                        await loadDashboard();
+                    }
+                }
+            } else {
+                showDirectorCreditNotification(result.error || 'Erreur lors du crédit', 'error');
+            }
+            
+        } catch (error) {
+            console.error('Erreur crédit directeur:', error);
+            showDirectorCreditNotification('Erreur de connexion', 'error');
+        }
+    });
+    
+    form.dataset.listenerAttached = 'true';
+}
+
+// Afficher une notification dans le module crédit directeur
+function showDirectorCreditNotification(message, type = 'info') {
+    const notification = document.getElementById('director-credit-notification');
+    if (!notification) return;
+    
+    notification.textContent = message;
+    notification.className = `notification ${type}`;
+    notification.style.display = 'block';
+    
+    setTimeout(() => {
+        notification.style.display = 'none';
+    }, 5000);
 }
 
 // ... existing code ...

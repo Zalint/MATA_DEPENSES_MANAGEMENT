@@ -3092,9 +3092,9 @@ app.post('/api/accounts/:accountId/credit-permissions', requireAdminAuth, async 
             return res.status(404).json({ error: 'Directeur non trouvé' });
         }
 
-        // Ajouter la permission
+        // Ajouter la permission (gérer les doublons avec ON CONFLICT)
         await pool.query(
-            'INSERT INTO account_credit_permissions (account_id, user_id, granted_by) VALUES ($1, $2, $3)',
+            'INSERT INTO account_credit_permissions (account_id, user_id, granted_by) VALUES ($1, $2, $3) ON CONFLICT (account_id, user_id) DO NOTHING',
             [accountId, user_id, granted_by]
         );
 
@@ -3143,14 +3143,75 @@ app.get('/api/accounts/:accountId/credit-permissions', requireAuth, async (req, 
     }
 });
 
-// Modifier la vérification des permissions de crédit dans la route de crédit
+// Route pour récupérer les comptes qu'un directeur peut créditer
+app.get('/api/director/crediteable-accounts', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+        
+        let query = `
+            SELECT a.id, a.account_name, COALESCE(a.account_type, 'classique') as account_type,
+                   a.current_balance, a.total_credited, u.full_name as user_name
+            FROM accounts a
+            LEFT JOIN users u ON a.user_id = u.id
+            WHERE a.is_active = true
+        `;
+        let params = [];
+        
+        if (userRole === 'directeur_general' || userRole === 'pca') {
+            // DG et PCA voient tous les comptes
+            query += ` ORDER BY a.account_name`;
+        } else if (userRole === 'directeur') {
+            // Directeurs voient seulement les comptes pour lesquels ils ont une permission
+            query += ` AND EXISTS (
+                SELECT 1 FROM account_credit_permissions acp 
+                WHERE acp.account_id = a.id AND acp.user_id = $1
+            ) ORDER BY a.account_name`;
+            params.push(userId);
+        } else {
+            // Autres rôles n'ont pas accès
+            return res.json([]);
+        }
+        
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération comptes créditables:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer l'historique des crédits d'un directeur
+app.get('/api/director/credit-history', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.user.id;
+        
+        const result = await pool.query(`
+            SELECT sch.*, a.account_name
+            FROM special_credit_history sch
+            JOIN accounts a ON sch.account_id = a.id
+            WHERE sch.credited_by = $1
+            ORDER BY sch.created_at DESC
+            LIMIT 20
+        `, [userId]);
+        
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération historique directeur:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route de crédit avec système de permissions amélioré
 app.post('/api/accounts/:id/credit', requireAuth, async (req, res) => {
     try {
         const accountId = req.params.id;
+        const { amount, description, credit_date } = req.body;
         const userId = req.session.user.id;
         const userRole = req.session.user.role;
+        const finalCreditDate = credit_date || new Date().toISOString().split('T')[0];
 
-        // Vérifier le type de compte et les permissions
+        // Vérifier que le compte existe
         const accountResult = await pool.query(
             'SELECT * FROM accounts WHERE id = $1',
             [accountId]
@@ -3161,34 +3222,51 @@ app.post('/api/accounts/:id/credit', requireAuth, async (req, res) => {
         }
 
         const account = accountResult.rows[0];
-        let canCredit = false;
+        
+        // Utiliser la fonction PostgreSQL pour vérifier les permissions
+        const permissionCheck = await pool.query(
+            'SELECT can_user_credit_account($1, $2) as can_credit',
+            [userId, accountId]
+        );
 
-        switch (account.account_type) {
-            case 'classique':
-                // Vérifier si l'utilisateur est DG/PCA ou a une permission spéciale
-                canCredit = userRole === 'directeur_general' || userRole === 'pca' ||
-                    (await pool.query(
-                        'SELECT 1 FROM account_credit_permissions WHERE account_id = $1 AND user_id = $2',
-                        [accountId, userId]
-                    )).rows.length > 0;
-                break;
-            case 'partenaire':
-                canCredit = true; // Tout le monde peut créditer
-                break;
-            case 'statut':
-            case 'Ajustement':
-                canCredit = userRole === 'directeur_general' || userRole === 'pca';
-                break;
-        }
-
-        if (!canCredit) {
+        if (!permissionCheck.rows[0].can_credit) {
             return res.status(403).json({ error: 'Vous n\'avez pas la permission de créditer ce compte' });
         }
 
-        // Continuer avec la logique de crédit existante...
+        await pool.query('BEGIN');
+
+        // Mise à jour du compte selon le type
+        if (account.account_type === 'statut') {
+            // Pour les comptes statut, écraser le solde existant
+            await pool.query(
+                'UPDATE accounts SET current_balance = $1, total_credited = $1, total_spent = 0, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+                [parseInt(amount), accountId]
+            );
+        } else {
+            // Pour les autres types, ajouter au solde existant
+            await pool.query(
+                'UPDATE accounts SET current_balance = current_balance + $1, total_credited = total_credited + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+                [parseInt(amount), accountId]
+            );
+        }
+
+        // Enregistrer dans l'historique spécial
+        await pool.query(
+            'INSERT INTO special_credit_history (account_id, credited_by, amount, comment, credit_date, account_type, is_balance_override) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+            [accountId, userId, parseInt(amount), description || 'Crédit de compte', finalCreditDate, account.account_type, account.account_type === 'statut']
+        );
+
+        await pool.query('COMMIT');
+
+        const message = account.account_type === 'statut' 
+            ? 'Compte statut mis à jour avec succès (solde écrasé)' 
+            : 'Compte crédité avec succès';
+            
+        res.json({ message, amount: parseInt(amount), account_type: account.account_type });
     } catch (error) {
-        console.error('Erreur lors de la vérification des permissions:', error);
-        res.status(500).json({ error: 'Erreur lors de la vérification des permissions' });
+        await pool.query('ROLLBACK');
+        console.error('Erreur crédit compte:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
