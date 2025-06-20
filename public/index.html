@@ -101,6 +101,11 @@
                             <i class="fas fa-exchange-alt"></i> Transfert
                         </a>
                     </li>
+                    <li id="stock-menu" style="display: none;">
+                        <a href="#" data-section="stock-soir" class="nav-link">
+                            <i class="fas fa-warehouse"></i> Gestion Stock
+                        </a>
+                    </li>
                 </ul>
             </aside>
 
@@ -158,6 +163,17 @@
                             <div class="stat-content">
                                 <h3>Cash Burn du Mois</h3>
                                 <p class="stat-value" id="monthly-burn">0 FCFA</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-boxes"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Stock Point de Vente</h3>
+                                <p class="stat-value" id="stock-total">0</p>
+                                <small class="stat-period" id="stock-date">Dernière date</small>
                             </div>
                         </div>
                     </div>
@@ -1036,6 +1052,101 @@
                     </div>
                 </section>-->
 
+                <!-- Section Gestion Stock -->
+                <section id="stock-soir-section" class="section">
+                    <h2>Gestion des Stocks du Soir</h2>
+                    
+                    <!-- Upload de fichier JSON -->
+                    <div class="stock-upload-card">
+                        <h3><i class="fas fa-upload"></i> Importer un fichier de réconciliation</h3>
+                        <form id="stock-upload-form" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label for="reconciliation-file">Fichier JSON de réconciliation</label>
+                                <input type="file" id="reconciliation-file" name="reconciliation" accept=".json,application/json" required>
+                                <small class="form-help">Sélectionnez un fichier JSON avec la structure de réconciliation</small>
+                            </div>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-upload"></i> Importer les données
+                            </button>
+                        </form>
+                        <div id="upload-result" class="form-message"></div>
+                    </div>
+
+                    <!-- Filtres et actions -->
+                    <div class="stock-controls">
+                        <div class="stock-filters">
+                            <div class="form-group">
+                                <label for="stock-date-filter">Date</label>
+                                <select id="stock-date-filter">
+                                    <option value="">Toutes les dates</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="stock-point-filter">Point de vente</label>
+                                <select id="stock-point-filter">
+                                    <option value="">Tous les points</option>
+                                </select>
+                            </div>
+                            <button id="filter-stock" class="btn btn-secondary">
+                                <i class="fas fa-filter"></i> Filtrer
+                            </button>
+                            <button id="refresh-stock" class="btn btn-secondary">
+                                <i class="fas fa-sync-alt"></i> Actualiser
+                            </button>
+                        </div>
+                        <div class="stock-actions">
+                            <button id="add-stock-btn" class="btn btn-success">
+                                <i class="fas fa-plus"></i> Ajouter
+                            </button>
+                            <button id="view-stats-btn" class="btn btn-info">
+                                <i class="fas fa-chart-bar"></i> Statistiques
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Tableau des données de stock -->
+                    <div class="table-container">
+                        <table id="stock-table" class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Point de Vente</th>
+                                    <th>Produit</th>
+                                    <th>Stock Matin</th>
+                                    <th>Stock Soir</th>
+                                    <th>Transfert</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stock-tbody">
+                                <!-- Les données seront chargées ici -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Statistiques par point de vente -->
+                    <div id="stock-stats" class="stock-stats" style="display: none;">
+                        <h3>Statistiques par Point de Vente</h3>
+                        <div class="table-container">
+                            <table id="stats-table" class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Point de Vente</th>
+                                        <th>Nb Produits</th>
+                                        <th>Total Stock Matin</th>
+                                        <th>Total Stock Soir</th>
+                                        <th>Total Transfert</th>
+                                        <th>Total Ventes Théoriques</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stats-tbody">
+                                    <!-- Les statistiques seront chargées ici -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
                 <!-- Section Transfert -->
                 <section id="transfert-section" class="section">
                     <h2>Transfert de Solde</h2>
@@ -1176,6 +1287,68 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Annuler</button>
                     <button type="submit" class="btn btn-primary">Modifier la Dépense</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal pour ajouter/modifier une entrée de stock -->
+    <div id="stock-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="stock-modal-title">Ajouter une entrée de stock</h2>
+                <span class="close" onclick="closeStockModal()">&times;</span>
+            </div>
+            <form id="stock-form">
+                <input type="hidden" id="stock-id" name="stock_id">
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="stock-date">Date</label>
+                        <input type="date" id="stock-date" name="date" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="stock-point-vente">Point de Vente</label>
+                        <input type="text" id="stock-point-vente" name="point_de_vente" required placeholder="Ex: Mbao, O.Foire, Keur Massar...">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="stock-produit">Produit</label>
+                        <input type="text" id="stock-produit" name="produit" required placeholder="Ex: Boeuf, Poulet, Tablette...">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="stock-matin">Stock Matin (FCFA)</label>
+                        <input type="number" id="stock-matin" name="stock_matin" step="0.01" min="0" placeholder="0">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="stock-soir">Stock Soir (FCFA)</label>
+                        <input type="number" id="stock-soir" name="stock_soir" step="0.01" min="0" placeholder="0">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="stock-transfert">Transfert (FCFA)</label>
+                        <input type="number" id="stock-transfert" name="transfert" step="0.01" placeholder="0">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="stock-vente-theorique">Vente Théorique (calculée)</label>
+                        <input type="number" id="stock-vente-theorique" readonly placeholder="Calculé automatiquement">
+                        <small class="form-help">Stock Matin - Stock Soir + Transfert</small>
+                    </div>
+                </div>
+                
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="closeStockModal()">Annuler</button>
+                    <button type="submit" class="btn btn-primary" id="stock-submit-btn">Ajouter</button>
                 </div>
             </form>
         </div>

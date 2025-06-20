@@ -50,7 +50,8 @@ const fileFilter = (req, file, cb) => {
         'image/jpeg', 'image/jpg', 'image/png',
         'application/pdf',
         'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/json', 'text/json'
     ];
     
     if (allowedTypes.includes(file.mimetype)) {
@@ -98,9 +99,57 @@ const requireAuth = (req, res, next) => {
 };
 
 const requireAdminAuth = (req, res, next) => {
+    console.log('🔐 SERVER: requireAdminAuth appelé pour:', req.method, req.path);
+    
+    // Debug: Log all headers and query params
+    console.log('🔍 DEBUG: Headers x-api-key:', req.headers['x-api-key']);
+    console.log('🔍 DEBUG: Headers authorization:', req.headers['authorization']);
+    console.log('🔍 DEBUG: Query api_key:', req.query.api_key);
+    
+    // Vérifier d'abord si une clé API est fournie
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.api_key;
+    
+    console.log('🔍 DEBUG: API Key extracted:', apiKey ? 'YES' : 'NO');
+    if (apiKey) {
+        console.log('🔍 DEBUG: API Key value:', apiKey);
+    }
+    
+    if (apiKey) {
+        // Authentification par clé API
+        const validApiKey = process.env.API_KEY || '4f8d9a2b6c7e8f1a3b5c9d0e2f4g6h7i';
+        console.log('🔍 DEBUG: Valid API Key:', validApiKey);
+        console.log('🔍 DEBUG: API Keys match:', apiKey === validApiKey);
+        
+        if (apiKey === validApiKey) {
+            // Créer un utilisateur virtuel admin pour l'API
+            req.session = req.session || {};
+            req.session.user = {
+                id: 0,
+                username: 'api_user',
+                role: 'admin',
+                full_name: 'API User'
+            };
+            req.user = req.session.user; // Pour les logs
+            console.log('🔑 SERVER: Authentification par clé API réussie');
+            return next();
+        } else {
+            console.log('❌ SERVER: Clé API invalide fournie:', apiKey.substring(0, 8) + '...');
+            return res.status(401).json({ error: 'Clé API invalide' });
+        }
+    }
+    
+    // Authentification par session (existante)
+    console.log('🔐 SERVER: Session user:', req.session?.user);
+    console.log('🔐 SERVER: User role:', req.session?.user?.role);
+    
     if (req.session.user && (['directeur_general', 'pca', 'admin'].includes(req.session.user.role))) {
+        console.log('✅ SERVER: Authentification par session réussie');
+        req.user = req.session.user; // Ajouter l'utilisateur à req pour les logs
         next();
     } else {
+        console.log('❌ SERVER: Accès refusé - Privilèges insuffisants');
+        console.log('❌ SERVER: User présent:', !!req.session.user);
+        console.log('❌ SERVER: Role présent:', req.session?.user?.role);
         res.status(403).json({ error: 'Accès refusé - Privilèges insuffisants' });
     }
 };
@@ -818,6 +867,56 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
     } catch (error) {
         console.error('Erreur récupération cartes statistiques:', error);
         res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer les données de stock pour le dashboard
+app.get('/api/dashboard/stock-summary', requireAuth, async (req, res) => {
+    try {
+        // Récupérer la dernière date disponible dans la table stock_mata
+        const latestDateQuery = `
+            SELECT MAX(date) as latest_date 
+            FROM stock_mata 
+            WHERE date IS NOT NULL
+        `;
+        const latestDateResult = await pool.query(latestDateQuery);
+        
+        if (!latestDateResult.rows[0].latest_date) {
+            return res.json({
+                totalStock: 0,
+                latestDate: null,
+                message: 'Aucune donnée de stock disponible'
+            });
+        }
+        
+        const latestDate = latestDateResult.rows[0].latest_date;
+        
+        // Calculer la somme des stocks du soir pour la dernière date
+        const stockSummaryQuery = `
+            SELECT 
+                COALESCE(SUM(stock_soir), 0) as total_stock,
+                COUNT(*) as total_entries,
+                COUNT(DISTINCT point_de_vente) as total_points,
+                COUNT(DISTINCT produit) as total_products
+            FROM stock_mata 
+            WHERE date = $1
+        `;
+        const stockSummaryResult = await pool.query(stockSummaryQuery, [latestDate]);
+        
+        const summary = stockSummaryResult.rows[0];
+        
+        res.json({
+            totalStock: parseFloat(summary.total_stock),
+            latestDate: latestDate,
+            totalEntries: parseInt(summary.total_entries),
+            totalPoints: parseInt(summary.total_points),
+            totalProducts: parseInt(summary.total_products),
+            formattedDate: new Date(latestDate).toLocaleDateString('fr-FR')
+        });
+        
+    } catch (error) {
+        console.error('Erreur récupération résumé stock:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la récupération des données de stock' });
     }
 });
 
@@ -3388,6 +3487,452 @@ app.delete('/api/accounts/:accountId/credit-permissions/:userId', requireAdminAu
     } catch (error) {
         console.error('Erreur lors du retrait de la permission:', error);
         res.status(500).json({ error: 'Erreur lors du retrait de la permission' });
+    }
+});
+
+// =====================================================
+// STOCK SOIR ROUTES
+// =====================================================
+
+// Route pour uploader un fichier JSON de réconciliation et créer les données de stock
+app.post('/api/stock-mata/upload', requireAdminAuth, upload.single('reconciliation'), async (req, res) => {
+    try {
+        console.log('🚀 SERVER: Route /api/stock-mata/upload appelée');
+        console.log('🚀 SERVER: Headers reçus:', req.headers);
+        console.log('🚀 SERVER: User info:', {
+            user: req.user?.username,
+            role: req.user?.role,
+            id: req.user?.id
+        });
+        
+        console.log('🔍 SERVER: Début de l\'upload de fichier JSON');
+        console.log('📂 SERVER: Fichier reçu:', req.file);
+        console.log('📂 SERVER: Body reçu:', req.body);
+        
+        if (!req.file) {
+            console.log('❌ SERVER: Aucun fichier fourni');
+            return res.status(400).json({ error: 'Aucun fichier fourni' });
+        }
+
+        console.log('📄 SERVER: Chemin du fichier:', req.file.path);
+        console.log('📄 SERVER: Nom original:', req.file.originalname);
+        console.log('📄 SERVER: Taille:', req.file.size, 'bytes');
+        console.log('📄 SERVER: Type MIME:', req.file.mimetype);
+
+        // Lire le fichier JSON
+        console.log('📖 SERVER: Lecture du fichier...');
+        const fileContent = fs.readFileSync(req.file.path, 'utf8');
+        console.log('📄 SERVER: Contenu lu, taille:', fileContent.length, 'caractères');
+        console.log('📄 SERVER: Premiers 200 caractères:', fileContent.substring(0, 200));
+        
+        let reconciliationData;
+
+        try {
+            reconciliationData = JSON.parse(fileContent);
+            console.log('✅ JSON parsé avec succès');
+        } catch (parseError) {
+            console.log('❌ Erreur parsing JSON:', parseError.message);
+            fs.unlinkSync(req.file.path); // Supprimer le fichier temporaire
+            return res.status(400).json({ error: 'Format JSON invalide' });
+        }
+
+        // Vérifier la structure du JSON
+        console.log('🔍 Validation de la structure JSON:');
+        console.log('- Est un array:', Array.isArray(reconciliationData));
+        console.log('- Premier élément existe:', !!reconciliationData[0]);
+        console.log('- Success property:', reconciliationData[0]?.success);
+        console.log('- Data exists:', !!reconciliationData[0]?.data);
+        console.log('- Details exists:', !!reconciliationData[0]?.data?.details);
+        
+        if (!Array.isArray(reconciliationData) || !reconciliationData[0] || 
+            !reconciliationData[0].success || !reconciliationData[0].data || 
+            !reconciliationData[0].data.details) {
+            console.log('❌ Structure JSON invalide');
+            fs.unlinkSync(req.file.path);
+            return res.status(400).json({ error: 'Structure JSON invalide' });
+        }
+        
+        console.log('✅ Structure JSON validée');
+
+        const data = reconciliationData[0].data;
+        const date = data.date; // Format: "18-06-2025"
+        const details = data.details;
+
+        // Convertir la date au format PostgreSQL (YYYY-MM-DD)
+        const dateParts = date.split('-');
+        const formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
+
+        // Vérifier s'il y a des données existantes pour cette date
+        const existingDataQuery = await pool.query(`
+                    SELECT DISTINCT point_de_vente, produit, stock_matin, stock_soir, transfert
+        FROM stock_mata 
+            WHERE date = $1
+            ORDER BY point_de_vente, produit
+        `, [formattedDate]);
+
+        const existingRecords = existingDataQuery.rows;
+        
+        // Préparer la liste des nouveaux enregistrements
+        const newRecords = [];
+        for (const pointVente in details) {
+            const pointData = details[pointVente];
+            for (const produit in pointData) {
+                if (produit === 'Bovin' || produit === 'Non spécifié') {
+                    continue;
+                }
+                const productData = pointData[produit];
+                newRecords.push({
+                    point_de_vente: pointVente,
+                    produit: produit,
+                    stock_matin: productData.stockMatin || 0,
+                    stock_soir: productData.stockSoir || 0,
+                    transfert: productData.transferts || 0
+                });
+            }
+        }
+
+        // Si des données existent déjà pour cette date, retourner un avertissement
+        if (existingRecords.length > 0) {
+            fs.unlinkSync(req.file.path);
+            return res.status(409).json({ 
+                error: 'duplicate_data',
+                message: 'Des données existent déjà pour cette date',
+                date: formattedDate,
+                existingRecords: existingRecords.length,
+                newRecords: newRecords.length,
+                existingData: existingRecords
+            });
+        }
+
+        await pool.query('BEGIN');
+
+        let insertedRecords = 0;
+        let updatedRecords = 0;
+
+        // Parcourir chaque point de vente
+        for (const pointVente in details) {
+            const pointData = details[pointVente];
+
+            // Parcourir chaque produit du point de vente
+            for (const produit in pointData) {
+                // Exclure "Bovin" et "Non spécifié"
+                if (produit === 'Bovin' || produit === 'Non spécifié') {
+                    continue;
+                }
+
+                const productData = pointData[produit];
+                const stockMatin = productData.stockMatin || 0;
+                const stockSoir = productData.stockSoir || 0;
+                const transfert = productData.transferts || 0;
+
+                // Insérer ou mettre à jour les données
+                const result = await pool.query(`
+                    INSERT INTO stock_mata (date, point_de_vente, produit, stock_matin, stock_soir, transfert)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    ON CONFLICT (date, point_de_vente, produit)
+                    DO UPDATE SET 
+                        stock_matin = EXCLUDED.stock_matin,
+                        stock_soir = EXCLUDED.stock_soir,
+                        transfert = EXCLUDED.transfert,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING (xmax = 0) AS inserted
+                `, [formattedDate, pointVente, produit, stockMatin, stockSoir, transfert]);
+
+                if (result.rows[0].inserted) {
+                    insertedRecords++;
+                } else {
+                    updatedRecords++;
+                }
+            }
+        }
+
+        await pool.query('COMMIT');
+
+        // Supprimer le fichier temporaire
+        fs.unlinkSync(req.file.path);
+
+        res.json({
+            message: 'Données de stock importées avec succès',
+            date: formattedDate,
+            insertedRecords,
+            updatedRecords,
+            totalRecords: insertedRecords + updatedRecords
+        });
+
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('Erreur lors de l\'import des données de stock:', error);
+        
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        
+        res.status(500).json({ error: 'Erreur lors de l\'import des données' });
+    }
+});
+
+// Route pour forcer l'import après confirmation des doublons
+app.post('/api/stock-mata/force-upload', requireAdminAuth, upload.single('reconciliation'), async (req, res) => {
+    try {
+        console.log('🔍 DEBUG: Import forcé après confirmation');
+        
+        if (!req.file) {
+            console.log('❌ Aucun fichier fourni pour import forcé');
+            return res.status(400).json({ error: 'Aucun fichier fourni' });
+        }
+
+        // Lire le fichier JSON
+        const fileContent = fs.readFileSync(req.file.path, 'utf8');
+        let reconciliationData;
+
+        try {
+            reconciliationData = JSON.parse(fileContent);
+            console.log('✅ JSON parsé avec succès pour import forcé');
+        } catch (parseError) {
+            console.log('❌ Erreur parsing JSON pour import forcé:', parseError.message);
+            fs.unlinkSync(req.file.path);
+            return res.status(400).json({ error: 'Format JSON invalide' });
+        }
+
+        // Vérifier la structure du JSON
+        if (!Array.isArray(reconciliationData) || !reconciliationData[0] || 
+            !reconciliationData[0].success || !reconciliationData[0].data || 
+            !reconciliationData[0].data.details) {
+            console.log('❌ Structure JSON invalide pour import forcé');
+            fs.unlinkSync(req.file.path);
+            return res.status(400).json({ error: 'Structure JSON invalide' });
+        }
+
+        const data = reconciliationData[0].data;
+        const date = data.date;
+        const details = data.details;
+
+        // Convertir la date au format PostgreSQL (YYYY-MM-DD)
+        const dateParts = date.split('-');
+        const formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`;
+
+        console.log('🔄 Import forcé - Suppression des données existantes pour la date:', formattedDate);
+
+        await pool.query('BEGIN');
+
+        // Supprimer toutes les données existantes pour cette date
+        const deleteResult = await pool.query('DELETE FROM stock_mata WHERE date = $1', [formattedDate]);
+        console.log(`🗑️ ${deleteResult.rowCount} enregistrements supprimés`);
+
+        let insertedRecords = 0;
+
+        // Parcourir chaque point de vente et insérer les nouvelles données
+        for (const pointVente in details) {
+            const pointData = details[pointVente];
+
+            for (const produit in pointData) {
+                if (produit === 'Bovin' || produit === 'Non spécifié') {
+                    continue;
+                }
+
+                const productData = pointData[produit];
+                const stockMatin = productData.stockMatin || 0;
+                const stockSoir = productData.stockSoir || 0;
+                const transfert = productData.transferts || 0;
+
+                await pool.query(`
+                    INSERT INTO stock_mata (date, point_de_vente, produit, stock_matin, stock_soir, transfert)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                `, [formattedDate, pointVente, produit, stockMatin, stockSoir, transfert]);
+
+                insertedRecords++;
+            }
+        }
+
+        await pool.query('COMMIT');
+        console.log(`✅ Import forcé terminé: ${insertedRecords} nouveaux enregistrements`);
+
+        // Supprimer le fichier temporaire
+        fs.unlinkSync(req.file.path);
+
+        res.json({
+            message: 'Données remplacées avec succès',
+            date: formattedDate,
+            deletedRecords: deleteResult.rowCount,
+            insertedRecords,
+            totalRecords: insertedRecords
+        });
+
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('Erreur lors de l\'import forcé:', error);
+        
+        if (req.file && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        
+        res.status(500).json({ error: 'Erreur lors de l\'import forcé' });
+    }
+});
+
+// Route pour récupérer les données de stock par date
+app.get('/api/stock-mata', requireAdminAuth, async (req, res) => {
+    try {
+        const { date } = req.query;
+        
+        let query = 'SELECT * FROM stock_mata';
+        let params = [];
+        
+        if (date) {
+            query += ' WHERE date = $1';
+            params.push(date);
+        }
+        
+        query += ' ORDER BY point_de_vente, produit';
+        
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération données stock:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer les dates disponibles
+app.get('/api/stock-mata/dates', requireAdminAuth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT DISTINCT date 
+            FROM stock_mata 
+            ORDER BY date DESC
+        `);
+        res.json(result.rows.map(row => row.date));
+    } catch (error) {
+        console.error('Erreur récupération dates stock:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer les statistiques par point de vente
+app.get('/api/stock-mata/statistiques', requireAdminAuth, async (req, res) => {
+    try {
+        const { date } = req.query;
+        
+        let query = `
+            SELECT 
+                point_de_vente,
+                COUNT(*) as nombre_produits,
+                SUM(stock_matin) as total_stock_matin,
+                SUM(stock_soir) as total_stock_soir,
+                SUM(transfert) as total_transfert,
+                SUM(stock_matin - stock_soir + transfert) as total_ventes_theoriques
+            FROM stock_mata
+        `;
+        let params = [];
+        
+        if (date) {
+            query += ' WHERE date = $1';
+            params.push(date);
+        }
+        
+        query += ' GROUP BY point_de_vente ORDER BY point_de_vente';
+        
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération statistiques stock:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour ajouter une nouvelle entrée de stock manuellement
+app.post('/api/stock-mata', requireAdminAuth, async (req, res) => {
+    try {
+        const { date, point_de_vente, produit, stock_matin, stock_soir, transfert } = req.body;
+        
+        if (!date || !point_de_vente || !produit) {
+            return res.status(400).json({ error: 'Date, point de vente et produit sont obligatoires' });
+        }
+
+        const result = await pool.query(`
+            INSERT INTO stock_mata (date, point_de_vente, produit, stock_matin, stock_soir, transfert)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+        `, [date, point_de_vente, produit, stock_matin || 0, stock_soir || 0, transfert || 0]);
+
+        res.json(result.rows[0]);
+    } catch (error) {
+        if (error.code === '23505') { // Violation de contrainte unique
+            res.status(409).json({ error: 'Une entrée existe déjà pour cette date, ce point de vente et ce produit' });
+        } else {
+            console.error('Erreur ajout stock:', error);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    }
+});
+
+// Route pour modifier une entrée de stock
+app.put('/api/stock-mata/:id', requireAdminAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { date, point_de_vente, produit, stock_matin, stock_soir, transfert } = req.body;
+        
+        if (!date || !point_de_vente || !produit) {
+            return res.status(400).json({ error: 'Date, point de vente et produit sont obligatoires' });
+        }
+
+        const result = await pool.query(`
+            UPDATE stock_mata 
+            SET date = $1, point_de_vente = $2, produit = $3, 
+                stock_matin = $4, stock_soir = $5, transfert = $6,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = $7
+            RETURNING *
+        `, [date, point_de_vente, produit, stock_matin || 0, stock_soir || 0, transfert || 0, id]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Entrée non trouvée' });
+        }
+
+        res.json(result.rows[0]);
+    } catch (error) {
+        if (error.code === '23505') { // Violation de contrainte unique
+            res.status(409).json({ error: 'Une entrée existe déjà pour cette date, ce point de vente et ce produit' });
+        } else {
+            console.error('Erreur modification stock:', error);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    }
+});
+
+// Route pour supprimer une entrée de stock
+app.delete('/api/stock-mata/:id', requireAdminAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const result = await pool.query('DELETE FROM stock_mata WHERE id = $1 RETURNING *', [id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Entrée non trouvée' });
+        }
+
+        res.json({ message: 'Entrée supprimée avec succès', deleted: result.rows[0] });
+    } catch (error) {
+        console.error('Erreur suppression stock:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer une entrée spécifique
+app.get('/api/stock-mata/:id', requireAdminAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const result = await pool.query('SELECT * FROM stock_mata WHERE id = $1', [id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Entrée non trouvée' });
+        }
+
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Erreur récupération stock:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 

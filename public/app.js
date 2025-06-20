@@ -3,6 +3,47 @@ let currentUser = null;
 let categories = [];
 let users = [];
 
+// Configuration dynamique du serveur
+function getServerConfig() {
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    const port = window.location.port;
+    
+    // Détection automatique de l'environnement
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
+        // Environnement local
+        const baseUrl = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
+        return {
+            environment: 'development',
+            baseUrl: baseUrl,
+            apiUrl: `${baseUrl}/api`
+        };
+    } else {
+        // Environnement de production
+        return {
+            environment: 'production', 
+            baseUrl: 'https://mata-depenses-management.onrender.com',
+            apiUrl: 'https://mata-depenses-management.onrender.com/api'
+        };
+    }
+}
+
+// Configuration globale
+const SERVER_CONFIG = getServerConfig();
+console.log('🌍 Environment detected:', SERVER_CONFIG.environment);
+console.log('🔗 Base URL:', SERVER_CONFIG.baseUrl);
+console.log('🔧 API URL:', SERVER_CONFIG.apiUrl);
+
+// Fonction utilitaire pour construire les URLs d'API
+function apiUrl(endpoint) {
+    // Si l'endpoint commence déjà par /api, l'utiliser tel quel (compatibilité)
+    if (endpoint.startsWith('/api')) {
+        return SERVER_CONFIG.baseUrl + endpoint;
+    }
+    // Sinon, construire l'URL complète
+    return SERVER_CONFIG.apiUrl + '/' + endpoint.replace(/^\//, '');
+}
+
 // Utilitaires
 function formatCurrency(amount) {
     return new Intl.NumberFormat('fr-FR', {
@@ -38,7 +79,7 @@ function showNotification(message, type = 'info') {
 // Gestion de l'authentification
 async function login(username, password) {
     try {
-        const response = await fetch('/api/login', {
+        const response = await fetch(apiUrl('/api/login'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
@@ -61,7 +102,7 @@ async function login(username, password) {
 
 async function logout() {
     try {
-        await fetch('/api/logout', { method: 'POST' });
+        await fetch(apiUrl('/api/logout'), { method: 'POST' });
         currentUser = null;
         showLogin();
         showNotification('Déconnexion réussie', 'info');
@@ -97,11 +138,12 @@ function showApp() {
     if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         document.getElementById('admin-menu').style.display = 'block';
         document.getElementById('admin-users-menu').style.display = 'block';
+        document.getElementById('stock-menu').style.display = 'block';
         document.getElementById('user-column').style.display = 'table-cell';
     }
 }
 
-function showSection(sectionName) {
+async function showSection(sectionName) {
     // Masquer toutes les sections
     document.querySelectorAll('.section').forEach(section => {
         section.classList.remove('active');
@@ -154,6 +196,9 @@ function showSection(sectionName) {
         case 'transfert':
             showTransfertMenuIfAllowed();
             break;
+        case 'stock-soir':
+            await initStockModule();
+            break;
     }
 }
 
@@ -197,7 +242,7 @@ async function loadInitialData() {
 
 async function loadCategories() {
     try {
-        const response = await fetch('/api/categories');
+        const response = await fetch(apiUrl('/api/categories'));
         const categoriesData = await response.json();
         
         // Charger les types de dépenses
@@ -6270,8 +6315,42 @@ async function loadDashboardData() {
         // Mettre à jour les cartes de statistiques
         await updateStatsCards(startDate, endDate);
         
+        // Charger les données de stock
+        await loadStockSummary();
+        
     } catch (error) {
         console.error('Erreur chargement dashboard:', error);
+    }
+}
+
+// Fonction pour charger le résumé du stock
+async function loadStockSummary() {
+    try {
+        const response = await fetch(apiUrl('/api/dashboard/stock-summary'));
+        const stockData = await response.json();
+        
+        const stockTotalElement = document.getElementById('stock-total');
+        const stockDateElement = document.getElementById('stock-date');
+        
+        if (stockTotalElement && stockDateElement) {
+            if (stockData.totalStock > 0) {
+                stockTotalElement.textContent = stockData.totalStock.toLocaleString('fr-FR');
+                stockDateElement.textContent = `(${stockData.formattedDate})`;
+            } else {
+                stockTotalElement.textContent = '0';
+                stockDateElement.textContent = stockData.message || 'Aucune donnée';
+            }
+        }
+        
+    } catch (error) {
+        console.error('Erreur chargement résumé stock:', error);
+        const stockTotalElement = document.getElementById('stock-total');
+        const stockDateElement = document.getElementById('stock-date');
+        
+        if (stockTotalElement && stockDateElement) {
+            stockTotalElement.textContent = 'Erreur';
+            stockDateElement.textContent = 'Données indisponibles';
+        }
     }
 }
 
@@ -6688,3 +6767,485 @@ async function resetAccountAdmin(accountId) {
         showNotification('Erreur lors de la remise à zéro du compte', 'error');
     }
 }
+
+// =====================================================
+// GESTION DES STOCKS
+// =====================================================
+
+let currentStockData = [];
+let stockFilters = {
+    date: '',
+    pointDeVente: ''
+};
+
+// Variables pour le tri
+let stockSortField = 'date';
+let stockSortDirection = 'desc';
+
+// Initialiser le module de gestion des stocks
+async function initStockModule() {
+    console.log('🏭 CLIENT: Initialisation du module de gestion des stocks');
+    console.log('🏭 CLIENT: Vérification de la présence des éléments DOM...');
+    
+    // Vérifier les éléments critiques
+    const stockSection = document.getElementById('stock-soir-section');
+    const uploadForm = document.getElementById('stock-upload-form');
+    const fileInput = document.getElementById('reconciliation-file');
+    
+    console.log("🏭 CLIENT: Section stock-soir:", stockSection ? '✅ Trouvée' : '❌ Manquante');
+    console.log("🏭 CLIENT: Formulaire upload:", uploadForm ? '✅ Trouvé' : '❌ Manquant');
+    console.log("🏭 CLIENT: Input fichier:", fileInput ? '✅ Trouvé' : '❌ Manquant');
+    
+    // Assurez-vous que les écouteurs ne sont pas ajoutés plusieurs fois
+    if (uploadForm && !uploadForm.dataset.initialized) {
+        console.log('🏭 CLIENT: Configuration des event listeners...');
+        setupStockEventListeners();
+        uploadForm.dataset.initialized = 'true';
+        console.log('🏭 CLIENT: Event listeners configurés et marqués comme initialisés');
+    } else if (uploadForm) {
+        console.log('⚠️ CLIENT: Module déjà initialisé');
+    }
+    
+    try {
+        console.log('🏭 CLIENT: Chargement des données...');
+        await loadStockData();
+        
+        console.log('🏭 CLIENT: Chargement des filtres...');
+        await loadStockFilters();
+        
+        console.log('✅ CLIENT: Module de gestion des stocks initialisé avec succès');
+    } catch (error) {
+        console.error("❌ CLIENT: Erreur lors de l'initialisation:", error);
+        console.error("❌ CLIENT: Stack trace:", error.stack);
+    }
+}
+
+function setupStockEventListeners() {
+    console.log('🔧 CLIENT: setupStockEventListeners appelé');
+    
+    // Formulaire d'upload
+    const uploadForm = document.getElementById('stock-upload-form');
+    console.log('🔧 CLIENT: Formulaire d\'upload trouvé:', uploadForm);
+    console.log('🔧 CLIENT: Listener déjà attaché?', uploadForm?.dataset?.listenerAttached);
+    
+    if (uploadForm && !uploadForm.dataset.listenerAttached) {
+        uploadForm.addEventListener('submit', handleStockUpload);
+        uploadForm.dataset.listenerAttached = 'true';
+        console.log('✅ CLIENT: Event listener attaché au formulaire d\'upload');
+    } else if (uploadForm) {
+        console.log('⚠️ CLIENT: Event listener déjà attaché au formulaire d\'upload');
+    } else {
+        console.log('❌ CLIENT: Formulaire d\'upload non trouvé!');
+    }
+
+    // Boutons de contrôle
+    const filterBtn = document.getElementById('filter-stock');
+    if (filterBtn && !filterBtn.dataset.listenerAttached) {
+        filterBtn.addEventListener('click', applyStockFilters);
+        filterBtn.dataset.listenerAttached = 'true';
+    }
+
+    const refreshBtn = document.getElementById('refresh-stock');
+    if (refreshBtn && !refreshBtn.dataset.listenerAttached) {
+        refreshBtn.addEventListener('click', () => {
+            resetStockFilters();
+            loadStockData();
+        });
+        refreshBtn.dataset.listenerAttached = 'true';
+    }
+
+    const addBtn = document.getElementById('add-stock-btn');
+    if (addBtn && !addBtn.dataset.listenerAttached) {
+        addBtn.addEventListener('click', () => openStockModal());
+        addBtn.dataset.listenerAttached = 'true';
+    }
+
+    const statsBtn = document.getElementById('view-stats-btn');
+    if (statsBtn && !statsBtn.dataset.listenerAttached) {
+        statsBtn.addEventListener('click', toggleStockStats);
+        statsBtn.dataset.listenerAttached = 'true';
+    }
+
+    // Formulaire de stock modal
+    const stockForm = document.getElementById('stock-form');
+    if (stockForm && !stockForm.dataset.listenerAttached) {
+        stockForm.addEventListener('submit', handleStockFormSubmit);
+        stockForm.dataset.listenerAttached = 'true';
+    }
+
+    // Note: La fonction calculateVenteTheorique a été supprimée car la colonne Vente Théorique n'est plus utilisée
+}
+
+async function loadStockFilters() {
+    await loadStockDates();
+    // Le chargement des points de vente se fait dans `displayStockData`
+}
+
+async function loadStockData() {
+    const dateFilter = document.getElementById('stock-date-filter').value;
+    const pointFilter = document.getElementById('stock-point-filter').value;
+
+    let url = '/api/stock-mata?';
+    if (dateFilter) url += `date=${dateFilter}&`;
+    if (pointFilter) url += `point_de_vente=${pointFilter}&`;
+    
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Erreur HTTP: ${response.status}`);
+        }
+        const data = await response.json();
+        window.currentStockData = data; // Stocker les données
+        displayStockData(data);
+        updateStockPointFilter(data); // Mettre à jour les filtres de points de vente
+    } catch (error) {
+        console.error('Erreur lors du chargement des données de stock:', error);
+        showStockNotification(`Erreur chargement: ${error.message}`, 'error');
+    }
+}
+
+async function loadStockDates() {
+    try {
+        const response = await fetch('/api/stock-mata/dates');
+        if (!response.ok) {
+            throw new Error('Impossible de charger les dates.');
+        }
+        const dates = await response.json();
+        updateStockDateFilter(dates);
+    } catch (error) {
+        console.error('Erreur chargement dates:', error);
+    }
+}
+
+function updateStockDateFilter(dates) {
+    const dateFilter = document.getElementById('stock-date-filter');
+    const uniqueDates = [...new Set(dates.map(d => new Date(d).toISOString().split('T')[0]))];
+    
+    // Garder l'option "Toutes les dates"
+    const firstOption = dateFilter.options[0];
+    dateFilter.innerHTML = '';
+    dateFilter.appendChild(firstOption);
+
+    uniqueDates.forEach(date => {
+        const option = document.createElement('option');
+        option.value = date;
+        option.textContent = new Date(date).toLocaleDateString('fr-FR');
+        dateFilter.appendChild(option);
+    });
+}
+
+function updateStockPointFilter(data) {
+    const pointFilter = document.getElementById('stock-point-filter');
+    const currentPoint = pointFilter.value;
+    const pointsDeVente = [...new Set(data.map(item => item.point_de_vente))];
+
+    // Garder l'option "Tous les points"
+    const firstOption = pointFilter.options[0];
+    pointFilter.innerHTML = '';
+    pointFilter.appendChild(firstOption);
+    
+    pointsDeVente.sort().forEach(point => {
+        const option = document.createElement('option');
+        option.value = point;
+        option.textContent = point;
+        pointFilter.appendChild(option);
+    });
+    pointFilter.value = currentPoint;
+}
+
+function displayStockData(data) {
+    const tbody = document.getElementById('stock-tbody');
+    if (!tbody) {
+        console.error("L'élément 'stock-tbody' est introuvable !");
+        return;
+    }
+    tbody.innerHTML = ''; // Vider le tableau
+    
+    if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center">Aucune donnée de stock disponible.</td></tr>';
+        return;
+    }
+
+    const filteredData = applyStockFilters(true);
+
+    filteredData.forEach(item => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${new Date(item.date).toLocaleDateString('fr-FR')}</td>
+            <td>${item.point_de_vente}</td>
+            <td>${item.produit}</td>
+            <td>${parseFloat(item.stock_matin).toFixed(2)}</td>
+            <td>${parseFloat(item.stock_soir).toFixed(2)}</td>
+            <td>${parseFloat(item.transfert).toFixed(2)}</td>
+            <td class="actions">
+                <button class="edit-btn" onclick="editStockItem(${item.id})">Modifier</button>
+                <button class="delete-btn" onclick="deleteStockItem(${item.id})">Supprimer</button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function sortStockData(data) {
+    // Logique de tri à implémenter
+    return data;
+}
+
+function applyStockFilters(calledFromDisplay = false) {
+    const dateFilter = document.getElementById('stock-date-filter').value;
+    const pointFilter = document.getElementById('stock-point-filter').value;
+    
+    const filteredData = window.currentStockData.filter(item => {
+        const itemDate = new Date(item.date).toISOString().split('T')[0];
+        const dateMatch = !dateFilter || itemDate === dateFilter;
+        const pointMatch = !pointFilter || item.point_de_vente === pointFilter;
+        return dateMatch && pointMatch;
+    });
+
+    if (!calledFromDisplay) {
+        displayStockData(filteredData);
+    }
+    
+    return filteredData; // Retourner les données filtrées pour `displayStockData`
+}
+
+function resetStockFilters() {
+    document.getElementById('stock-date-filter').value = '';
+    document.getElementById('stock-point-filter').value = '';
+    displayStockData(window.currentStockData);
+}
+
+async function handleStockUpload(e) {
+    console.log('🚀 CLIENT: handleStockUpload appelé');
+    console.log('🚀 CLIENT: Event object:', e);
+    
+    e.preventDefault();
+    console.log('🚀 CLIENT: preventDefault() appelé');
+    
+    const fileInput = document.getElementById('reconciliation-file');
+    console.log('🚀 CLIENT: FileInput trouvé:', fileInput);
+    
+    const file = fileInput ? fileInput.files[0] : null;
+    console.log('🚀 CLIENT: Fichier sélectionné:', file);
+    
+    if (!file) {
+        console.log('❌ CLIENT: Aucun fichier sélectionné');
+        showStockNotification('Veuillez sélectionner un fichier.', 'error');
+        return;
+    }
+
+    console.log('📁 CLIENT: Détails du fichier:');
+    console.log('  - Nom:', file.name);
+    console.log('  - Taille:', file.size, 'bytes');
+    console.log('  - Type:', file.type);
+    console.log('  - Dernière modification:', new Date(file.lastModified));
+
+    const formData = new FormData();
+    formData.append('reconciliation', file);
+    console.log('📦 CLIENT: FormData créé avec le fichier');
+
+    const uploadButton = e.target.querySelector('button[type="submit"]');
+    console.log('🔘 CLIENT: Bouton d\'upload trouvé:', uploadButton);
+    
+    const originalButtonText = uploadButton ? uploadButton.innerHTML : '';
+    if (uploadButton) {
+        uploadButton.innerHTML = '<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Importation...';
+        uploadButton.disabled = true;
+        console.log('🔘 CLIENT: Bouton désactivé et spinner affiché');
+    }
+
+    try {
+        console.log('🌐 CLIENT: Début de la requête fetch vers', apiUrl('/api/stock-mata/upload'));
+        console.log('🌐 CLIENT: Environment:', SERVER_CONFIG.environment);
+        
+        const response = await fetch(apiUrl('/api/stock-mata/upload'), {
+            method: 'POST',
+            body: formData,
+        });
+
+        console.log('📡 CLIENT: Réponse reçue du serveur:');
+        console.log('  - Status:', response.status);
+        console.log('  - StatusText:', response.statusText);
+        console.log('  - Headers:', Object.fromEntries(response.headers.entries()));
+
+        const result = await response.json();
+        console.log('📄 CLIENT: Contenu de la réponse JSON:', result);
+
+        if (response.ok) {
+            console.log('✅ CLIENT: Upload réussi');
+            showStockNotification(result.message || 'Importation réussie!', 'success');
+            
+            console.log('🔄 CLIENT: Rechargement immédiat des données...');
+            // Réinitialiser le champ de fichier immédiatement
+            fileInput.value = '';
+            
+            // Recharger les données et filtres
+            await Promise.all([
+                loadStockData(),
+                loadStockDates(),
+                loadStockSummary() // Actualiser la carte du dashboard
+            ]);
+            
+            console.log('🔄 CLIENT: Données rechargées avec succès');
+            showStockNotification(`Import terminé: ${result.totalRecords || 0} enregistrements traités`, 'success');
+        } else {
+            console.log('❌ CLIENT: Erreur HTTP:', response.status, result);
+            // Utiliser le message d'erreur du serveur s'il existe
+            throw new Error(result.error || 'Une erreur est survenue lors de l\'importation.');
+        }
+    } catch (error) {
+        console.error('💥 CLIENT: Erreur lors de l\'upload:', error);
+        console.error('💥 CLIENT: Stack trace:', error.stack);
+        showStockNotification(error.message, 'error');
+    } finally {
+        if (uploadButton) {
+            uploadButton.innerHTML = originalButtonText;
+            uploadButton.disabled = false;
+            console.log('🔘 CLIENT: Bouton réactivé');
+        }
+        console.log('🏁 CLIENT: handleStockUpload terminé');
+    }
+}
+
+async function forceStockUpload(file) {
+    // Cette fonction pourrait être utilisée pour un drag-and-drop, non implémenté pour l'instant
+    console.log("Upload forcé demandé pour:", file.name);
+}
+
+function openStockModal(stockId = null) {
+    const modal = document.getElementById('stock-modal');
+    if (!modal) {
+        console.error("L'élément 'stock-modal' est introuvable !");
+        return;
+    }
+
+    modal.style.display = 'block';
+
+    if (stockId) {
+        document.getElementById('stock-modal-title').textContent = 'Modifier une entrée';
+        loadStockItemForEdit(stockId);
+    } else {
+        document.getElementById('stock-modal-title').textContent = 'Ajouter une entrée';
+        document.getElementById('stock-modal-form').reset();
+        document.getElementById('stock-id').value = '';
+    }
+}
+
+function closeStockModal() {
+    const modal = document.getElementById('stock-modal');
+    modal.style.display = 'none';
+}
+
+async function loadStockItemForEdit(stockId) {
+    try {
+        const response = await fetch(`/api/stock-mata/${stockId}`);
+        if (!response.ok) {
+            throw new Error('Impossible de charger les données de l\'entrée.');
+        }
+        const item = await response.json();
+        document.getElementById('stock-id').value = item.id;
+        document.getElementById('stock-date').value = new Date(item.date).toISOString().split('T')[0];
+        document.getElementById('stock-point-de-vente').value = item.point_de_vente;
+        document.getElementById('stock-produit').value = item.produit;
+        document.getElementById('stock-matin').value = item.stock_matin;
+        document.getElementById('stock-soir-input').value = item.stock_soir;
+        document.getElementById('stock-transfert').value = item.transfert;
+    } catch (error) {
+        showStockNotification(error.message, 'error');
+    }
+}
+
+async function handleStockFormSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    const formData = new FormData(form);
+    const id = document.getElementById('stock-id').value;
+    const url = id ? `/api/stock-mata/${id}` : '/api/stock-mata';
+    const method = id ? 'PUT' : 'POST';
+
+    try {
+        const response = await fetch(url, {
+            method,
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(Object.fromEntries(formData)),
+        });
+
+        if (response.ok) {
+            showStockNotification(`Entrée ${id ? 'mise à jour' : 'ajoutée'} avec succès!`, 'success');
+            closeStockModal();
+            await loadStockData();
+        } else {
+            const result = await response.json();
+            throw new Error(result.error || `Erreur lors de ${id ? 'la mise à jour' : 'l\'ajout'}`);
+        }
+    } catch (error) {
+        showStockNotification(error.message, 'error');
+    }
+}
+
+function editStockItem(stockId) {
+    openStockModal(stockId);
+}
+
+async function deleteStockItem(stockId) {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette entrée ?')) {
+        return;
+    }
+    try {
+        const response = await fetch(`/api/stock-mata/${stockId}`, { method: 'DELETE' });
+        if (response.ok) {
+            showStockNotification('Entrée supprimée avec succès.', 'success');
+            await loadStockData();
+        } else {
+            const result = await response.json();
+            throw new Error(result.error || 'Erreur lors de la suppression.');
+        }
+    } catch (error) {
+        showStockNotification(error.message, 'error');
+    }
+}
+
+// La fonction calculateVenteTheorique a été supprimée car la colonne "Vente Théorique" n'est plus affichée
+
+async function toggleStockStats() {
+    const statsContainer = document.getElementById('stock-stats-container');
+    if (statsContainer.style.display === 'none' || statsContainer.innerHTML.trim() === '') {
+        await loadStockStatistics();
+        statsContainer.style.display = 'block';
+    } else {
+        statsContainer.style.display = 'none';
+    }
+}
+
+async function loadStockStatistics() {
+    const container = document.getElementById('stock-stats-container');
+    try {
+        const response = await fetch('/api/stock-mata/stats'); // Note: L'API pour cela n'est pas encore définie
+        if (!response.ok) throw new Error('Statistiques non disponibles');
+        const stats = await response.json();
+        displayStockStatistics(stats);
+    } catch (error) {
+        console.error("Erreur chargement stats:", error);
+        container.innerHTML = `<p class="text-error">${error.message}</p>`;
+    }
+}
+
+function displayStockStatistics(stats) {
+    const container = document.getElementById('stock-stats-container');
+    // Logique d'affichage des statistiques
+    container.innerHTML = `<pre>${JSON.stringify(stats, null, 2)}</pre>`;
+}
+
+function showStockNotification(message, type = 'info') {
+    const container = document.getElementById('stock-notification');
+    container.textContent = message;
+    container.className = `notification ${type} show`;
+
+    setTimeout(() => {
+        container.classList.remove('show');
+    }, 5000);
+}
+
+// ... existing code ...
