@@ -142,15 +142,17 @@ const requireAdminAuth = (req, res, next) => {
     console.log('🔐 SERVER: Session user:', req.session?.user);
     console.log('🔐 SERVER: User role:', req.session?.user?.role);
     
-    if (req.session.user && (['directeur_general', 'pca', 'admin'].includes(req.session.user.role))) {
-        console.log('✅ SERVER: Authentification par session réussie');
+    if (req.session?.user && (['directeur_general', 'pca', 'admin'].includes(req.session.user.role))) {
+        console.log('✅ SERVER: Authentification par session réussie pour:', req.session.user.username);
         req.user = req.session.user; // Ajouter l'utilisateur à req pour les logs
-        next();
+        return next();
     } else {
         console.log('❌ SERVER: Accès refusé - Privilèges insuffisants');
-        console.log('❌ SERVER: User présent:', !!req.session.user);
+        console.log('❌ SERVER: User présent:', !!req.session?.user);
         console.log('❌ SERVER: Role présent:', req.session?.user?.role);
-        res.status(403).json({ error: 'Accès refusé - Privilèges insuffisants' });
+        console.log('❌ SERVER: Roles autorisés:', ['directeur_general', 'pca', 'admin']);
+        console.log('❌ SERVER: Role match:', req.session?.user ? ['directeur_general', 'pca', 'admin'].includes(req.session.user.role) : false);
+        return res.status(403).json({ error: 'Accès refusé - Privilèges insuffisants' });
     }
 };
 
@@ -3796,14 +3798,13 @@ app.get('/api/stock-mata', requireAdminAuth, async (req, res) => {
 // Route pour récupérer les dates disponibles
 app.get('/api/stock-mata/dates', requireAdminAuth, async (req, res) => {
     try {
-        const result = await pool.query(`
-            SELECT DISTINCT date 
-            FROM stock_mata 
-            ORDER BY date DESC
-        `);
-        res.json(result.rows.map(row => row.date));
+        // Formatter la date directement en SQL pour éviter les problèmes de timezone
+        const result = await pool.query(
+            "SELECT DISTINCT TO_CHAR(date_stock, 'YYYY-MM-DD') as date FROM stock_mata ORDER BY date DESC"
+        );
+        res.json(result.rows);
     } catch (error) {
-        console.error('Erreur récupération dates stock:', error);
+        console.error('Erreur lors de la récupération des dates de stock:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });

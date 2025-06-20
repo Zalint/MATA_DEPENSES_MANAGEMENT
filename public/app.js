@@ -6845,6 +6845,15 @@ function setupStockEventListeners() {
         filterBtn.dataset.listenerAttached = 'true';
     }
 
+    // Filtrage automatique lors du changement de date
+    const dateFilter = document.getElementById('stock-date-filter');
+    if (dateFilter && !dateFilter.dataset.listenerAttached) {
+        dateFilter.addEventListener('change', () => {
+            applyStockFilters();
+        });
+        dateFilter.dataset.listenerAttached = 'true';
+    }
+
     const refreshBtn = document.getElementById('refresh-stock');
     if (refreshBtn && !refreshBtn.dataset.listenerAttached) {
         refreshBtn.addEventListener('click', () => {
@@ -6877,62 +6886,52 @@ function setupStockEventListeners() {
 }
 
 async function loadStockFilters() {
-    await loadStockDates();
+    // Plus besoin de charger les dates puisqu'on utilise un calendrier
     // Le chargement des points de vente se fait dans `displayStockData`
+    console.log('📅 Calendrier de dates initialisé (plus de dropdown à charger)');
 }
 
 async function loadStockData() {
-    const dateFilter = document.getElementById('stock-date-filter').value;
     const pointFilter = document.getElementById('stock-point-filter').value;
 
-    let url = '/api/stock-mata?';
-    if (dateFilter) url += `date=${dateFilter}&`;
-    if (pointFilter) url += `point_de_vente=${pointFilter}&`;
-    
+    console.log('📅 Chargement des données stock...');
+    console.log('📍 Point sélectionné:', pointFilter || 'Tous');
+
+    let url = apiUrl('/api/stock-mata');
+    const params = new URLSearchParams();
+
+    // On ne filtre plus par date côté serveur, on le fait côté client
+    if (pointFilter) {
+        console.log('📍 Filtrage par point:', pointFilter);
+        params.append('point_de_vente', pointFilter);
+    }
+
+    if (params.toString()) {
+        url += '?' + params.toString();
+    }
+
+    console.log('🌐 URL finale:', url);
+
     try {
         const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`Erreur HTTP: ${response.status}`);
         }
         const data = await response.json();
-        window.currentStockData = data; // Stocker les données
-        displayStockData(data);
-        updateStockPointFilter(data); // Mettre à jour les filtres de points de vente
+        
+        console.log('📊 Données reçues:', data.length, 'enregistrements');
+        
+        window.currentStockData = data;
+        displayStockData(data); // displayStockData appellera applyStockFilters
+        updateStockPointFilter(data);
     } catch (error) {
-        console.error('Erreur lors du chargement des données de stock:', error);
-        showStockNotification(`Erreur chargement: ${error.message}`, 'error');
+        console.error('❌ Erreur lors du chargement des données de stock:', error);
+        showStockNotification(`Erreur chargement des données: ${error.message}`, 'error');
     }
 }
 
-async function loadStockDates() {
-    try {
-        const response = await fetch('/api/stock-mata/dates');
-        if (!response.ok) {
-            throw new Error('Impossible de charger les dates.');
-        }
-        const dates = await response.json();
-        updateStockDateFilter(dates);
-    } catch (error) {
-        console.error('Erreur chargement dates:', error);
-    }
-}
-
-function updateStockDateFilter(dates) {
-    const dateFilter = document.getElementById('stock-date-filter');
-    const uniqueDates = [...new Set(dates.map(d => new Date(d).toISOString().split('T')[0]))];
-    
-    // Garder l'option "Toutes les dates"
-    const firstOption = dateFilter.options[0];
-    dateFilter.innerHTML = '';
-    dateFilter.appendChild(firstOption);
-
-    uniqueDates.forEach(date => {
-        const option = document.createElement('option');
-        option.value = date;
-        option.textContent = new Date(date).toLocaleDateString('fr-FR');
-        dateFilter.appendChild(option);
-    });
-}
+// Fonctions supprimées : loadStockDates() et updateStockDateFilter()
+// Plus nécessaires depuis l'utilisation du calendrier HTML5
 
 function updateStockPointFilter(data) {
     const pointFilter = document.getElementById('stock-point-filter');
@@ -6996,9 +6995,13 @@ function applyStockFilters(calledFromDisplay = false) {
     const pointFilter = document.getElementById('stock-point-filter').value;
     
     const filteredData = window.currentStockData.filter(item => {
-        const itemDate = new Date(item.date).toISOString().split('T')[0];
-        const dateMatch = !dateFilter || itemDate === dateFilter;
+        // Convertir la date de l'item en date locale pour comparaison
+        const itemDate = new Date(item.date);
+        const localDateStr = itemDate.toLocaleDateString('en-CA'); // Format YYYY-MM-DD en local
+        
+        const dateMatch = !dateFilter || localDateStr === dateFilter;
         const pointMatch = !pointFilter || item.point_de_vente === pointFilter;
+        
         return dateMatch && pointMatch;
     });
 
@@ -7006,7 +7009,7 @@ function applyStockFilters(calledFromDisplay = false) {
         displayStockData(filteredData);
     }
     
-    return filteredData; // Retourner les données filtrées pour `displayStockData`
+    return filteredData;
 }
 
 function resetStockFilters() {
@@ -7082,7 +7085,6 @@ async function handleStockUpload(e) {
             // Recharger les données et filtres
             await Promise.all([
                 loadStockData(),
-                loadStockDates(),
                 loadStockSummary() // Actualiser la carte du dashboard
             ]);
             
