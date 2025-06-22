@@ -9,7 +9,9 @@
           "name": "Bovin",
           "subcategories": [
             { "id": "boeuf", "name": "Boeuf" },
-            { "id": "veau", "name": "Veau" }
+            { "id": "veau", "name": "Veau" },
+            { "id": "alim", "name": "Alimentation" },
+            { "id": "trans", "name": "Transport" }
           ]
         }
       ]
