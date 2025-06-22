@@ -1,0 +1,61 @@
+{
+  "categories": {
+    "Ovin": [
+      "Brebis",
+      "Belier",
+      "Agneau",
+      "NouveauNeMouton",
+      "Ladoum",
+      "Autre"
+    ],
+    "Caprin": [
+      "Chevere",
+      "Autre"
+    ],
+    "Bovin": [
+      "Boeuf",
+      "Veau",
+      "Autre"
+    ],
+    "Cheval": [
+      "Autre"
+    ],
+    "Ane": [
+      "Autre"
+    ],
+    "Aliments": [
+      "PailleArachide",
+      "Ripasse",
+      "Panicum",
+      "Luzerne",
+      "Autre"
+    ],
+    "Autres": [
+      "Autre"
+    ]
+  },
+  "labels": {
+    "Ovin": "Ovin",
+    "Caprin": "Caprin", 
+    "Bovin": "Bovin",
+    "Cheval": "Cheval",
+    "Ane": "Âne",
+    "Aliments": "Aliments",
+    "Autres": "Autres",
+    "Brebis": "Brebis",
+    "Belier": "Bélier",
+    "Agneau": "Agneau",
+    "NouveauNeMouton": "Nouveau-né Mouton",
+    "Ladoum": "Ladoum",
+    "Chevere": "Chèvre",
+    "Boeuf": "Bœuf",
+    "Veau": "Veau",
+    "PailleArachide": "Paille d'Arachide",
+    "Ripasse": "Ripasse",
+    "Panicum": "Panicum",
+    "Luzerne": "Luzerne",
+    "Autre": "Autre"
+  },
+  "version": "1.0.0",
+  "description": "Configuration des catégories et produits pour le stock vivant"
+} 
