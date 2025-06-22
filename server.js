@@ -4208,3 +4208,432 @@ app.get('/api/transfers', requireAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur: ' + error.message });
     }
 });
+
+// =====================================================
+// STOCK VIVANT ROUTES
+// =====================================================
+
+// Middleware pour vérifier les permissions stock vivant
+const requireStockVivantAuth = async (req, res, next) => {
+    try {
+        console.log('🔐 STOCK VIVANT: requireStockVivantAuth appelé pour:', req.method, req.path);
+        
+        if (!req.session.user) {
+            console.log('❌ STOCK VIVANT: Pas de session utilisateur');
+            return res.status(401).json({ error: 'Non autorisé' });
+        }
+
+        const userRole = req.session.user.role;
+        const userName = req.session.user.username;
+        console.log('👤 STOCK VIVANT: Utilisateur:', userName, 'Role:', userRole);
+        
+        // Vérifier les permissions avec la fonction PostgreSQL
+        console.log('🔍 STOCK VIVANT: Vérification permissions pour role:', userRole);
+        const permissionCheck = await pool.query(
+            'SELECT can_access_stock_vivant($1) as can_access',
+            [userRole]
+        );
+
+        const hasAccess = permissionCheck.rows[0].can_access;
+        console.log('✅ STOCK VIVANT: Résultat permissions:', hasAccess);
+
+        if (!hasAccess) {
+            console.log('❌ STOCK VIVANT: Accès refusé pour role:', userRole);
+            return res.status(403).json({ error: 'Accès refusé - Permissions insuffisantes pour le stock vivant' });
+        }
+
+        console.log('✅ STOCK VIVANT: Accès autorisé pour:', userName);
+        next();
+    } catch (error) {
+        console.error('❌ STOCK VIVANT: Erreur vérification permissions:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+};
+
+// Route pour récupérer la configuration des catégories de stock vivant
+app.get('/api/stock-vivant/config', requireStockVivantAuth, (req, res) => {
+    try {
+        const config = require('./stock_vivant_config.json');
+        res.json(config);
+    } catch (error) {
+        console.error('❌ STOCK VIVANT: Erreur chargement config:', error);
+        res.status(500).json({ error: 'Configuration non disponible' });
+    }
+});
+
+// Route pour mettre à jour la configuration (DG uniquement)
+app.put('/api/stock-vivant/config', requireSuperAdmin, (req, res) => {
+    try {
+        const fs = require('fs');
+        const newConfig = req.body;
+        
+        // Valider la structure de base
+        if (!newConfig.categories || !newConfig.labels) {
+            return res.status(400).json({ error: 'Structure de configuration invalide' });
+        }
+
+        // Sauvegarder la nouvelle configuration
+        fs.writeFileSync('./stock_vivant_config.json', JSON.stringify(newConfig, null, 2));
+        
+        res.json({ message: 'Configuration mise à jour avec succès' });
+    } catch (error) {
+        console.error('Erreur mise à jour config stock vivant:', error);
+        res.status(500).json({ error: 'Erreur lors de la mise à jour' });
+    }
+});
+
+// Route pour récupérer les données de stock vivant
+app.get('/api/stock-vivant', requireStockVivantAuth, async (req, res) => {
+    try {
+        const { date, categorie } = req.query;
+        
+        let query = 'SELECT * FROM stock_vivant';
+        let params = [];
+        let conditions = [];
+        
+        if (date) {
+            conditions.push('date_stock = $' + (params.length + 1));
+            params.push(date);
+        }
+        
+        if (categorie) {
+            conditions.push('categorie = $' + (params.length + 1));
+            params.push(categorie);
+        }
+        
+        if (conditions.length > 0) {
+            query += ' WHERE ' + conditions.join(' AND ');
+        }
+        
+        query += ' ORDER BY date_stock DESC, categorie, produit';
+        
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération stock vivant:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer les dates disponibles
+app.get('/api/stock-vivant/dates', requireStockVivantAuth, async (req, res) => {
+    try {
+        console.log('📅 SERVER: Récupération dates stock vivant pour:', req.session.user.username);
+        const result = await pool.query(
+            "SELECT DISTINCT TO_CHAR(date_stock, 'YYYY-MM-DD') as date FROM stock_vivant ORDER BY date DESC"
+        );
+        console.log('📅 SERVER: Dates trouvées:', result.rows.length);
+        console.log('📅 SERVER: Dates détails:', result.rows);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('❌ SERVER: Erreur récupération dates stock vivant:', error);
+        console.error('❌ SERVER: Stack trace dates:', error.stack);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour ajouter/modifier des données de stock vivant
+app.post('/api/stock-vivant/update', requireStockVivantAuth, async (req, res) => {
+    try {
+        const { date_stock, stockData, replace_existing } = req.body;
+        
+        if (!date_stock || !stockData || !Array.isArray(stockData)) {
+            return res.status(400).json({ error: 'Données invalides' });
+        }
+
+        // Vérifier s'il y a des données existantes pour cette date
+        const existingCheck = await pool.query(
+            'SELECT COUNT(*) as count FROM stock_vivant WHERE date_stock = $1',
+            [date_stock]
+        );
+
+        const hasExistingData = parseInt(existingCheck.rows[0].count) > 0;
+
+        // Si des données existent et qu'on ne force pas le remplacement, demander confirmation
+        if (hasExistingData && !replace_existing) {
+            return res.status(409).json({ 
+                error: 'duplicate_data',
+                message: 'Des données existent déjà pour cette date',
+                date: date_stock,
+                existingCount: existingCheck.rows[0].count
+            });
+        }
+
+        await pool.query('BEGIN');
+
+        // Si on remplace, supprimer les données existantes
+        if (replace_existing && hasExistingData) {
+            await pool.query('DELETE FROM stock_vivant WHERE date_stock = $1', [date_stock]);
+        }
+
+        let processedCount = 0;
+
+        // Traiter chaque entrée de stock
+        for (const item of stockData) {
+            const { categorie, produit, quantite, prix_unitaire, decote, commentaire } = item;
+            
+            if (!categorie || !produit || quantite === undefined || prix_unitaire === undefined) {
+                continue; // Ignorer les entrées incomplètes
+            }
+
+            const decoteValue = decote !== undefined ? parseFloat(decote)/100 : 0.20;
+            const total = (parseFloat(quantite) || 0) * (parseFloat(prix_unitaire) || 0) * (1 - decoteValue);
+
+            await pool.query(`
+                INSERT INTO stock_vivant (date_stock, categorie, produit, quantite, prix_unitaire, decote, total, commentaire)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (date_stock, categorie, produit)
+                DO UPDATE SET 
+                    quantite = EXCLUDED.quantite,
+                    prix_unitaire = EXCLUDED.prix_unitaire,
+                    decote = EXCLUDED.decote,
+                    total = EXCLUDED.total,
+                    commentaire = EXCLUDED.commentaire,
+                    updated_at = CURRENT_TIMESTAMP
+            `, [date_stock, categorie, produit, quantite, prix_unitaire, decoteValue, total, commentaire || '']);
+
+            processedCount++;
+        }
+
+        await pool.query('COMMIT');
+
+        res.json({
+            message: `Stock vivant mis à jour avec succès`,
+            date: date_stock,
+            processedCount,
+            replaced: hasExistingData && replace_existing
+        });
+
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('Erreur mise à jour stock vivant:', error);
+        res.status(500).json({ error: 'Erreur lors de la mise à jour' });
+    }
+});
+
+// Route pour copier le stock d'une date précédente
+app.post('/api/stock-vivant/copy-from-date', requireStockVivantAuth, async (req, res) => {
+    try {
+        const { source_date, target_date } = req.body;
+        
+        if (!source_date || !target_date) {
+            return res.status(400).json({ error: 'Dates source et cible requises' });
+        }
+
+        // Vérifier qu'il y a des données à copier
+        const sourceData = await pool.query(
+            'SELECT * FROM stock_vivant WHERE date_stock = $1',
+            [source_date]
+        );
+
+        if (sourceData.rows.length === 0) {
+            return res.status(404).json({ error: 'Aucune donnée trouvée pour la date source' });
+        }
+
+        // Vérifier s'il y a déjà des données pour la date cible
+        const targetCheck = await pool.query(
+            'SELECT COUNT(*) as count FROM stock_vivant WHERE date_stock = $1',
+            [target_date]
+        );
+
+        if (parseInt(targetCheck.rows[0].count) > 0) {
+            return res.status(409).json({ 
+                error: 'target_has_data',
+                message: 'Des données existent déjà pour la date cible'
+            });
+        }
+
+        await pool.query('BEGIN');
+
+        // Copier les données
+        await pool.query(`
+            INSERT INTO stock_vivant (date_stock, categorie, produit, quantite, prix_unitaire, decote, total, commentaire)
+            SELECT $1, categorie, produit, quantite, prix_unitaire, decote, total, commentaire
+            FROM stock_vivant 
+            WHERE date_stock = $2
+        `, [target_date, source_date]);
+
+        const copiedCount = sourceData.rows.length;
+
+        await pool.query('COMMIT');
+
+        res.json({
+            message: `${copiedCount} entrées copiées avec succès`,
+            source_date,
+            target_date,
+            copiedCount
+        });
+
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('Erreur copie stock vivant:', error);
+        res.status(500).json({ error: 'Erreur lors de la copie' });
+    }
+});
+
+// Route pour supprimer une entrée spécifique
+app.delete('/api/stock-vivant/:id', requireStockVivantAuth, async (req, res) => {
+    try {
+        const { id } = req.params;
+        
+        const result = await pool.query('DELETE FROM stock_vivant WHERE id = $1 RETURNING *', [id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Entrée non trouvée' });
+        }
+
+        res.json({ message: 'Entrée supprimée avec succès', deleted: result.rows[0] });
+    } catch (error) {
+        console.error('Erreur suppression stock vivant:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Routes pour la gestion des permissions (DG uniquement)
+app.get('/api/stock-vivant/permissions', requireSuperAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                svp.id,
+                svp.user_id,
+                svp.is_active,
+                svp.granted_at,
+                u.username,
+                u.full_name,
+                ug.full_name as granted_by_name
+            FROM stock_vivant_permissions svp
+            JOIN users u ON svp.user_id = u.id
+            LEFT JOIN users ug ON svp.granted_by = ug.id
+            WHERE u.role = 'directeur'
+            ORDER BY u.full_name
+        `);
+        
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération permissions stock vivant:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.post('/api/stock-vivant/permissions', requireSuperAdmin, async (req, res) => {
+    try {
+        const { user_id } = req.body;
+        const granted_by = req.session.user.id;
+
+        // Vérifier que l'utilisateur est un directeur
+        const userCheck = await pool.query(
+            'SELECT * FROM users WHERE id = $1 AND role = $2',
+            [user_id, 'directeur']
+        );
+
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Directeur non trouvé' });
+        }
+
+        // Ajouter ou activer la permission
+        await pool.query(`
+            INSERT INTO stock_vivant_permissions (user_id, granted_by, is_active)
+            VALUES ($1, $2, true)
+            ON CONFLICT (user_id) 
+            DO UPDATE SET is_active = true, granted_by = $2, granted_at = CURRENT_TIMESTAMP
+        `, [user_id, granted_by]);
+
+        res.json({ message: 'Permission accordée avec succès' });
+    } catch (error) {
+        console.error('Erreur ajout permission stock vivant:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.delete('/api/stock-vivant/permissions/:userId', requireSuperAdmin, async (req, res) => {
+    try {
+        const { userId } = req.params;
+        
+        const result = await pool.query(
+            'UPDATE stock_vivant_permissions SET is_active = false WHERE user_id = $1 RETURNING *',
+            [userId]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Permission non trouvée' });
+        }
+
+        res.json({ message: 'Permission révoquée avec succès' });
+    } catch (error) {
+        console.error('Erreur révocation permission stock vivant:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir les directeurs disponibles pour les permissions
+app.get('/api/stock-vivant/available-directors', requireSuperAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                u.id,
+                u.username,
+                u.full_name,
+                CASE 
+                    WHEN svp.is_active = true THEN true 
+                    ELSE false 
+                END as has_permission
+            FROM users u
+            LEFT JOIN stock_vivant_permissions svp ON u.id = svp.user_id AND svp.is_active = true
+            WHERE u.role = 'directeur' AND u.is_active = true
+            ORDER BY u.full_name
+        `);
+        
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération directeurs disponibles:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer le total général du stock vivant
+app.get('/api/stock-vivant/total', requireAuth, async (req, res) => {
+    try {
+        // Récupérer la dernière date disponible
+        const latestDateQuery = `
+            SELECT MAX(date_stock) as latest_date 
+            FROM stock_vivant 
+            WHERE date_stock IS NOT NULL
+        `;
+        const latestDateResult = await pool.query(latestDateQuery);
+        
+        if (!latestDateResult.rows[0].latest_date) {
+            return res.json({
+                totalStock: 0,
+                formattedDate: null,
+                message: 'Aucune donnée de stock vivant disponible'
+            });
+        }
+        
+        const latestDate = latestDateResult.rows[0].latest_date;
+        
+        // Calculer la somme totale pour la dernière date
+        const totalQuery = `
+            SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+            FROM stock_vivant
+            WHERE date_stock = $1
+        `;
+        const totalResult = await pool.query(totalQuery, [latestDate]);
+        
+        const totalStock = Math.round(totalResult.rows[0].total_stock || 0);
+        const formattedDate = latestDate.toLocaleDateString('fr-FR', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        
+        res.json({
+            totalStock,
+            formattedDate,
+            message: 'Total stock vivant récupéré avec succès'
+        });
+        
+    } catch (error) {
+        console.error('Erreur récupération total stock vivant:', error);
+        res.status(500).json({ error: 'Erreur lors de la récupération du total stock vivant' });
+    }
+});
