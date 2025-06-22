@@ -4017,6 +4017,42 @@ app.get('/api/director/credit-history', requireAuth, async (req, res) => {
     }
 });
 
+// Route pour vérifier l'accès Stock Vivant d'un directeur
+app.get('/api/director/stock-vivant-access', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+        
+        // Si c'est un admin, il a toujours accès
+        if (['directeur_general', 'pca', 'admin'].includes(userRole)) {
+            return res.json({ hasAccess: true, reason: 'admin' });
+        }
+        
+        // Pour les directeurs, vérifier s'ils ont une permission active
+        if (userRole === 'directeur') {
+            const result = await pool.query(`
+                SELECT 1 
+                FROM stock_vivant_permissions svp
+                JOIN users u ON svp.user_id = u.id
+                WHERE svp.user_id = $1 AND svp.is_active = true AND u.is_active = true
+            `, [userId]);
+            
+            const hasAccess = result.rows.length > 0;
+            return res.json({ 
+                hasAccess: hasAccess,
+                reason: hasAccess ? 'permission_granted' : 'no_permission'
+            });
+        }
+        
+        // Autres rôles n'ont pas accès
+        res.json({ hasAccess: false, reason: 'role_not_allowed' });
+        
+    } catch (error) {
+        console.error('Erreur lors de la vérification de l\'accès Stock Vivant:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
 // Route de crédit avec système de permissions amélioré
 app.post('/api/accounts/:id/credit', requireAuth, async (req, res) => {
     try {
@@ -4213,7 +4249,7 @@ app.get('/api/transfers', requireAuth, async (req, res) => {
 // STOCK VIVANT ROUTES
 // =====================================================
 
-// Middleware pour vérifier les permissions stock vivant
+// Middleware pour vérifier les permissions stock vivant (similaire au système de crédit)
 const requireStockVivantAuth = async (req, res, next) => {
     try {
         console.log('🔐 STOCK VIVANT: requireStockVivantAuth appelé pour:', req.method, req.path);
@@ -4223,27 +4259,43 @@ const requireStockVivantAuth = async (req, res, next) => {
             return res.status(401).json({ error: 'Non autorisé' });
         }
 
+        const userId = req.session.user.id;
         const userRole = req.session.user.role;
         const userName = req.session.user.username;
-        console.log('👤 STOCK VIVANT: Utilisateur:', userName, 'Role:', userRole);
+        console.log('👤 STOCK VIVANT: Utilisateur:', userName, 'Role:', userRole, 'ID:', userId);
         
-        // Vérifier les permissions avec la fonction PostgreSQL
-        console.log('🔍 STOCK VIVANT: Vérification permissions pour role:', userRole);
-        const permissionCheck = await pool.query(
-            'SELECT can_access_stock_vivant($1) as can_access',
-            [userRole]
-        );
-
-        const hasAccess = permissionCheck.rows[0].can_access;
-        console.log('✅ STOCK VIVANT: Résultat permissions:', hasAccess);
-
-        if (!hasAccess) {
-            console.log('❌ STOCK VIVANT: Accès refusé pour role:', userRole);
-            return res.status(403).json({ error: 'Accès refusé - Permissions insuffisantes pour le stock vivant' });
+        // Si c'est un admin, il a toujours accès
+        if (['directeur_general', 'pca', 'admin'].includes(userRole)) {
+            console.log('✅ STOCK VIVANT: Accès autorisé pour admin:', userName);
+            return next();
         }
-
-        console.log('✅ STOCK VIVANT: Accès autorisé pour:', userName);
-        next();
+        
+        // Pour les directeurs, vérifier s'ils ont une permission active
+        if (userRole === 'directeur') {
+            console.log('🔍 STOCK VIVANT: Vérification permissions directeur pour:', userName);
+            const permissionCheck = await pool.query(`
+                SELECT 1 
+                FROM stock_vivant_permissions svp
+                JOIN users u ON svp.user_id = u.id
+                WHERE svp.user_id = $1 AND svp.is_active = true AND u.is_active = true
+            `, [userId]);
+            
+            const hasPermission = permissionCheck.rows.length > 0;
+            console.log('🔍 STOCK VIVANT: Directeur a permission:', hasPermission);
+            
+            if (hasPermission) {
+                console.log('✅ STOCK VIVANT: Accès autorisé pour directeur avec permission:', userName);
+                return next();
+            } else {
+                console.log('❌ STOCK VIVANT: Directeur sans permission:', userName);
+                return res.status(403).json({ error: 'Accès refusé - Vous n\'avez pas la permission d\'accéder au stock vivant' });
+            }
+        }
+        
+        // Autres rôles n'ont pas accès
+        console.log('❌ STOCK VIVANT: Accès refusé pour role:', userRole);
+        return res.status(403).json({ error: 'Accès refusé - Rôle non autorisé pour le stock vivant' });
+        
     } catch (error) {
         console.error('❌ STOCK VIVANT: Erreur vérification permissions:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -4370,27 +4422,25 @@ app.post('/api/stock-vivant/update', requireStockVivantAuth, async (req, res) =>
 
         // Traiter chaque entrée de stock
         for (const item of stockData) {
-            const { categorie, produit, quantite, prix_unitaire, decote, commentaire } = item;
+            const { categorie, produit, quantite, prix_unitaire, commentaire } = item;
             
             if (!categorie || !produit || quantite === undefined || prix_unitaire === undefined) {
                 continue; // Ignorer les entrées incomplètes
             }
 
-            const decoteValue = decote !== undefined ? parseFloat(decote)/100 : 0.20;
-            const total = (parseFloat(quantite) || 0) * (parseFloat(prix_unitaire) || 0) * (1 - decoteValue);
+            const total = (parseFloat(quantite) || 0) * (parseFloat(prix_unitaire) || 0);
 
             await pool.query(`
-                INSERT INTO stock_vivant (date_stock, categorie, produit, quantite, prix_unitaire, decote, total, commentaire)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO stock_vivant (date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (date_stock, categorie, produit)
                 DO UPDATE SET 
                     quantite = EXCLUDED.quantite,
                     prix_unitaire = EXCLUDED.prix_unitaire,
-                    decote = EXCLUDED.decote,
                     total = EXCLUDED.total,
                     commentaire = EXCLUDED.commentaire,
                     updated_at = CURRENT_TIMESTAMP
-            `, [date_stock, categorie, produit, quantite, prix_unitaire, decoteValue, total, commentaire || '']);
+            `, [date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire || '']);
 
             processedCount++;
         }
@@ -4447,8 +4497,8 @@ app.post('/api/stock-vivant/copy-from-date', requireStockVivantAuth, async (req,
 
         // Copier les données
         await pool.query(`
-            INSERT INTO stock_vivant (date_stock, categorie, produit, quantite, prix_unitaire, decote, total, commentaire)
-            SELECT $1, categorie, produit, quantite, prix_unitaire, decote, total, commentaire
+            INSERT INTO stock_vivant (date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire)
+            SELECT $1, categorie, produit, quantite, prix_unitaire, total, commentaire
             FROM stock_vivant 
             WHERE date_stock = $2
         `, [target_date, source_date]);

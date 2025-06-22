@@ -94,7 +94,7 @@ async function login(username, password) {
         if (response.ok) {
             currentUser = data.user;
             showNotification('Connexion réussie !', 'success');
-            showApp();
+            await showApp();
             await loadInitialData();
         } else {
             throw new Error(data.error);
@@ -130,7 +130,7 @@ function showLogin() {
     document.getElementById('app').classList.remove('active');
 }
 
-function showApp() {
+async function showApp() {
     document.getElementById('login-page').classList.remove('active');
     document.getElementById('app').classList.add('active');
     
@@ -144,8 +144,12 @@ function showApp() {
         document.getElementById('admin-users-menu').style.display = 'block';
         document.getElementById('stock-menu').style.display = 'block';
         document.getElementById('stock-vivant-menu').style.display = 'block';
+        document.getElementById('stock-vivant-permissions-menu').style.display = 'block';
         document.getElementById('user-column').style.display = 'table-cell';
     }
+    
+    // Initialize Stock Vivant module (similar to credit module)
+    await initDirectorStockVivantModule();
 }
 
 async function showSection(sectionName) {
@@ -214,6 +218,16 @@ async function showSection(sectionName) {
             } catch (error) {
                 console.error('❌ CLIENT: Erreur dans showSection - stock-vivant:', error);
                 showNotification('Erreur lors du chargement du Stock Vivant', 'error');
+            }
+            break;
+        case 'stock-vivant-permissions':
+            console.log('🔄 CLIENT: showSection - stock-vivant-permissions appelé');
+            try {
+                await initStockVivantPermissions();
+                console.log('✅ CLIENT: showSection - stock-vivant-permissions terminé avec succès');
+            } catch (error) {
+                console.error('❌ CLIENT: Erreur dans showSection - stock-vivant-permissions:', error);
+                showNotification('Erreur lors du chargement des Permissions Stock Vivant', 'error');
             }
             break;
     }
@@ -2603,10 +2617,10 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             throw new Error('Non connecté');
         })
-        .then(user => {
+        .then(async user => {
             currentUser = user;
-            showApp();
-            loadInitialData();
+            await showApp();
+            await loadInitialData();
         })
         .catch((error) => {
             // Erreur normale au démarrage si non connecté
@@ -7608,7 +7622,6 @@ function generateStockVivantTables(existingData = []) {
                         <th>Produit</th>
                         <th>Quantité</th>
                         <th>Prix Unitaire (FCFA)</th>
-                        <th>Décote (%)</th>
                         <th>Total (FCFA)</th>
                         <th>Commentaire</th>
                     </tr>
@@ -7621,8 +7634,7 @@ function generateStockVivantTables(existingData = []) {
                         const productLabel = stockVivantConfig.labels[product] || product;
                         const quantite = existingItem ? existingItem.quantite : 0;
                         const prixUnitaire = existingItem ? existingItem.prix_unitaire : 0;
-                        const decote = existingItem ? existingItem.decote * 100 : 20;
-                        const total = quantite * prixUnitaire * (1 - decote/100);
+                        const total = quantite * prixUnitaire;
                         const commentaire = existingItem ? existingItem.commentaire : '';
                         
                         return `
@@ -7636,11 +7648,6 @@ function generateStockVivantTables(existingData = []) {
                                 <td>
                                     <input type="number" class="stock-price" 
                                            value="${prixUnitaire}" min="0" step="0.01"
-                                           onchange="calculateStockVivantTotal(this)">
-                                </td>
-                                <td>
-                                    <input type="number" class="stock-decote" 
-                                           value="${decote}" min="0" max="100" step="1"
                                            onchange="calculateStockVivantTotal(this)">
                                 </td>
                                 <td>
@@ -7665,8 +7672,7 @@ function calculateStockVivantTotal(input) {
     const row = input.closest('tr');
     const quantity = parseFloat(row.querySelector('.stock-quantity').value) || 0;
     const price = parseFloat(row.querySelector('.stock-price').value) || 0;
-    const decote = parseFloat(row.querySelector('.stock-decote').value) || 0;
-    const total = quantity * price * (1 - decote/100);
+    const total = quantity * price;
     
     row.querySelector('.stock-total').textContent = formatCurrency(total);
 }
@@ -7683,7 +7689,6 @@ async function saveStockVivantData() {
         const product = row.dataset.product;
         const quantity = parseFloat(row.querySelector('.stock-quantity').value) || 0;
         const price = parseFloat(row.querySelector('.stock-price').value) || 0;
-        const decote = parseFloat(row.querySelector('.stock-decote').value) || 0;
         const comment = row.querySelector('.stock-comment').value.trim();
         
         // Inclure seulement les entrées avec une quantité ou un prix > 0
@@ -7693,7 +7698,6 @@ async function saveStockVivantData() {
                 produit: product,
                 quantite: quantity,
                 prix_unitaire: price,
-                decote: decote,
                 commentaire: comment
             });
         }
@@ -8232,5 +8236,85 @@ async function loadStockVivantTotal() {
             totalElement.textContent = 'Erreur';
             dateElement.textContent = 'Données indisponibles';
         }
+    }
+}
+
+// === MODULE STOCK VIVANT POUR DIRECTEURS ===
+
+// Initialiser le module stock vivant pour directeurs (identique au module crédit)
+async function initDirectorStockVivantModule() {
+    const stockVivantMenu = document.getElementById('stock-vivant-menu');
+    if (!stockVivantMenu) return;
+    
+    // Vérifier si l'utilisateur a des permissions stock vivant
+    if (currentUser && currentUser.role === 'directeur') {
+        try {
+            const response = await fetch('/api/director/stock-vivant-access');
+            const accessData = await response.json();
+            
+            if (accessData.hasAccess) {
+                // Le directeur a des permissions, afficher le menu
+                stockVivantMenu.style.display = 'block';
+                
+                // Configurer le gestionnaire de navigation
+                const navLink = stockVivantMenu.querySelector('a');
+                if (navLink) {
+                    navLink.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        showSection('stock-vivant');
+                    });
+                }
+                
+                console.log(`✅ Stock Vivant accessible pour le directeur ${currentUser.username}`);
+            } else {
+                // Pas de permissions, masquer le menu
+                stockVivantMenu.style.display = 'none';
+                console.log(`❌ Stock Vivant non accessible pour le directeur ${currentUser.username}: ${accessData.reason}`);
+            }
+        } catch (error) {
+            console.error('Erreur vérification permissions stock vivant:', error);
+            stockVivantMenu.style.display = 'none';
+        }
+    } else if (currentUser && (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin')) {
+        // DG/PCA/Admin voient toujours le menu
+        stockVivantMenu.style.display = 'block';
+        
+        const navLink = stockVivantMenu.querySelector('a');
+        if (navLink) {
+            navLink.addEventListener('click', function(e) {
+                e.preventDefault();
+                showSection('stock-vivant');
+            });
+        }
+        
+        console.log(`✅ Stock Vivant accessible pour l'admin ${currentUser.username}`);
+    } else {
+        stockVivantMenu.style.display = 'none';
+        console.log(`❌ Stock Vivant non accessible pour le rôle ${currentUser?.role}`);
+    }
+}
+
+// Initialize Stock Vivant Permissions section
+async function initStockVivantPermissions() {
+    console.log('🔄 CLIENT: Initialisation des permissions stock vivant');
+    
+    try {
+        // Load directors and permissions
+        await loadStockVivantDirectors();
+        
+        // Setup event listener for grant permission button
+        const grantBtn = document.getElementById('grant-permission-btn');
+        if (grantBtn) {
+            grantBtn.removeEventListener('click', grantStockVivantPermission); // Remove any existing listener
+            grantBtn.addEventListener('click', grantStockVivantPermission);
+        }
+        
+        console.log('✅ CLIENT: Permissions stock vivant initialisées');
+        return true;
+        
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur initialisation permissions stock vivant:', error);
+        showStockVivantNotification('Erreur lors de l\'initialisation des permissions', 'error');
+        return false;
     }
 }

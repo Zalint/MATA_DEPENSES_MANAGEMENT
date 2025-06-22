@@ -111,6 +111,11 @@
                             <i class="fas fa-seedling"></i> Stock Vivant
                         </a>
                     </li>
+                    <li id="stock-vivant-permissions-menu" style="display: none;">
+                        <a href="#" data-section="stock-vivant-permissions" class="nav-link">
+                            <i class="fas fa-seedling"></i> Permissions Stock Vivant
+                        </a>
+                    </li>
                 </ul>
             </aside>
 
@@ -418,6 +423,38 @@
                             <tbody id="expenses-tbody">
                             </tbody>
                         </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Stock Vivant Permissions (Admin only) -->
+                <section id="stock-vivant-permissions-section" class="section">
+                    <h2><i class="fas fa-seedling"></i> Permissions Stock Vivant</h2>
+                    <p class="section-description">Gérer les permissions d'accès au stock vivant pour les directeurs</p>
+                    
+                    <div class="permissions-management">
+                        <div class="grant-permission-card">
+                            <h3><i class="fas fa-user-plus"></i> Accorder une Permission</h3>
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="director-select">Sélectionner un directeur</label>
+                                    <select id="director-select" class="form-select">
+                                        <option value="">Chargement des directeurs...</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <button id="grant-permission-btn" type="button" class="btn btn-success">
+                                        <i class="fas fa-check"></i> Accorder l'accès
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="current-permissions-card">
+                            <h3><i class="fas fa-users"></i> Permissions Actuelles</h3>
+                            <div id="permissions-list" class="permissions-list">
+                                <p>Chargement des permissions...</p>
+                            </div>
                         </div>
                     </div>
                 </section>
