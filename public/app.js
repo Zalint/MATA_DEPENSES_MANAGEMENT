@@ -7228,13 +7228,8 @@ function displayStockStatistics(stats) {
 }
 
 function showStockNotification(message, type = 'info') {
-    const container = document.getElementById('stock-notification');
-    container.textContent = message;
-    container.className = `notification ${type} show`;
-
-    setTimeout(() => {
-        container.classList.remove('show');
-    }, 5000);
+    // Use the main notification system instead of a separate one
+    showNotification(message, type);
 }
 
 // =====================================================
