@@ -7291,21 +7291,23 @@ async function initStockVivantModule() {
         const config = await response.json();
         stockVivantConfig = config;
 
-        // 3. Afficher le tableau simple basé sur la configuration
-        displaySimpleStockVivant();
+        // 3. Initialize modern Stock Vivant interface
+        await initializeModernStockVivant();
         
-        // 4. Charger la dernière date disponible
+        // 4. Show default mode after config is loaded
+        await showStockMode('saisie');
+        
+        // 5. Charger la dernière date disponible
         const lastDate = await getLastStockVivantDate();
         if (lastDate) {
-            const dateInput = document.getElementById('stock-date');
+            const dateInput = document.getElementById('stock-vivant-date');
             if (dateInput) {
                 dateInput.value = lastDate;
-                // Charger les données de cette date
-                await loadStockVivantByDate();
+                console.log('📅 CLIENT: Dernière date chargée:', lastDate);
             }
         }
         
-        // 5. Rendre le menu visible
+        // 6. Rendre le menu visible
         const stockVivantMenu = document.getElementById('stock-vivant-menu');
         if (stockVivantMenu) {
             stockVivantMenu.style.display = 'block';
@@ -7600,81 +7602,92 @@ async function loadStockVivantForm() {
 }
 
 function generateStockVivantTables(existingData = []) {
-    const container = document.getElementById('stock-vivant-tables');
-    container.innerHTML = '';
-    
     if (!stockVivantConfig || !stockVivantConfig.categories) {
         showStockVivantNotification('Configuration non disponible', 'error');
-        return;
+        return '<p class="info-text text-error">Configuration non disponible</p>';
     }
+    
+    let html = '';
     
     Object.keys(stockVivantConfig.categories).forEach(category => {
         const products = stockVivantConfig.categories[category];
         const categoryLabel = stockVivantConfig.labels[category] || category;
         
-        const tableDiv = document.createElement('div');
-        tableDiv.className = 'stock-category-table';
-        tableDiv.innerHTML = `
-            <h4>${categoryLabel}</h4>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>Produit</th>
-                        <th>Quantité</th>
-                        <th>Prix Unitaire (FCFA)</th>
-                        <th>Total (FCFA)</th>
-                        <th>Commentaire</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${products.map(product => {
-                        const existingItem = existingData.find(item => 
-                            item.categorie === category && item.produit === product
-                        );
-                        const productLabel = stockVivantConfig.labels[product] || product;
-                        const quantite = existingItem ? existingItem.quantite : 0;
-                        const prixUnitaire = existingItem ? existingItem.prix_unitaire : 0;
-                        const total = quantite * prixUnitaire;
-                        const commentaire = existingItem ? existingItem.commentaire : '';
-                        
-                        return `
-                            <tr data-category="${category}" data-product="${product}">
-                                <td>${productLabel}</td>
-                                <td>
-                                    <input type="number" class="stock-quantity" 
-                                           value="${quantite}" min="0" step="1"
-                                           onchange="calculateStockVivantTotal(this)">
-                                </td>
-                                <td>
-                                    <input type="number" class="stock-price" 
-                                           value="${prixUnitaire}" min="0" step="0.01"
-                                           onchange="calculateStockVivantTotal(this)">
-                                </td>
-                                <td>
-                                    <span class="stock-total">${formatCurrency(total)}</span>
-                                </td>
-                                <td>
-                                    <input type="text" class="stock-comment" 
-                                           value="${commentaire}" placeholder="Commentaire optionnel">
-                                </td>
-                            </tr>
-                        `;
-                    }).join('')}
-                </tbody>
-            </table>
+        html += `
+            <div class="stock-category-table" data-category="${category}">
+                <h4>${categoryLabel}</h4>
+                <table class="modern-table">
+                    <thead>
+                        <tr>
+                            <th>Produit</th>
+                            <th>Quantité</th>
+                            <th>Prix Unitaire (FCFA)</th>
+                            <th>Décote (%)</th>
+                            <th>Total (FCFA)</th>
+                            <th>Commentaire</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${products.map(product => {
+                            const existingItem = existingData.find(item => 
+                                item.categorie === category && item.produit === product
+                            );
+                            const productLabel = stockVivantConfig.labels[product] || product;
+                            const quantite = existingItem ? existingItem.quantite : 0;
+                            const prixUnitaire = existingItem ? existingItem.prix_unitaire : 0;
+                            const decote = existingItem ? existingItem.decote || 0.20 : 0.20; // Utiliser la décote de la DB ou 20% par défaut
+                            const total = quantite * prixUnitaire * (1 - decote);
+                            const commentaire = existingItem ? existingItem.commentaire : '';
+                            
+                            return `
+                                <tr data-category="${category}" data-product="${product}">
+                                    <td>${productLabel}</td>
+                                    <td>
+                                        <input type="number" class="stock-quantity modern-input" 
+                                               value="${quantite}" min="0" step="1"
+                                               onchange="calculateStockVivantTotal(this)">
+                                    </td>
+                                    <td>
+                                        <input type="number" class="stock-price modern-input" 
+                                               value="${prixUnitaire}" min="0" step="0.01"
+                                               onchange="calculateStockVivantTotal(this)">
+                                    </td>
+                                    <td>
+                                        <input type="number" class="stock-decote modern-input" 
+                                               value="${(decote * 100).toFixed(0)}" min="0" max="100" step="1"
+                                               onchange="calculateStockVivantTotal(this)">
+                                    </td>
+                                    <td>
+                                        <span class="stock-total font-weight-bold">${formatCurrency(total)}</span>
+                                    </td>
+                                    <td>
+                                        <input type="text" class="stock-comment modern-input" 
+                                               value="${commentaire}" placeholder="Commentaire optionnel">
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
         `;
-        
-        container.appendChild(tableDiv);
     });
+    
+    return html;
 }
 
 function calculateStockVivantTotal(input) {
     const row = input.closest('tr');
     const quantity = parseFloat(row.querySelector('.stock-quantity').value) || 0;
     const price = parseFloat(row.querySelector('.stock-price').value) || 0;
-    const total = quantity * price;
+    const decotePercent = parseFloat(row.querySelector('.stock-decote').value) || 20;
+    const decote = decotePercent / 100; // Convertir le pourcentage en décimal
+    const total = quantity * price * (1 - decote);
     
     row.querySelector('.stock-total').textContent = formatCurrency(total);
+    
+    // Mettre à jour le total général
+    updateGrandTotal();
 }
 
 async function saveStockVivantData() {
@@ -7994,100 +8007,55 @@ function displaySimpleStockVivant() {
     document.getElementById('stock-date').value = today;
 }
 
-async function loadStockVivantByDate() {
-    try {
-        // 1. Vérifier la date
-        const dateInput = document.getElementById('stock-date');
-        if (!dateInput || !dateInput.value) {
-            showStockVivantNotification('Veuillez sélectionner une date', 'error');
-            return;
-        }
-
-        // 2. Charger les données depuis l'API
-        const response = await fetch(apiUrl(`/api/stock-vivant?date=${dateInput.value}`));
-        
-        if (!response.ok) {
-            throw new Error(`Erreur lors du chargement des données`);
-        }
-
-        const stockData = await response.json();
-
-        // 3. Si pas de données, afficher un message
-        if (!stockData || stockData.length === 0) {
-            showStockVivantNotification('Aucune donnée trouvée pour cette date', 'info');
-            return;
-        }
-
-        // 4. Remplir le formulaire avec les données
-        Object.keys(stockVivantConfig.categories).forEach(category => {
-            stockVivantConfig.categories[category].forEach(product => {
-                const rowId = `${category}_${product}`;
-                const existingData = stockData.find(item => 
-                    item.categorie === category && item.produit === product
-                );
-
-                // Remplir quantité
-                const qtyInput = document.getElementById(`qty_${rowId}`);
-                if (qtyInput) {
-                    qtyInput.value = existingData ? existingData.quantite : 0;
-                }
-
-                // Remplir prix unitaire
-                const priceInput = document.getElementById(`price_${rowId}`);
-                if (priceInput) {
-                    priceInput.value = existingData ? existingData.prix_unitaire : 0;
-                }
-
-                // Mettre à jour le total de la ligne
-                calculateRowTotal(rowId);
-            });
-        });
-
-        // Mettre à jour le total général une seule fois après avoir chargé toutes les données
-        updateGrandTotal();
-        showStockVivantNotification('Données chargées avec succès', 'success');
-
-    } catch (error) {
-        console.error('Erreur chargement stock:', error);
-        showStockVivantNotification(`Erreur: ${error.message}`, 'error');
-    }
-}
+// Cette fonction a été remplacée par displaySimpleStockVivantTable() pour la nouvelle interface moderne
 async function saveSimpleStockVivant() {
     try {
         // 1. Vérifier la date
-        const dateInput = document.getElementById('stock-date');
+        const dateInput = document.getElementById('stock-vivant-date');
         if (!dateInput || !dateInput.value) {
             showStockVivantNotification('Veuillez sélectionner une date', 'error');
             return;
         }
 
-        // 2. Collecter les données
+        // 2. Collecter les données depuis les tableaux générés
         const stockData = [];
-        Object.keys(stockVivantConfig.categories).forEach(category => {
-            stockVivantConfig.categories[category].forEach(product => {
-                const rowId = `${category}_${product}`;
-                const quantity = parseFloat(document.getElementById(`qty_${rowId}`).value) || 0;
-                const price = parseFloat(document.getElementById(`price_${rowId}`).value) || 0;
+        const rows = document.querySelectorAll('#stock-vivant-simple-table tr[data-category]');
+        
+        rows.forEach(row => {
+            const category = row.dataset.category;
+            const product = row.dataset.product;
+            const quantityInput = row.querySelector('.stock-quantity');
+            const priceInput = row.querySelector('.stock-price');
+            const decoteInput = row.querySelector('.stock-decote');
+            const commentInput = row.querySelector('.stock-comment');
+            
+            if (quantityInput && priceInput && decoteInput) {
+                const quantity = parseFloat(quantityInput.value) || 0;
+                const price = parseFloat(priceInput.value) || 0;
+                const decotePercent = parseFloat(decoteInput.value) || 20;
+                const decote = decotePercent / 100; // Convertir en décimal
+                const comment = commentInput ? commentInput.value.trim() : '';
                 
                 // N'inclure que les lignes avec quantité ou prix > 0
                 if (quantity > 0 || price > 0) {
-                    const total = quantity * price * (1 - DEFAULT_DISCOUNT);
                     stockData.push({
                         categorie: category,
                         produit: product,
                         quantite: quantity,
                         prix_unitaire: price,
-                        decote: DEFAULT_DISCOUNT,
-                        total: Math.round(total) // Arrondir le total
+                        decote: decote,
+                        commentaire: comment
                     });
                 }
-            });
+            }
         });
 
         if (stockData.length === 0) {
             showStockVivantNotification('Aucune donnée à sauvegarder', 'warning');
             return;
         }
+
+        console.log('📊 Données à sauvegarder:', stockData);
 
         // 3. Envoyer à l'API
         const response = await fetch(apiUrl('/api/stock-vivant/update'), {
@@ -8107,7 +8075,7 @@ async function saveSimpleStockVivant() {
         if (!response.ok) {
             // Gérer le cas où des données existent déjà
             if (response.status === 409 && result.error === 'duplicate_data') {
-                if (confirm(`Des données existent déjà pour le ${dateInput.value}. Voulez-vous les remplacer ?`)) {
+                if (confirm(`Des données existent déjà pour le ${formatDate(dateInput.value)}. Voulez-vous les remplacer ?`)) {
                     // Réessayer avec replace_existing = true
                     const retryResponse = await fetch(apiUrl('/api/stock-vivant/update'), {
                         method: 'POST',
@@ -8121,40 +8089,46 @@ async function saveSimpleStockVivant() {
                         })
                     });
                     
+                    const retryResult = await retryResponse.json();
+                    
                     if (!retryResponse.ok) {
-                        throw new Error('Erreur lors du remplacement des données');
+                        throw new Error(retryResult.error || 'Erreur lors du remplacement des données');
                     }
                     
-                    showStockVivantNotification('Stock remplacé avec succès', 'success');
+                    showStockVivantNotification(`Stock remplacé avec succès (${retryResult.processedCount} entrées)`, 'success');
+                    
+                    // Recharger les données après sauvegarde
+                    await displaySimpleStockVivantTable();
                 }
                 return;
             }
             throw new Error(result.error || 'Erreur lors de la sauvegarde');
         }
 
-        showStockVivantNotification('Stock sauvegardé avec succès', 'success');
+        showStockVivantNotification(`Stock sauvegardé avec succès (${result.processedCount} entrées)`, 'success');
         
-        // Optionnel : effacer le formulaire après sauvegarde
-        if (confirm('Voulez-vous effacer le formulaire ?')) {
-            clearSimpleStockVivant();
-        }
+        // Recharger les données après sauvegarde
+        await displaySimpleStockVivantTable();
 
     } catch (error) {
         console.error('Erreur sauvegarde stock:', error);
         showStockVivantNotification(`Erreur: ${error.message}`, 'error');
     }
 }
-// Calculer le total pour une ligne
-function calculateRowTotal(rowId) {
-    const qtyInput = document.getElementById(`qty_${rowId}`);
-    const priceInput = document.getElementById(`price_${rowId}`);
-    const totalSpan = document.getElementById(`total_${rowId}`);
+// Calculer le total pour une ligne (version moderne)
+function calculateRowTotal(row) {
+    const qtyInput = row.querySelector('.stock-quantity');
+    const priceInput = row.querySelector('.stock-price');
+    const decoteInput = row.querySelector('.stock-decote');
+    const totalSpan = row.querySelector('.stock-total');
     
-    if (qtyInput && priceInput && totalSpan) {
+    if (qtyInput && priceInput && decoteInput && totalSpan) {
         const qty = parseFloat(qtyInput.value) || 0;
         const price = parseFloat(priceInput.value) || 0;
-        const total = qty * price * (1 - DEFAULT_DISCOUNT); // Appliquer la décote
-        totalSpan.textContent = formatCurrency(Math.round(total)); // Arrondir et formater
+        const decotePercent = parseFloat(decoteInput.value) || 20;
+        const decote = decotePercent / 100; // Convertir le pourcentage en décimal
+        const total = qty * price * (1 - decote);
+        totalSpan.textContent = formatCurrency(total);
         
         // Mettre à jour le total général
         updateGrandTotal();
@@ -8164,16 +8138,13 @@ function calculateRowTotal(rowId) {
 // Calculer le total général
 function calculateGrandTotal() {
     let grandTotal = 0;
-    Object.keys(stockVivantConfig.categories).forEach(category => {
-        stockVivantConfig.categories[category].forEach(product => {
-            const rowId = `${category}_${product}`;
-            const totalSpan = document.getElementById(`total_${rowId}`);
-            if (totalSpan) {
-                const total = parseFloat(totalSpan.textContent.replace(/[^\d.-]/g, '')) || 0;
-                grandTotal += total;
-            }
-        });
+    const totals = document.querySelectorAll('#stock-vivant-simple-table .stock-total');
+    
+    totals.forEach(totalSpan => {
+        const total = parseFloat(totalSpan.textContent.replace(/[^\d.-]/g, '')) || 0;
+        grandTotal += total;
     });
+    
     return grandTotal;
 }
 
@@ -8188,11 +8159,21 @@ function updateGrandTotal() {
 
 // Effacer le stock simple
 function clearSimpleStockVivant() {
-    const inputs = document.querySelectorAll('.stock-quantity, .stock-price');
-    inputs.forEach(input => input.value = 0);
+    const rows = document.querySelectorAll('#stock-vivant-simple-table tr[data-category]');
     
-    const totals = document.querySelectorAll('.stock-total');
-    totals.forEach(total => total.textContent = '0');
+    rows.forEach(row => {
+        const quantityInput = row.querySelector('.stock-quantity');
+        const priceInput = row.querySelector('.stock-price');
+        const decoteInput = row.querySelector('.stock-decote');
+        const commentInput = row.querySelector('.stock-comment');
+        const totalSpan = row.querySelector('.stock-total');
+        
+        if (quantityInput) quantityInput.value = 0;
+        if (priceInput) priceInput.value = 0;
+        if (decoteInput) decoteInput.value = 20; // Remettre la décote par défaut à 20%
+        if (commentInput) commentInput.value = '';
+        if (totalSpan) totalSpan.textContent = formatCurrency(0);
+    });
     
     // Mettre à jour le total général
     updateGrandTotal();
@@ -8317,4 +8298,274 @@ async function initStockVivantPermissions() {
         showStockVivantNotification('Erreur lors de l\'initialisation des permissions', 'error');
         return false;
     }
+}
+
+// === STOCK VIVANT MODERN DESIGN FUNCTIONS ===
+
+// Setup modern Stock Vivant events
+function setupModernStockVivantEvents() {
+    console.log('🎨 CLIENT: Configuration des événements Stock Vivant moderne');
+    
+    // Mode selector
+    const modeSelect = document.getElementById('stock-vivant-mode');
+    if (modeSelect) {
+        modeSelect.addEventListener('change', async function() {
+            await showStockMode(this.value);
+        });
+    }
+    
+    // Date input
+    const dateInput = document.getElementById('stock-vivant-date');
+    if (dateInput) {
+        dateInput.addEventListener('change', function() {
+            console.log('📅 Date changée:', this.value);
+        });
+    }
+    
+    // Category filter
+    const categoryFilter = document.getElementById('stock-vivant-category-filter');
+    if (categoryFilter) {
+        categoryFilter.addEventListener('change', function() {
+            filterStockByCategory(this.value);
+        });
+    }
+    
+    // Action buttons - modern interface
+    const resetBtn = document.getElementById('reset-stock-filters-btn');
+    if (resetBtn) {
+        resetBtn.addEventListener('click', async () => {
+            await resetStockFilters();
+        });
+    }
+    
+    const saveBtn = document.getElementById('save-stock-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveSimpleStockVivant);
+    }
+    
+    const clearBtn = document.getElementById('clear-stock-btn');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', clearSimpleStockVivant);
+    }
+    
+    const exportBtn = document.getElementById('export-stock-btn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', exportStockData);
+    }
+    
+    // Dates selector for history
+    const datesSelect = document.getElementById('stock-dates-select');
+    if (datesSelect) {
+        datesSelect.addEventListener('change', function() {
+            if (this.value) {
+                loadStockVivantBySelectedDate(this.value);
+            }
+        });
+    }
+}
+
+// Show specific stock mode
+async function showStockMode(mode) {
+    console.log('🔄 CLIENT: Affichage mode:', mode);
+    
+    // Hide all panels
+    document.querySelectorAll('.stock-mode-panel').forEach(panel => {
+        panel.style.display = 'none';
+    });
+    
+    // Show selected panel
+    const selectedPanel = document.getElementById(`stock-vivant-${mode}`);
+    if (selectedPanel) {
+        selectedPanel.style.display = 'block';
+    }
+    
+    // Load data based on mode
+    switch(mode) {
+        case 'saisie':
+            console.log('📝 Mode saisie activé');
+            await displaySimpleStockVivantTable();
+            break;
+        case 'consultation':
+            console.log('👁️ Mode consultation activé');
+            await loadStockVivantForConsultation();
+            break;
+        case 'historique':
+            console.log('📜 Mode historique activé');
+            await loadStockVivantDates();
+            break;
+    }
+}
+
+// Display simple stock vivant table (modern version)
+async function displaySimpleStockVivantTable() {
+    const container = document.getElementById('stock-vivant-simple-table');
+    if (!container) {
+        console.error('❌ Container stock-vivant-simple-table introuvable');
+        return;
+    }
+    
+    // Show loading message
+    container.innerHTML = '<p class="info-text">Chargement des données...</p>';
+    
+    try {
+        // Get selected date
+        const dateInput = document.getElementById('stock-vivant-date');
+        const selectedDate = dateInput ? dateInput.value : null;
+        
+        let existingData = [];
+        
+        // Load existing data for the selected date
+        if (selectedDate) {
+            try {
+                const response = await fetch(apiUrl(`/api/stock-vivant?date=${selectedDate}`));
+                if (response.ok) {
+                    existingData = await response.json();
+                    console.log('📊 Données existantes chargées:', existingData.length, 'entrées');
+                }
+            } catch (error) {
+                console.warn('⚠️ Impossible de charger les données existantes:', error.message);
+            }
+        }
+        
+        // Generate table with existing data
+        container.innerHTML = generateStockVivantTables(existingData);
+        updateGrandTotal();
+        
+    } catch (error) {
+        console.error('❌ Erreur lors de l\'affichage du tableau:', error);
+        container.innerHTML = '<p class="info-text text-error">Erreur lors du chargement</p>';
+    }
+}
+
+// Load stock vivant for consultation mode
+async function loadStockVivantForConsultation() {
+    const container = document.getElementById('stock-vivant-view-table');
+    if (!container) return;
+    
+    try {
+        const dateInput = document.getElementById('stock-vivant-date');
+        const selectedDate = dateInput ? dateInput.value : null;
+        
+        if (!selectedDate) {
+            container.innerHTML = '<p class="info-text">Veuillez sélectionner une date</p>';
+            return;
+        }
+        
+        const response = await fetch(`/api/stock-vivant?date=${selectedDate}`);
+        const data = await response.json();
+        
+        if (data.length === 0) {
+            container.innerHTML = '<p class="info-text">Aucune donnée pour cette date</p>';
+            return;
+        }
+        
+        displayStockVivantViewData(data);
+        
+    } catch (error) {
+        console.error('Erreur chargement consultation:', error);
+        container.innerHTML = '<p class="info-text text-error">Erreur lors du chargement</p>';
+    }
+}
+
+// Reset stock filters
+async function resetStockFilters() {
+    console.log('🔄 CLIENT: Réinitialisation des filtres');
+    
+    // Reset date to today
+    const dateInput = document.getElementById('stock-vivant-date');
+    if (dateInput) {
+        dateInput.value = new Date().toISOString().split('T')[0];
+    }
+    
+    // Reset mode to saisie
+    const modeSelect = document.getElementById('stock-vivant-mode');
+    if (modeSelect) {
+        modeSelect.value = 'saisie';
+        await showStockMode('saisie');
+    }
+    
+    // Reset category filter
+    const categoryFilter = document.getElementById('stock-vivant-category-filter');
+    if (categoryFilter) {
+        categoryFilter.value = '';
+        filterStockByCategory('');
+    }
+}
+
+// Filter stock by category
+function filterStockByCategory(categoryValue) {
+    console.log('🔍 CLIENT: Filtrage par catégorie:', categoryValue);
+    
+    const tables = document.querySelectorAll('.stock-category-table');
+    tables.forEach(table => {
+        const category = table.dataset.category;
+        if (!categoryValue || category === categoryValue) {
+            table.style.display = 'block';
+        } else {
+            table.style.display = 'none';
+        }
+    });
+    
+    updateGrandTotal();
+}
+
+// Export stock data
+function exportStockData() {
+    console.log('📤 CLIENT: Export des données stock');
+    showStockVivantNotification('Fonctionnalité d\'export en cours de développement', 'info');
+}
+
+// Load stock vivant by selected date
+async function loadStockVivantBySelectedDate(selectedDate) {
+    console.log('📅 CLIENT: Chargement stock pour date:', selectedDate);
+    
+    try {
+        const response = await fetch(`/api/stock-vivant?date=${selectedDate}`);
+        const data = await response.json();
+        
+        const container = document.getElementById('stock-vivant-history-table');
+        if (container) {
+            if (data.length === 0) {
+                container.innerHTML = '<p class="info-text">Aucune donnée pour cette date</p>';
+            } else {
+                displayStockVivantViewData(data);
+            }
+        }
+        
+    } catch (error) {
+        console.error('Erreur chargement historique:', error);
+        showStockVivantNotification('Erreur lors du chargement de l\'historique', 'error');
+    }
+}
+
+// Initialize modern Stock Vivant interface
+async function initializeModernStockVivant() {
+    console.log('🎨 CLIENT: Initialisation interface Stock Vivant moderne');
+    
+    // Set default date to today
+    const today = new Date().toISOString().split('T')[0];
+    const dateInput = document.getElementById('stock-vivant-date');
+    if (dateInput) {
+        dateInput.value = today;
+    }
+    
+    // Populate category filter
+    populateStockVivantCategoryFilter();
+    
+    // Setup modern events
+    setupModernStockVivantEvents();
+    
+    // Show default mode (saisie) only if config is loaded
+    if (stockVivantConfig && stockVivantConfig.categories) {
+        await showStockMode('saisie');
+    } else {
+        console.log('⏳ Configuration pas encore chargée, attente...');
+        // Show loading message
+        const container = document.getElementById('stock-vivant-simple-table');
+        if (container) {
+            container.innerHTML = '<p class="info-text">Chargement de la configuration...</p>';
+        }
+    }
+    
+    console.log('✅ CLIENT: Interface moderne initialisée');
 }

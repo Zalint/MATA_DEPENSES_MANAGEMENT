@@ -4422,25 +4422,27 @@ app.post('/api/stock-vivant/update', requireStockVivantAuth, async (req, res) =>
 
         // Traiter chaque entrée de stock
         for (const item of stockData) {
-            const { categorie, produit, quantite, prix_unitaire, commentaire } = item;
+            const { categorie, produit, quantite, prix_unitaire, decote, commentaire } = item;
             
             if (!categorie || !produit || quantite === undefined || prix_unitaire === undefined) {
                 continue; // Ignorer les entrées incomplètes
             }
 
-            const total = (parseFloat(quantite) || 0) * (parseFloat(prix_unitaire) || 0);
+            const decoteValue = parseFloat(decote) || 0.20; // Décote par défaut de 20%
+            const total = (parseFloat(quantite) || 0) * (parseFloat(prix_unitaire) || 0) * (1 - decoteValue);
 
             await pool.query(`
-                INSERT INTO stock_vivant (date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                INSERT INTO stock_vivant (date_stock, categorie, produit, quantite, prix_unitaire, decote, total, commentaire)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (date_stock, categorie, produit)
                 DO UPDATE SET 
                     quantite = EXCLUDED.quantite,
                     prix_unitaire = EXCLUDED.prix_unitaire,
+                    decote = EXCLUDED.decote,
                     total = EXCLUDED.total,
                     commentaire = EXCLUDED.commentaire,
                     updated_at = CURRENT_TIMESTAMP
-            `, [date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire || '']);
+            `, [date_stock, categorie, produit, quantite, prix_unitaire, decoteValue, total, commentaire || '']);
 
             processedCount++;
         }

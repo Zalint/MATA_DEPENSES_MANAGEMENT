@@ -1200,11 +1200,115 @@
 
                 <!-- Section Stock Vivant -->
                 <section id="stock-vivant-section" class="section">
-                    <h2>Stock Vivant</h2>
-                    
-                    <!-- Tableau simple pour saisie -->
-                    <div id="stock-vivant-simple-table">
-                        <!-- Le tableau sera généré par JavaScript -->
+                    <div class="section-header">
+                        <h2><i class="fas fa-seedling"></i> Stock Vivant</h2>
+                        <p class="section-description">Gestion et suivi du stock vivant quotidien</p>
+                    </div>
+
+                    <!-- Filtres et contrôles -->
+                    <div class="filters-container">
+                        <div class="filters-row">
+                            <div class="filter-group">
+                                <label for="stock-vivant-date">Date du stock</label>
+                                <input type="date" id="stock-vivant-date" class="form-control">
+                            </div>
+                            
+                            <div class="filter-group">
+                                <label for="stock-vivant-mode">Mode d'affichage</label>
+                                <select id="stock-vivant-mode" class="form-control">
+                                    <option value="saisie">Saisie Simple</option>
+                                    <option value="consultation">Consultation</option>
+                                    <option value="historique">Historique</option>
+                                </select>
+                            </div>
+                            
+                            <div class="filter-group">
+                                <label for="stock-vivant-category-filter">Catégorie</label>
+                                <select id="stock-vivant-category-filter" class="form-control">
+                                    <option value="">Toutes les catégories</option>
+                                </select>
+                            </div>
+                            
+                            <div class="filter-actions">
+                                <button type="button" id="load-stock-data-btn" class="btn btn-primary">
+                                    <i class="fas fa-search"></i> Charger
+                                </button>
+                                <button type="button" id="reset-stock-filters-btn" class="btn btn-secondary">
+                                    <i class="fas fa-eraser"></i> Réinitialiser
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Zone de contenu principal -->
+                    <div class="content-container">
+                        <!-- Mode Saisie Simple -->
+                        <div id="stock-vivant-saisie" class="stock-mode-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-edit"></i> Saisie du Stock</h3>
+                                <div class="panel-actions">
+                                    <button type="button" id="save-stock-btn" class="btn btn-success">
+                                        <i class="fas fa-save"></i> Sauvegarder
+                                    </button>
+                                    <button type="button" id="clear-stock-btn" class="btn btn-warning">
+                                        <i class="fas fa-eraser"></i> Effacer
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <div id="stock-vivant-simple-table">
+                                    <!-- Le tableau sera généré par JavaScript -->
+                                </div>
+                            </div>
+                            
+                            <div class="stock-summary">
+                                <div class="summary-item">
+                                    <label>Total Général:</label>
+                                    <span id="stock-grand-total" class="total-value">0 FCFA</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Mode Consultation -->
+                        <div id="stock-vivant-consultation" class="stock-mode-panel" style="display: none;">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-eye"></i> Consultation du Stock</h3>
+                                <div class="panel-actions">
+                                    <button type="button" id="export-stock-btn" class="btn btn-info">
+                                        <i class="fas fa-download"></i> Exporter
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <div id="stock-vivant-view-table">
+                                    <!-- Les données de consultation seront affichées ici -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Mode Historique -->
+                        <div id="stock-vivant-historique" class="stock-mode-panel" style="display: none;">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-history"></i> Historique du Stock</h3>
+                                <div class="panel-info">
+                                    <span id="stock-dates-info" class="info-text"></span>
+                                </div>
+                            </div>
+                            
+                            <div class="dates-selector">
+                                <select id="stock-dates-select" class="form-control">
+                                    <option value="">Sélectionner une date</option>
+                                </select>
+                            </div>
+                            
+                            <div class="table-responsive">
+                                <div id="stock-vivant-history-table">
+                                    <!-- L'historique sera affiché ici -->
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </section>
 
