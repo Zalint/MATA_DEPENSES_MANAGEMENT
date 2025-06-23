@@ -8,96 +8,229 @@
           "id": "bovin",
           "name": "Bovin",
           "subcategories": [
-            { "id": "boeuf", "name": "Boeuf" },
-            { "id": "veau", "name": "Veau" },
-            { "id": "alim", "name": "Alimentation" },
-            { "id": "trans", "name": "Transport" }
+            {
+              "id": "boeuf",
+              "name": "Boeuf"
+            },
+            {
+              "id": "veau",
+              "name": "Veau"
+            },
+            {
+              "id": "alim",
+              "name": "Alimentation"
+            },
+            {
+              "id": "trans",
+              "name": "Transport"
+            }
           ]
         }
       ]
     },
     {
-        "id": "achatovin",
-        "name": "Achat Ovin",
-        "categories": [
-        
-          {
-            "id": "ovin",
-            "name": "Ovin",
-            "subcategories": [
-              { "id": "agneau", "name": "Agneau" },
-              { "id": "brebis", "name": "Brebis" },
-              { "id": "belier", "name": "Belier" }
-            ]
-          }
-        ]
-      },
+      "id": "achatovin",
+      "name": "Achat Ovin",
+      "categories": [
+        {
+          "id": "ovin",
+          "name": "Ovin",
+          "subcategories": [
+            {
+              "id": "agneau",
+              "name": "Agneau"
+            },
+            {
+              "id": "brebis",
+              "name": "Brebis"
+            },
+            {
+              "id": "belier",
+              "name": "Belier"
+            }
+          ]
+        }
+      ]
+    },
     {
       "id": "depense_mata_group",
       "name": "Dépense Mata Group",
       "categories": [
-        { "id": "commun_mg", "name": "Commun" },
-        { "id": "o_foire_mg", "name": "O.Foire" },
-        { "id": "mbao_mg", "name": "Mbao" },
-        { "id": "keur_massarr_mg", "name": "Keur Massarr" },
-        { "id": "linguere_mg", "name": "Linguere" },
-        { "id": "dahra_mg", "name": "Dahra" }
+        {
+          "id": "commun_mg",
+          "name": "Commun"
+        },
+        {
+          "id": "o_foire_mg",
+          "name": "O.Foire"
+        },
+        {
+          "id": "mbao_mg",
+          "name": "Mbao"
+        },
+        {
+          "id": "keur_massarr_mg",
+          "name": "Keur Massarr"
+        },
+        {
+          "id": "linguere_mg",
+          "name": "Linguere"
+        },
+        {
+          "id": "dahra_mg",
+          "name": "Dahra"
+        }
       ],
       "subcategories": [
-        { "id": "electricite", "name": "Électricité" },
-        { "id": "eau", "name": "Eau" },
-        { "id": "vehicule", "name": "Véhicule" },
-        { "id": "wifi", "name": "Wifi" },
-        { "id": "autres_mg", "name": "Autres" },
-        { "id": "nettoyage", "name": "Nettoyage" },
-        { "id": "commercial", "name": "Commercial" },
-        { "id": "boucher", "name": "Boucher" }
+        {
+          "id": "electricite",
+          "name": "Électricité"
+        },
+        {
+          "id": "eau",
+          "name": "Eau"
+        },
+        {
+          "id": "vehicule",
+          "name": "Véhicule"
+        },
+        {
+          "id": "wifi",
+          "name": "Wifi"
+        },
+        {
+          "id": "autres_mg",
+          "name": "Autres"
+        },
+        {
+          "id": "nettoyage",
+          "name": "Nettoyage"
+        },
+        {
+          "id": "commercial",
+          "name": "Commercial"
+        },
+        {
+          "id": "boucher",
+          "name": "Boucher"
+        }
       ]
     },
     {
       "id": "depense_mata_prod",
       "name": "Dépense Mata Prod",
       "categories": [
-        { "id": "commun_mp", "name": "Commun" },
-        { "id": "fora", "name": "Fora" },
-        { "id": "linguere_mp", "name": "Linguère" },
-        { "id": "dahra_mp", "name": "Dahra" },
-        { "id": "bambey", "name": "Bambey" },
-        { "id": "mbirkilane", "name": "Mbirkilane" },
-        { "id": "autre_mp", "name": "Autre" }
+        {
+          "id": "commun_mp",
+          "name": "Commun"
+        },
+        {
+          "id": "fora",
+          "name": "Fora"
+        },
+        {
+          "id": "linguere_mp",
+          "name": "Linguère"
+        },
+        {
+          "id": "dahra_mp",
+          "name": "Dahra"
+        },
+        {
+          "id": "bambey",
+          "name": "Bambey"
+        },
+        {
+          "id": "mbirkilane",
+          "name": "Mbirkilane"
+        },
+        {
+          "id": "autre_mp",
+          "name": "Autre"
+        }
       ],
       "subcategories": [
-        { "id": "alimentation", "name": "Alimentation" },
-        { "id": "eau_mp", "name": "Eau" },
-        { "id": "veterinaire", "name": "Vétérinaire" },
-        { "id": "champs", "name": "Champs" },
-        { "id": "transport", "name": "Transport" },
-        { "id": "autres_mp", "name": "Autres" }
+        {
+          "id": "alimentation",
+          "name": "Alimentation"
+        },
+        {
+          "id": "eau_mp",
+          "name": "Eau"
+        },
+        {
+          "id": "veterinaire",
+          "name": "Vétérinaire"
+        },
+        {
+          "id": "champs",
+          "name": "Champs"
+        },
+        {
+          "id": "transport",
+          "name": "Transport"
+        },
+        {
+          "id": "autres_mp",
+          "name": "Autres"
+        }
       ]
     },
     {
       "id": "depense_marketing",
       "name": "Dépense Marketing",
       "categories": [
-        { "id": "commun_mk", "name": "Commun" },
-        { "id": "digital", "name": "Digital" },
-        { "id": "o_foire_mk", "name": "O.Foire" },
-        { "id": "mbao_mk", "name": "Mbao" },
-        { "id": "keur_massarr_mk", "name": "Keur Massarr" },
-        { "id": "linguere_mk", "name": "Linguere" },
-        { "id": "dahra_mk", "name": "Dahra" }
+        {
+          "id": "commun_mk",
+          "name": "Commun"
+        },
+        {
+          "id": "digital",
+          "name": "Digital"
+        },
+        {
+          "id": "o_foire_mk",
+          "name": "O.Foire"
+        },
+        {
+          "id": "mbao_mk",
+          "name": "Mbao"
+        },
+        {
+          "id": "keur_massarr_mk",
+          "name": "Keur Massarr"
+        },
+        {
+          "id": "linguere_mk",
+          "name": "Linguere"
+        },
+        {
+          "id": "dahra_mk",
+          "name": "Dahra"
+        }
       ],
       "subcategories": [
         {
           "id": "reseau_social",
           "name": "Réseau social",
           "details": [
-            "Facebook", "TikTok", "Google", "Instagram", 
-            "YouTube", "LinkedIn", "Site web"
+            "Facebook",
+            "TikTok",
+            "Google",
+            "Instagram",
+            "YouTube",
+            "LinkedIn",
+            "Site web"
           ]
         },
-        { "id": "deplacement", "name": "Déplacement" },
-        { "id": "autres_mk", "name": "Autres" }
+        {
+          "id": "deplacement",
+          "name": "Déplacement"
+        },
+        {
+          "id": "autres_mk",
+          "name": "Autres"
+        }
       ]
     },
     {
@@ -108,22 +241,52 @@
           "id": "linguere_tresorerie",
           "name": "Linguere",
           "subcategories": [
-            { "id": "poulet", "name": "Poulet" },
-            { "id": "oeuf", "name": "Oeuf" },
-            { "id": "ovin_tresorerie", "name": "Ovin" },
-            { "id": "bovin_tresorerie", "name": "Bovin" },
-            { "id": "autres_tresorerie", "name": "Autres" }
+            {
+              "id": "poulet",
+              "name": "Poulet"
+            },
+            {
+              "id": "oeuf",
+              "name": "Oeuf"
+            },
+            {
+              "id": "ovin_tresorerie",
+              "name": "Ovin"
+            },
+            {
+              "id": "bovin_tresorerie",
+              "name": "Bovin"
+            },
+            {
+              "id": "autres_tresorerie",
+              "name": "Autres"
+            }
           ]
         },
         {
           "id": "Dakar_tresorerie",
           "name": "Dakar",
           "subcategories": [
-            { "id": "poulet_dakar", "name": "Poulet" },
-            { "id": "oeuf_dakar", "name": "Oeuf" },
-            { "id": "ovin_dakar", "name": "Ovin" },
-            { "id": "bovin_dakar", "name": "Bovin" },
-            { "id": "autres_dakar", "name": "Autres" }
+            {
+              "id": "poulet_dakar",
+              "name": "Poulet"
+            },
+            {
+              "id": "oeuf_dakar",
+              "name": "Oeuf"
+            },
+            {
+              "id": "ovin_dakar",
+              "name": "Ovin"
+            },
+            {
+              "id": "bovin_dakar",
+              "name": "Bovin"
+            },
+            {
+              "id": "autres_dakar",
+              "name": "Autres"
+            }
           ]
         }
       ]
@@ -136,10 +299,29 @@
           "id": "fournisseur_cat",
           "name": "Fournisseur",
           "subcategories": [
-            { "id": "fournisseur_subcat", "name": "Fournisseur" }
+            {
+              "id": "fournisseur_subcat",
+              "name": "Fournisseur"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "AutresAll",
+      "name": "Autres",
+      "categories": [
+        {
+          "id": "AutresAllId",
+          "name": "Autres",
+          "subcategories": [
+            {
+              "id": "AutresAllIdSub",
+              "name": "Autres"
+            }
           ]
         }
       ]
     }
   ]
-} 
+}

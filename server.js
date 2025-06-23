@@ -3376,6 +3376,53 @@ app.post('/api/admin/accounts/:id/empty', adminEndpoints.requireAdmin, adminEndp
 // Admin routes - Get account backups
 app.get('/api/admin/backups', adminEndpoints.requireAdmin, adminEndpoints.getAccountBackups);
 
+// Admin routes - Configuration management
+app.get('/api/admin/config/categories', requireAdminAuth, (req, res) => {
+    try {
+        const configPath = path.join(__dirname, 'categories_config.json');
+        const configData = fs.readFileSync(configPath, 'utf8');
+        res.json(JSON.parse(configData));
+    } catch (error) {
+        console.error('Error reading categories config:', error);
+        res.status(500).json({ error: 'Error reading categories configuration' });
+    }
+});
+
+app.put('/api/admin/config/categories', requireAdminAuth, (req, res) => {
+    try {
+        const configPath = path.join(__dirname, 'categories_config.json');
+        const configData = JSON.stringify(req.body, null, 2);
+        fs.writeFileSync(configPath, configData, 'utf8');
+        res.json({ message: 'Categories configuration updated successfully' });
+    } catch (error) {
+        console.error('Error updating categories config:', error);
+        res.status(500).json({ error: 'Error updating categories configuration' });
+    }
+});
+
+app.get('/api/admin/config/stock-vivant', requireAdminAuth, (req, res) => {
+    try {
+        const configPath = path.join(__dirname, 'stock_vivant_config.json');
+        const configData = fs.readFileSync(configPath, 'utf8');
+        res.json(JSON.parse(configData));
+    } catch (error) {
+        console.error('Error reading stock vivant config:', error);
+        res.status(500).json({ error: 'Error reading stock vivant configuration' });
+    }
+});
+
+app.put('/api/admin/config/stock-vivant', requireAdminAuth, (req, res) => {
+    try {
+        const configPath = path.join(__dirname, 'stock_vivant_config.json');
+        const configData = JSON.stringify(req.body, null, 2);
+        fs.writeFileSync(configPath, configData, 'utf8');
+        res.json({ message: 'Stock vivant configuration updated successfully' });
+    } catch (error) {
+        console.error('Error updating stock vivant config:', error);
+        res.status(500).json({ error: 'Error updating stock vivant configuration' });
+    }
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));

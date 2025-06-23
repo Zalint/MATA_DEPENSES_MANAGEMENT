@@ -142,6 +142,7 @@ async function showApp() {
     if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         document.getElementById('admin-menu').style.display = 'block';
         document.getElementById('admin-users-menu').style.display = 'block';
+        document.getElementById('admin-config-menu').style.display = 'block';
         document.getElementById('stock-menu').style.display = 'block';
         document.getElementById('stock-vivant-menu').style.display = 'block';
         document.getElementById('stock-vivant-permissions-menu').style.display = 'block';
@@ -228,6 +229,16 @@ async function showSection(sectionName) {
             } catch (error) {
                 console.error('❌ CLIENT: Erreur dans showSection - stock-vivant-permissions:', error);
                 showNotification('Erreur lors du chargement des Permissions Stock Vivant', 'error');
+            }
+            break;
+        case 'admin-config':
+            console.log('🔄 CLIENT: showSection - admin-config appelé');
+            try {
+                await initAdminConfig();
+                console.log('✅ CLIENT: showSection - admin-config terminé avec succès');
+            } catch (error) {
+                console.error('❌ CLIENT: Erreur dans showSection - admin-config:', error);
+                showNotification('Erreur lors du chargement de la Configuration', 'error');
             }
             break;
     }
@@ -9316,4 +9327,635 @@ async function confirmCopyStockData() {
         console.error('Erreur lors de la copie:', error);
         showStockVivantNotification('Erreur lors de la copie: ' + error.message, 'error');
     }
+}
+
+// =====================================================
+// ADMIN CONFIG FUNCTIONS
+// =====================================================
+
+async function initAdminConfig() {
+    console.log('🔧 Initialisation de la configuration admin');
+    
+    // Vérifier les permissions
+    if (!['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        showNotification('Accès refusé - Privilèges administrateur requis', 'error');
+        return;
+    }
+
+    // Initialiser les onglets
+    setupConfigTabs();
+    
+    // Charger les configurations
+    await loadCategoriesConfig();
+    await loadStockVivantConfig();
+    
+    // Configurer les événements
+    setupConfigEventListeners();
+    
+    // Configurer le nettoyage des highlights d'accolades
+    setupBraceHighlightCleanup('categories');
+    setupBraceHighlightCleanup('stock-vivant');
+}
+
+function setupConfigTabs() {
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const configPanels = document.querySelectorAll('.config-panel');
+
+    tabButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            const configType = button.getAttribute('data-config');
+            
+            // Désactiver tous les onglets et panneaux
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            configPanels.forEach(panel => panel.classList.remove('active'));
+            
+            // Activer l'onglet et le panneau sélectionnés
+            button.classList.add('active');
+            
+            if (configType === 'categories') {
+                document.getElementById('categories-config').classList.add('active');
+            } else if (configType === 'stock-vivant') {
+                document.getElementById('stock-vivant-config').classList.add('active');
+            }
+        });
+    });
+}
+
+function setupConfigEventListeners() {
+    // Événements pour la configuration des catégories
+    document.getElementById('save-categories-config').addEventListener('click', saveCategoriesConfig);
+    document.getElementById('reload-categories-config').addEventListener('click', loadCategoriesConfig);
+    
+    const categoriesEditor = document.getElementById('categories-json-editor');
+    categoriesEditor.addEventListener('input', () => {
+        document.getElementById('save-categories-config').disabled = false;
+        updateLineNumbers('categories');
+        updateCursorPosition('categories');
+        validateJsonRealTime('categories');
+    });
+    
+    categoriesEditor.addEventListener('scroll', () => syncLineNumbersScroll('categories'));
+    categoriesEditor.addEventListener('keyup', () => updateCursorPosition('categories'));
+    categoriesEditor.addEventListener('click', (e) => {
+        updateCursorPosition('categories');
+        handleBraceClick(e, 'categories');
+    });
+
+    // Toolbar categories
+    document.getElementById('format-categories-json').addEventListener('click', () => formatJson('categories'));
+    document.getElementById('minify-categories-json').addEventListener('click', () => minifyJson('categories'));
+    document.getElementById('validate-categories-json').addEventListener('click', () => validateJson('categories'));
+    document.getElementById('undo-categories').addEventListener('click', () => undoJsonChange('categories'));
+    document.getElementById('redo-categories').addEventListener('click', () => redoJsonChange('categories'));
+
+    // Événements pour la configuration du stock vivant
+    document.getElementById('save-stock-vivant-config').addEventListener('click', saveStockVivantConfig);
+    document.getElementById('reload-stock-vivant-config').addEventListener('click', loadStockVivantConfig);
+    
+    const stockVivantEditor = document.getElementById('stock-vivant-json-editor');
+    stockVivantEditor.addEventListener('input', () => {
+        document.getElementById('save-stock-vivant-config').disabled = false;
+        updateLineNumbers('stock-vivant');
+        updateCursorPosition('stock-vivant');
+        validateJsonRealTime('stock-vivant');
+    });
+    
+    stockVivantEditor.addEventListener('scroll', () => syncLineNumbersScroll('stock-vivant'));
+    stockVivantEditor.addEventListener('keyup', () => updateCursorPosition('stock-vivant'));
+    stockVivantEditor.addEventListener('click', (e) => {
+        updateCursorPosition('stock-vivant');
+        handleBraceClick(e, 'stock-vivant');
+    });
+
+    // Toolbar stock vivant
+    document.getElementById('format-stock-vivant-json').addEventListener('click', () => formatJson('stock-vivant'));
+    document.getElementById('minify-stock-vivant-json').addEventListener('click', () => minifyJson('stock-vivant'));
+    document.getElementById('validate-stock-vivant-json').addEventListener('click', () => validateJson('stock-vivant'));
+    document.getElementById('undo-stock-vivant').addEventListener('click', () => undoJsonChange('stock-vivant'));
+    document.getElementById('redo-stock-vivant').addEventListener('click', () => redoJsonChange('stock-vivant'));
+}
+
+// Variables globales pour l'historique des modifications
+const jsonHistory = {
+    categories: { undo: [], redo: [] },
+    'stock-vivant': { undo: [], redo: [] }
+};
+
+async function loadCategoriesConfig() {
+    try {
+        const response = await fetch('/api/admin/config/categories');
+        
+        if (response.ok) {
+            const config = await response.json();
+            const editor = document.getElementById('categories-json-editor');
+            editor.value = JSON.stringify(config, null, 2);
+            document.getElementById('save-categories-config').disabled = true;
+            
+            // Initialiser les fonctionnalités de l'éditeur
+            updateLineNumbers('categories');
+            updateCursorPosition('categories');
+            validateJsonRealTime('categories');
+            saveToHistory('categories', editor.value);
+            
+            showNotification('Configuration des catégories chargée', 'success');
+        } else {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors du chargement');
+        }
+    } catch (error) {
+        console.error('Erreur chargement config catégories:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+async function saveCategoriesConfig() {
+    try {
+        const editor = document.getElementById('categories-json-editor');
+        const configText = editor.value.trim();
+        
+        if (!configText) {
+            showNotification('La configuration ne peut pas être vide', 'error');
+            return;
+        }
+
+        // Valider le JSON
+        let config;
+        try {
+            config = JSON.parse(configText);
+        } catch (parseError) {
+            showNotification('JSON invalide: ' + parseError.message, 'error');
+            updateJsonStatus('categories', 'error', `Erreur: ${parseError.message}`);
+            return;
+        }
+        
+        // Sauvegarder dans l'historique avant la modification
+        saveToHistory('categories', configText);
+
+        // Sauvegarder
+        const response = await fetch('/api/admin/config/categories', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(config)
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showNotification(result.message, 'success');
+            document.getElementById('save-categories-config').disabled = true;
+            
+            // Recharger les catégories dans l'application
+            await loadCategories();
+        } else {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors de la sauvegarde');
+        }
+    } catch (error) {
+        console.error('Erreur sauvegarde config catégories:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+async function loadStockVivantConfig() {
+    try {
+        const response = await fetch('/api/admin/config/stock-vivant');
+        
+        if (response.ok) {
+            const config = await response.json();
+            const editor = document.getElementById('stock-vivant-json-editor');
+            editor.value = JSON.stringify(config, null, 2);
+            document.getElementById('save-stock-vivant-config').disabled = true;
+            
+            // Initialiser les fonctionnalités de l'éditeur
+            updateLineNumbers('stock-vivant');
+            updateCursorPosition('stock-vivant');
+            validateJsonRealTime('stock-vivant');
+            saveToHistory('stock-vivant', editor.value);
+            
+            showNotification('Configuration du stock vivant chargée', 'success');
+        } else {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors du chargement');
+        }
+    } catch (error) {
+        console.error('Erreur chargement config stock vivant:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+async function saveStockVivantConfig() {
+    try {
+        const editor = document.getElementById('stock-vivant-json-editor');
+        const configText = editor.value.trim();
+        
+        if (!configText) {
+            showNotification('La configuration ne peut pas être vide', 'error');
+            return;
+        }
+
+        // Valider le JSON
+        let config;
+        try {
+            config = JSON.parse(configText);
+        } catch (parseError) {
+            showNotification('JSON invalide: ' + parseError.message, 'error');
+            updateJsonStatus('stock-vivant', 'error', `Erreur: ${parseError.message}`);
+            return;
+        }
+        
+        // Sauvegarder dans l'historique avant la modification
+        saveToHistory('stock-vivant', configText);
+
+        // Sauvegarder
+        const response = await fetch('/api/admin/config/stock-vivant', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(config)
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showNotification(result.message, 'success');
+            document.getElementById('save-stock-vivant-config').disabled = true;
+        } else {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors de la sauvegarde');
+        }
+    } catch (error) {
+        console.error('Erreur sauvegarde config stock vivant:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+// =====================================================
+// ENHANCED JSON EDITOR FUNCTIONS
+// =====================================================
+
+function updateLineNumbers(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    const lineNumbers = document.getElementById(`${configType}-line-numbers`);
+    
+    if (!editor || !lineNumbers) return;
+    
+    const lines = editor.value.split('\n');
+    const lineNumbersText = lines.map((_, index) => index + 1).join('\n');
+    lineNumbers.textContent = lineNumbersText;
+}
+
+function syncLineNumbersScroll(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    const lineNumbers = document.getElementById(`${configType}-line-numbers`);
+    
+    if (!editor || !lineNumbers) return;
+    
+    lineNumbers.scrollTop = editor.scrollTop;
+}
+
+function updateCursorPosition(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    const lineInfo = document.getElementById(`${configType}-line-info`);
+    
+    if (!editor || !lineInfo) return;
+    
+    const cursorPosition = editor.selectionStart;
+    const textBeforeCursor = editor.value.substring(0, cursorPosition);
+    const lines = textBeforeCursor.split('\n');
+    const currentLine = lines.length;
+    const currentColumn = lines[lines.length - 1].length + 1;
+    
+    lineInfo.textContent = `Ligne ${currentLine}, Col ${currentColumn}`;
+}
+
+function validateJsonRealTime(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    const status = document.getElementById(`${configType}-json-status`);
+    
+    if (!editor || !status) return;
+    
+    try {
+        const text = editor.value.trim();
+        if (!text) {
+            updateJsonStatus(configType, 'warning', 'JSON vide');
+            return;
+        }
+        
+        JSON.parse(text);
+        updateJsonStatus(configType, 'valid', 'JSON valide');
+        editor.classList.remove('error');
+    } catch (error) {
+        updateJsonStatus(configType, 'error', `Erreur JSON: ${error.message}`);
+        editor.classList.add('error');
+    }
+}
+
+function updateJsonStatus(configType, type, message) {
+    const status = document.getElementById(`${configType}-json-status`);
+    if (!status) return;
+    
+    const statusClasses = ['status-valid', 'status-error', 'status-warning'];
+    const statusIcons = {
+        valid: 'fas fa-check-circle',
+        error: 'fas fa-exclamation-triangle',
+        warning: 'fas fa-exclamation-circle'
+    };
+    
+    const statusIndicator = status.querySelector('.status-indicator');
+    statusIndicator.className = `status-indicator status-${type}`;
+    statusIndicator.innerHTML = `<i class="${statusIcons[type]}"></i> ${message}`;
+}
+
+function formatJson(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    if (!editor) return;
+    
+    try {
+        const text = editor.value.trim();
+        if (!text) {
+            showNotification('Aucun contenu à formater', 'warning');
+            return;
+        }
+        
+        const parsed = JSON.parse(text);
+        const formatted = JSON.stringify(parsed, null, 2);
+        
+        saveToHistory(configType, editor.value);
+        editor.value = formatted;
+        updateLineNumbers(configType);
+        validateJsonRealTime(configType);
+        document.getElementById(`save-${configType}-config`).disabled = false;
+        
+        showNotification('JSON formaté avec succès', 'success');
+    } catch (error) {
+        showNotification(`Erreur de formatage: ${error.message}`, 'error');
+    }
+}
+
+function minifyJson(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    if (!editor) return;
+    
+    try {
+        const text = editor.value.trim();
+        if (!text) {
+            showNotification('Aucun contenu à minifier', 'warning');
+            return;
+        }
+        
+        const parsed = JSON.parse(text);
+        const minified = JSON.stringify(parsed);
+        
+        saveToHistory(configType, editor.value);
+        editor.value = minified;
+        updateLineNumbers(configType);
+        validateJsonRealTime(configType);
+        document.getElementById(`save-${configType}-config`).disabled = false;
+        
+        showNotification('JSON minifié avec succès', 'success');
+    } catch (error) {
+        showNotification(`Erreur de minification: ${error.message}`, 'error');
+    }
+}
+
+function validateJson(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    if (!editor) return;
+    
+    try {
+        const text = editor.value.trim();
+        if (!text) {
+            showNotification('Aucun contenu à valider', 'warning');
+            return;
+        }
+        
+        const parsed = JSON.parse(text);
+        const objectCount = countJsonObjects(parsed);
+        
+        showNotification(`✅ JSON valide! ${objectCount.objects} objets, ${objectCount.arrays} tableaux`, 'success');
+        updateJsonStatus(configType, 'valid', 'JSON valide');
+    } catch (error) {
+        showNotification(`❌ JSON invalide: ${error.message}`, 'error');
+        updateJsonStatus(configType, 'error', `Erreur: ${error.message}`);
+    }
+}
+
+function countJsonObjects(obj, counts = { objects: 0, arrays: 0 }) {
+    if (Array.isArray(obj)) {
+        counts.arrays++;
+        obj.forEach(item => countJsonObjects(item, counts));
+    } else if (typeof obj === 'object' && obj !== null) {
+        counts.objects++;
+        Object.values(obj).forEach(value => countJsonObjects(value, counts));
+    }
+    return counts;
+}
+
+function saveToHistory(configType, content) {
+    const history = jsonHistory[configType];
+    if (!history) return;
+    
+    // Éviter les doublons
+    if (history.undo.length > 0 && history.undo[history.undo.length - 1] === content) {
+        return;
+    }
+    
+    history.undo.push(content);
+    history.redo = []; // Vider le redo quand on ajoute quelque chose
+    
+    // Limiter l'historique à 50 éléments
+    if (history.undo.length > 50) {
+        history.undo.shift();
+    }
+}
+
+function undoJsonChange(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    const history = jsonHistory[configType];
+    
+    if (!editor || !history || history.undo.length <= 1) {
+        showNotification('Rien à annuler', 'info');
+        return;
+    }
+    
+    // Sauvegarder l'état actuel dans redo
+    history.redo.push(history.undo.pop());
+    
+    // Restaurer l'état précédent
+    const previousState = history.undo[history.undo.length - 1];
+    editor.value = previousState;
+    
+    updateLineNumbers(configType);
+    validateJsonRealTime(configType);
+    document.getElementById(`save-${configType}-config`).disabled = false;
+    
+    showNotification('Modification annulée', 'info');
+}
+
+function redoJsonChange(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    const history = jsonHistory[configType];
+    
+    if (!editor || !history || history.redo.length === 0) {
+        showNotification('Rien à refaire', 'info');
+        return;
+    }
+    
+    // Restaurer l'état suivant
+    const nextState = history.redo.pop();
+    history.undo.push(nextState);
+    editor.value = nextState;
+    
+    updateLineNumbers(configType);
+    validateJsonRealTime(configType);
+    document.getElementById(`save-${configType}-config`).disabled = false;
+    
+    showNotification('Modification refaite', 'info');
+}
+
+// =====================================================
+// BRACE HIGHLIGHTING FUNCTIONS
+// =====================================================
+
+let braceHighlightTimeout = null;
+
+function handleBraceClick(event, configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    if (!editor) return;
+    
+    // Obtenir la position du curseur
+    const cursorPosition = editor.selectionStart;
+    const text = editor.value;
+    const charAtCursor = text[cursorPosition];
+    
+    // Vérifier si on a cliqué sur une accolade/crochet
+    const braces = {
+        '{': '}',
+        '[': ']',
+        '(': ')',
+        '}': '{',
+        ']': '[',
+        ')': '('
+    };
+    
+    if (braces[charAtCursor]) {
+        const matchingPosition = findMatchingBrace(text, cursorPosition, charAtCursor);
+        if (matchingPosition !== -1) {
+            highlightBraces(editor, cursorPosition, matchingPosition, charAtCursor, configType);
+        }
+    }
+}
+
+function findMatchingBrace(text, startPos, startChar) {
+    const braceMap = {
+        '{': '}',
+        '[': ']',
+        '(': ')',
+        '}': '{',
+        ']': '[',
+        ')': '('
+    };
+    
+    const targetChar = braceMap[startChar];
+    const isOpening = ['{', '[', '('].includes(startChar);
+    
+    let count = 1;
+    let pos = startPos + (isOpening ? 1 : -1);
+    
+    while (pos >= 0 && pos < text.length) {
+        const char = text[pos];
+        
+        if (char === startChar) {
+            count++;
+        } else if (char === targetChar) {
+            count--;
+            if (count === 0) {
+                return pos;
+            }
+        }
+        
+        pos += isOpening ? 1 : -1;
+    }
+    
+    return -1; // Pas trouvé
+}
+
+function highlightBraces(editor, pos1, pos2, clickedChar, configType) {
+    // Nettoyer les anciens highlights
+    clearBraceHighlights(configType);
+    
+    // Approche alternative: sélectionner temporairement le contenu entre les accolades
+    const text = editor.value;
+    const start = Math.min(pos1, pos2);
+    const end = Math.max(pos1, pos2) + 1;
+    
+    // Calculer les positions des lignes pour l'affichage
+    const textBefore1 = text.substring(0, pos1);
+    const textBefore2 = text.substring(0, pos2);
+    const line1 = textBefore1.split('\n').length;
+    const line2 = textBefore2.split('\n').length;
+    const col1 = textBefore1.split('\n').pop().length + 1;
+    const col2 = textBefore2.split('\n').pop().length + 1;
+    
+    // Ajouter un effet visuel à l'éditeur
+    editor.classList.add('highlighting');
+    
+    // Sélectionner brièvement le contenu entre les accolades
+    editor.focus();
+    editor.setSelectionRange(start, end);
+    
+    // Afficher une notification informative
+    const braceType = {
+        '{': 'accolades',
+        '[': 'crochets',
+        '(': 'parenthèses'
+    }[clickedChar] || {
+        '}': 'accolades',
+        ']': 'crochets',
+        ')': 'parenthèses'
+    }[clickedChar];
+    
+    showNotification(
+        `🎯 Paire de ${braceType} trouvée: L${line1}:C${col1} ↔ L${line2}:C${col2}`,
+        'info'
+    );
+    
+    // Programmer la suppression des highlights
+    if (braceHighlightTimeout) {
+        clearTimeout(braceHighlightTimeout);
+    }
+    
+    braceHighlightTimeout = setTimeout(() => {
+        clearBraceHighlights(configType);
+        // Remettre le curseur à la position originale
+        editor.setSelectionRange(pos1, pos1);
+    }, 2000); // 2 secondes
+}
+
+// Note: createBraceHighlight et getCharacterCoordinates supprimées car nous utilisons 
+// maintenant une approche basée sur la sélection de texte qui est plus fiable
+
+function clearBraceHighlights(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    if (!editor) return;
+    
+    // Supprimer la classe de highlighting
+    editor.classList.remove('highlighting');
+    
+    // Nettoyer le timeout
+    if (braceHighlightTimeout) {
+        clearTimeout(braceHighlightTimeout);
+        braceHighlightTimeout = null;
+    }
+}
+
+// Nettoyer les highlights quand on scroll ou qu'on tape
+function setupBraceHighlightCleanup(configType) {
+    const editor = document.getElementById(`${configType}-json-editor`);
+    if (!editor) return;
+    
+    editor.addEventListener('scroll', () => clearBraceHighlights(configType));
+    editor.addEventListener('input', () => clearBraceHighlights(configType));
+    editor.addEventListener('keydown', () => clearBraceHighlights(configType));
 }

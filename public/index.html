@@ -88,6 +88,11 @@
                             <i class="fas fa-user-shield"></i> Gérer Utilisateurs
                         </a>
                     </li>
+                    <li id="admin-config-menu" style="display: none;">
+                        <a href="#" data-section="admin-config" class="nav-link">
+                            <i class="fas fa-cogs"></i> Config
+                        </a>
+                    </li>
                     <li>
                         <a href="#" data-section="partner-tracking" class="nav-link">
                             <i class="fas fa-handshake"></i> Suivi Partenaires
@@ -1309,6 +1314,151 @@
                             <div class="table-responsive">
                                 <div id="stock-vivant-history-table">
                                     <!-- L'historique sera affiché ici -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section Admin Config -->
+                <section id="admin-config-section" class="section">
+                    <h2><i class="fas fa-cogs"></i> Configuration</h2>
+                    <p class="section-description">Gérer les fichiers de configuration du système</p>
+
+                    <div class="config-tabs">
+                        <div class="tab-buttons">
+                            <button type="button" class="tab-button active" data-config="categories">
+                                <i class="fas fa-tags"></i> Configuration Catégories
+                            </button>
+                            <button type="button" class="tab-button" data-config="stock-vivant">
+                                <i class="fas fa-seedling"></i> Configuration Stock Vivant
+                            </button>
+                        </div>
+
+                        <!-- Configuration des Catégories -->
+                        <div id="categories-config" class="config-panel active">
+                            <div class="config-header">
+                                <h3><i class="fas fa-tags"></i> Configuration des Catégories</h3>
+                                <div class="config-actions">
+                                    <button type="button" id="save-categories-config" class="btn btn-success" disabled>
+                                        <i class="fas fa-save"></i> Sauvegarder
+                                    </button>
+                                    <button type="button" id="reload-categories-config" class="btn btn-secondary">
+                                        <i class="fas fa-sync"></i> Recharger
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="config-editor">
+                                <div class="form-group">
+                                    <label for="categories-json-editor">Configuration JSON des Catégories</label>
+                                    
+                                    <!-- Toolbar pour l'éditeur -->
+                                    <div class="json-toolbar">
+                                        <div class="toolbar-group">
+                                            <button type="button" class="btn btn-sm btn-tool" id="format-categories-json" title="Formater le JSON">
+                                                <i class="fas fa-code"></i> Formater
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="minify-categories-json" title="Minifier le JSON">
+                                                <i class="fas fa-compress"></i> Minifier
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="validate-categories-json" title="Valider le JSON">
+                                                <i class="fas fa-check-circle"></i> Valider
+                                            </button>
+                                        </div>
+                                        <div class="toolbar-group">
+                                            <button type="button" class="btn btn-sm btn-tool" id="undo-categories" title="Annuler">
+                                                <i class="fas fa-undo"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="redo-categories" title="Refaire">
+                                                <i class="fas fa-redo"></i>
+                                            </button>
+                                        </div>
+                                        <div class="toolbar-info">
+                                            <span class="line-info" id="categories-line-info">Ligne 1, Col 1</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="json-editor-container">
+                                        <div class="json-line-numbers" id="categories-line-numbers">1</div>
+                                        <textarea id="categories-json-editor" class="json-editor" rows="25" placeholder="Chargement de la configuration..."></textarea>
+                                    </div>
+                                    
+                                    <div class="json-status" id="categories-json-status">
+                                        <span class="status-indicator status-valid">
+                                            <i class="fas fa-check-circle"></i> JSON valide
+                                        </span>
+                                    </div>
+                                    
+                                    <small class="form-help">
+                                        <i class="fas fa-info-circle"></i> 
+                                        Utilisez les outils ci-dessus pour formater et valider votre JSON. 
+                                        Un JSON invalide causera des erreurs dans l'application.
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Configuration du Stock Vivant -->
+                        <div id="stock-vivant-config" class="config-panel">
+                            <div class="config-header">
+                                <h3><i class="fas fa-seedling"></i> Configuration du Stock Vivant</h3>
+                                <div class="config-actions">
+                                    <button type="button" id="save-stock-vivant-config" class="btn btn-success" disabled>
+                                        <i class="fas fa-save"></i> Sauvegarder
+                                    </button>
+                                    <button type="button" id="reload-stock-vivant-config" class="btn btn-secondary">
+                                        <i class="fas fa-sync"></i> Recharger
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="config-editor">
+                                <div class="form-group">
+                                    <label for="stock-vivant-json-editor">Configuration JSON du Stock Vivant</label>
+                                    
+                                    <!-- Toolbar pour l'éditeur -->
+                                    <div class="json-toolbar">
+                                        <div class="toolbar-group">
+                                            <button type="button" class="btn btn-sm btn-tool" id="format-stock-vivant-json" title="Formater le JSON">
+                                                <i class="fas fa-code"></i> Formater
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="minify-stock-vivant-json" title="Minifier le JSON">
+                                                <i class="fas fa-compress"></i> Minifier
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="validate-stock-vivant-json" title="Valider le JSON">
+                                                <i class="fas fa-check-circle"></i> Valider
+                                            </button>
+                                        </div>
+                                        <div class="toolbar-group">
+                                            <button type="button" class="btn btn-sm btn-tool" id="undo-stock-vivant" title="Annuler">
+                                                <i class="fas fa-undo"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="redo-stock-vivant" title="Refaire">
+                                                <i class="fas fa-redo"></i>
+                                            </button>
+                                        </div>
+                                        <div class="toolbar-info">
+                                            <span class="line-info" id="stock-vivant-line-info">Ligne 1, Col 1</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="json-editor-container">
+                                        <div class="json-line-numbers" id="stock-vivant-line-numbers">1</div>
+                                        <textarea id="stock-vivant-json-editor" class="json-editor" rows="25" placeholder="Chargement de la configuration..."></textarea>
+                                    </div>
+                                    
+                                    <div class="json-status" id="stock-vivant-json-status">
+                                        <span class="status-indicator status-valid">
+                                            <i class="fas fa-check-circle"></i> JSON valide
+                                        </span>
+                                    </div>
+                                    
+                                    <small class="form-help">
+                                        <i class="fas fa-info-circle"></i> 
+                                        Cette configuration définit les catégories et labels pour le stock vivant.
+                                        Utilisez les outils ci-dessus pour formater et valider votre JSON.
+                                    </small>
                                 </div>
                             </div>
                         </div>
