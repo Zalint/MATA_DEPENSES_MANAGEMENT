@@ -7683,32 +7683,53 @@ function calculateStockVivantTotal(input) {
 
 async function saveStockVivantData() {
     const selectedDate = document.getElementById('stock-vivant-date').value;
+    if (!selectedDate) {
+        showStockVivantNotification('Veuillez sélectionner une date', 'error');
+        return;
+    }
+    
     const stockData = [];
     
-    // Collecter toutes les données des tableaux
-    const rows = document.querySelectorAll('#stock-vivant-tables tr[data-category]');
+    // Collecter toutes les données des tableaux - updated selector
+    const rows = document.querySelectorAll('tr[data-category]');
+    console.log('🔍 Found rows for saving:', rows.length);
     
     rows.forEach(row => {
         const category = row.dataset.category;
         const product = row.dataset.product;
-        const quantity = parseFloat(row.querySelector('.stock-quantity').value) || 0;
-        const price = parseFloat(row.querySelector('.stock-price').value) || 0;
-        const comment = row.querySelector('.stock-comment').value.trim();
+        const quantityInput = row.querySelector('.stock-quantity');
+        const priceInput = row.querySelector('.stock-price');
+        const decoteInput = row.querySelector('.stock-decote');
+        const commentInput = row.querySelector('.stock-comment');
         
-        // Inclure seulement les entrées avec une quantité ou un prix > 0
-        if (quantity > 0 || price > 0) {
-            stockData.push({
-                categorie: category,
-                produit: product,
-                quantite: quantity,
-                prix_unitaire: price,
-                commentaire: comment
-            });
+        if (quantityInput && priceInput) {
+            const quantity = parseFloat(quantityInput.value) || 0;
+            const price = parseFloat(priceInput.value) || 0;
+            const decotePercent = parseFloat(decoteInput ? decoteInput.value : 20) || 20;
+            const decote = decotePercent / 100;
+            const comment = commentInput ? commentInput.value.trim() : '';
+            
+            console.log(`📊 Processing ${category}/${product}: qty=${quantity}, price=${price}`);
+            
+            // Inclure seulement les entrées avec une quantité ou un prix > 0
+            if (quantity > 0 || price > 0) {
+                stockData.push({
+                    categorie: category,
+                    produit: product,
+                    quantite: quantity,
+                    prix_unitaire: price,
+                    decote: decote,
+                    commentaire: comment
+                });
+            }
         }
     });
     
+    console.log('📊 Final stock data to save:', stockData);
+    
     if (stockData.length === 0) {
         showStockVivantNotification('Aucune donnée à sauvegarder', 'warning');
+        console.log('❌ No data found to save - check table structure');
         return;
     }
     
