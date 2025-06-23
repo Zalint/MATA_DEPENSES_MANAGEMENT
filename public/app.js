@@ -608,6 +608,11 @@ async function addExpenseWithFile(formData) {
             const totalField = document.getElementById('expense-total');
             totalField.value = '';
             delete totalField.dataset.manuallyEdited;
+            // Remettre la quantité à 1 par défaut
+            const quantityField = document.getElementById('expense-quantity');
+            if (quantityField) {
+                quantityField.value = '1';
+            }
             // Réinitialiser le texte du fichier
             const fileText = document.getElementById('file-input-text');
             if (fileText) {
@@ -2605,6 +2610,11 @@ function setDefaultDate() {
         creditDateInput.value = today;
     }
     document.getElementById('expense-date').value = today;
+    // Initialiser la quantité à 1
+    const quantityField = document.getElementById('expense-quantity');
+    if (quantityField) {
+        quantityField.value = '1';
+    }
 }
 
 // Gestionnaires d'événements
@@ -2674,7 +2684,9 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.append('justification', fileInput.files[0]);
         }
         
-        addExpenseWithFile(formData);
+        // Stocker formData globalement et afficher la confirmation
+        window.pendingExpenseFormData = formData;
+        showExpenseConfirmationModal();
     });
     
 
@@ -4009,8 +4021,6 @@ function createExpenseDetailsModal() {
                                 <th class="sortable" data-field="total" style="padding: 12px; text-align: right; cursor: pointer; user-select: none; position: relative;">
                                     Total Dépensé <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
                                 </th>
-                                <th style="padding: 12px; text-align: right;">Total restant</th>
-                                <th style="padding: 12px; text-align: right;">Total crédité</th>
                                 <th class="sortable" data-field="predictable" style="padding: 12px; text-align: center; cursor: pointer; user-select: none; position: relative;">
                                     Prévisible <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
                                 </th>
@@ -4283,15 +4293,10 @@ function displayModalExpenses(expenses) {
         `;
         return;
     }
-    // Calcul du total crédité
-    const totalCredited = typeof window.modalTotalCredited !== 'undefined' ? window.modalTotalCredited : 0;
-    // Calcul cumulatif selon l'ordre d'affichage (après tri et filtres)
-    let cumulative = 0;
+    // Rendu des lignes du tableau
     tbody.innerHTML = expenses.map(expense => {
         const isDGExpense = currentUser.role === 'directeur' && expense.username !== currentUser.username;
         const rowStyle = isDGExpense ? 'font-style: italic; opacity: 0.8;' : '';
-        cumulative += parseInt(expense.total) || 0;
-        const remaining = totalCredited - cumulative;
         return `
             <tr style="${rowStyle}">
                 <td style="padding: 12px;">${formatDate(expense.expense_date)}</td>
@@ -4304,8 +4309,6 @@ function displayModalExpenses(expenses) {
                 <td style="padding: 12px; text-align: center;">${expense.quantity || 'N/A'}</td>
                 <td style="padding: 12px; text-align: right;">${expense.unit_price ? formatCurrency(expense.unit_price) : 'N/A'}</td>
                 <td style="padding: 12px; text-align: right; font-weight: bold; color: #e74c3c;">${formatCurrency(expense.total)}</td>
-                <td style="padding: 12px; text-align: right; font-weight: bold; color: #2980b9;">${formatCurrency(remaining)}</td>
-                <td style="padding: 12px; text-align: right; font-weight: bold; color: #27ae60;">${typeof window.modalTotalCredited !== 'undefined' ? formatCurrency(window.modalTotalCredited) : '-'}</td>
                 <td style="padding: 12px; text-align: center;">
                     <span class="badge ${expense.predictable === 'oui' ? 'badge-success' : 'badge-warning'}" 
                           style="padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; 
@@ -8563,4 +8566,237 @@ async function initializeModernStockVivant() {
     }
     
     console.log('✅ CLIENT: Interface moderne initialisée');
+}
+
+// Fonctions pour le modal de confirmation de dépense
+function showExpenseConfirmationModal() {
+    try {
+        // Remplir le résumé avec les données du formulaire
+        populateExpenseConfirmationSummary();
+        
+        // Afficher la validation du budget
+        displayBudgetValidationInModal();
+        
+        // Afficher le modal
+        document.getElementById('expense-confirmation-modal').style.display = 'block';
+        document.body.style.overflow = 'hidden';
+        
+    } catch (error) {
+        console.error('Erreur lors de l\'affichage du modal de confirmation:', error);
+        showNotification('Erreur lors de l\'affichage de la confirmation', 'error');
+    }
+}
+
+function closeExpenseConfirmationModal() {
+    document.getElementById('expense-confirmation-modal').style.display = 'none';
+    document.body.style.overflow = 'auto';
+    // Ne pas nettoyer les données ici - elles seront nettoyées après la soumission
+}
+
+function populateExpenseConfirmationSummary() {
+    if (!window.pendingExpenseFormData) return;
+    
+    const formData = window.pendingExpenseFormData;
+    
+    // Récupérer les textes des sélections
+    const accountSelect = document.getElementById('expense-account');
+    const typeSelect = document.getElementById('expense-type');
+    const categorySelect = document.getElementById('expense-category');
+    const subcategorySelect = document.getElementById('expense-subcategory');
+    const socialNetworkSelect = document.getElementById('social-network-detail');
+    const predictableSelect = document.getElementById('expense-predictable');
+    
+    // Remplir les éléments du résumé
+    document.getElementById('confirm-account').textContent = 
+        accountSelect.options[accountSelect.selectedIndex]?.text || '—';
+    
+    document.getElementById('confirm-type').textContent = 
+        typeSelect.options[typeSelect.selectedIndex]?.text || '—';
+    
+    document.getElementById('confirm-category').textContent = 
+        categorySelect.options[categorySelect.selectedIndex]?.text || '—';
+    
+    document.getElementById('confirm-subcategory').textContent = 
+        subcategorySelect.options[subcategorySelect.selectedIndex]?.text || '—';
+    
+    // Réseau social (si applicable)
+    const socialRow = document.getElementById('confirm-social-row');
+    if (socialNetworkSelect.value) {
+        socialRow.style.display = 'flex';
+        document.getElementById('confirm-social').textContent = 
+            socialNetworkSelect.options[socialNetworkSelect.selectedIndex]?.text || '—';
+    } else {
+        socialRow.style.display = 'none';
+    }
+    
+    // Date formatée
+    const dateValue = formData.get('expense_date');
+    document.getElementById('confirm-date').textContent = 
+        dateValue ? formatDate(dateValue) : '—';
+    
+    document.getElementById('confirm-designation').textContent = 
+        formData.get('designation') || '—';
+    
+    document.getElementById('confirm-supplier').textContent = 
+        formData.get('supplier') || '—';
+    
+    document.getElementById('confirm-quantity').textContent = 
+        formData.get('quantity') || '—';
+    
+    const unitPrice = parseInt(formData.get('unit_price')) || 0;
+    document.getElementById('confirm-unit-price').textContent = 
+        unitPrice > 0 ? formatCurrency(unitPrice) : '—';
+    
+    const total = parseInt(formData.get('total')) || 0;
+    document.getElementById('confirm-total').textContent = 
+        total > 0 ? formatCurrency(total) : '—';
+    
+    document.getElementById('confirm-predictable').textContent = 
+        predictableSelect.options[predictableSelect.selectedIndex]?.text || '—';
+    
+    // Description (si fournie)
+    const description = formData.get('description');
+    const descriptionRow = document.getElementById('confirm-description-row');
+    if (description && description.trim()) {
+        descriptionRow.style.display = 'flex';
+        document.getElementById('confirm-description').textContent = description;
+    } else {
+        descriptionRow.style.display = 'none';
+    }
+    
+    // Fichier (si fourni)
+    const fileRow = document.getElementById('confirm-file-row');
+    const file = formData.get('justification');
+    if (file && file.name) {
+        fileRow.style.display = 'flex';
+        document.getElementById('confirm-file').textContent = file.name;
+    } else {
+        fileRow.style.display = 'none';
+    }
+}
+
+async function displayBudgetValidationInModal() {
+    try {
+        const budgetContainer = document.getElementById('budget-validation');
+        budgetContainer.innerHTML = '';
+        
+        if (!window.pendingExpenseFormData) return;
+        
+        const accountId = window.pendingExpenseFormData.get('account_id');
+        const amount = parseInt(window.pendingExpenseFormData.get('total')) || 0;
+        
+        if (!accountId || amount <= 0) return;
+        
+        // Récupérer les informations du compte
+        const response = await fetch(`/api/account/${accountId}/balance`);
+        if (!response.ok) {
+            console.warn('Impossible de récupérer le solde du compte pour la validation');
+            return;
+        }
+        
+        const balance = await response.json();
+        
+        // Calculer les nouveaux totaux
+        const currentBalance = balance.current_balance;
+        const totalCredited = balance.total_credited;
+        const currentTotalSpent = balance.total_spent;
+        const newTotalSpent = currentTotalSpent + amount;
+        
+        let validationClass = 'budget-ok';
+        let validationIcon = '✓';
+        let validationTitle = 'Budget validé';
+        let validationMessage = '';
+        
+        // Vérifier le solde disponible
+        if (currentBalance < amount) {
+            validationClass = 'budget-error';
+            validationIcon = '❌';
+            validationTitle = 'Solde insuffisant';
+            validationMessage = `
+                Solde disponible: <strong>${formatCurrency(currentBalance)}</strong><br>
+                Montant demandé: <strong>${formatCurrency(amount)}</strong><br>
+                Déficit: <strong>${formatCurrency(amount - currentBalance)}</strong>
+            `;
+        }
+        // Vérifier le dépassement du budget total
+        else if (totalCredited > 0 && newTotalSpent > totalCredited) {
+            validationClass = 'budget-error';
+            validationIcon = '❌';
+            validationTitle = 'Dépassement du budget';
+            validationMessage = `
+                Budget total: <strong>${formatCurrency(totalCredited)}</strong><br>
+                Déjà dépensé: <strong>${formatCurrency(currentTotalSpent)}</strong><br>
+                Nouveau total après: <strong>${formatCurrency(newTotalSpent)}</strong><br>
+                Dépassement: <strong>${formatCurrency(newTotalSpent - totalCredited)}</strong>
+            `;
+        }
+        // Avertissement si proche de la limite
+        else if (totalCredited > 0) {
+            const remainingBudget = totalCredited - newTotalSpent;
+            const percentageUsed = (newTotalSpent / totalCredited) * 100;
+            
+            if (percentageUsed >= 80) {
+                validationClass = 'budget-warning';
+                validationIcon = '⚠️';
+                validationTitle = 'Attention - Budget élevé';
+                validationMessage = `
+                    Utilisation du budget: <strong>${percentageUsed.toFixed(1)}%</strong><br>
+                    Budget restant après: <strong>${formatCurrency(remainingBudget)}</strong>
+                `;
+            } else {
+                validationMessage = `
+                    Budget restant après: <strong>${formatCurrency(remainingBudget)}</strong><br>
+                    Utilisation: <strong>${percentageUsed.toFixed(1)}%</strong>
+                `;
+            }
+        }
+        
+        budgetContainer.className = `budget-validation ${validationClass}`;
+        budgetContainer.innerHTML = `
+            <strong>${validationIcon} ${validationTitle}</strong>
+            ${validationMessage}
+        `;
+        
+        // Désactiver le bouton de confirmation si erreur
+        const confirmBtn = document.getElementById('confirm-expense-btn');
+        if (validationClass === 'budget-error') {
+            confirmBtn.disabled = true;
+            confirmBtn.style.opacity = '0.5';
+            confirmBtn.style.cursor = 'not-allowed';
+        } else {
+            confirmBtn.disabled = false;
+            confirmBtn.style.opacity = '1';
+            confirmBtn.style.cursor = 'pointer';
+        }
+        
+    } catch (error) {
+        console.error('Erreur validation budget dans modal:', error);
+    }
+}
+
+async function confirmAndSubmitExpense() {
+    if (!window.pendingExpenseFormData) {
+        showNotification('Erreur: données de dépense non trouvées', 'error');
+        return;
+    }
+    
+    try {
+        // Sauvegarder les données avant de fermer le modal
+        const formDataToSubmit = window.pendingExpenseFormData;
+        
+        // Fermer le modal
+        closeExpenseConfirmationModal();
+        
+        // Procéder à l'ajout de la dépense
+        await addExpenseWithFile(formDataToSubmit);
+        
+        // Nettoyer les données après succès
+        delete window.pendingExpenseFormData;
+        
+    } catch (error) {
+        console.error('Erreur lors de la soumission:', error);
+        showNotification(`Erreur lors de l'ajout de la dépense: ${error.message}`, 'error');
+        // Nettoyer les données même en cas d'erreur
+        delete window.pendingExpenseFormData;
+    }
 }

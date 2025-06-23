@@ -286,6 +286,11 @@
                             <h3>Dépenses par Catégorie</h3>
                             <div id="category-chart"></div>
                         </div>
+                        
+                        <div class="chart-card">
+                            <h3>Historique des Crédits</h3>
+                            <div id="credit-history-chart"></div>
+                        </div>
                     </div>
                 </section>
 
@@ -543,14 +548,14 @@
                             
                             <div class="form-group">
                                 <label for="expense-supplier">Nom Fournisseur</label>
-                                <input type="text" id="expense-supplier" name="supplier" required placeholder="Nom du fournisseur ou prestataire">
+                                <input type="text" id="expense-supplier" name="supplier" placeholder="Nom du fournisseur ou prestataire">
                             </div>
                         </div>
                         
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="expense-quantity">Quantité</label>
-                                <input type="number" id="expense-quantity" name="quantity" step="0.01" min="0" required placeholder="1">
+                                <input type="number" id="expense-quantity" name="quantity" step="0.01" min="0" required value="1" placeholder="1">
                             </div>
                             
                             <div class="form-group">
@@ -1343,6 +1348,93 @@
 
     <!-- Messages de notification -->
     <div id="notification" class="notification"></div>
+
+    <!-- Modal de confirmation pour ajouter une dépense -->
+    <div id="expense-confirmation-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-check-circle"></i> Confirmer l'ajout de la dépense</h2>
+                <span class="close" onclick="closeExpenseConfirmationModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="confirmation-summary">
+                    <h3><i class="fas fa-receipt"></i> Résumé de la dépense</h3>
+                    
+                    <div class="summary-grid">
+                        <div class="summary-row">
+                            <span class="summary-label">Compte :</span>
+                            <span class="summary-value" id="confirm-account"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Type :</span>
+                            <span class="summary-value" id="confirm-type"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Catégorie :</span>
+                            <span class="summary-value" id="confirm-category"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Sous-catégorie :</span>
+                            <span class="summary-value" id="confirm-subcategory"></span>
+                        </div>
+                        <div class="summary-row" id="confirm-social-row" style="display: none;">
+                            <span class="summary-label">Réseau social :</span>
+                            <span class="summary-value" id="confirm-social"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Date :</span>
+                            <span class="summary-value" id="confirm-date"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Désignation :</span>
+                            <span class="summary-value" id="confirm-designation"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Fournisseur :</span>
+                            <span class="summary-value" id="confirm-supplier"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Quantité :</span>
+                            <span class="summary-value" id="confirm-quantity"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Prix unitaire :</span>
+                            <span class="summary-value" id="confirm-unit-price"></span>
+                        </div>
+                        <div class="summary-row total-row">
+                            <span class="summary-label">Total :</span>
+                            <span class="summary-value" id="confirm-total"></span>
+                        </div>
+                        <div class="summary-row">
+                            <span class="summary-label">Prévisible :</span>
+                            <span class="summary-value" id="confirm-predictable"></span>
+                        </div>
+                        <div class="summary-row" id="confirm-description-row" style="display: none;">
+                            <span class="summary-label">Description :</span>
+                            <span class="summary-value" id="confirm-description"></span>
+                        </div>
+                        <div class="summary-row" id="confirm-file-row" style="display: none;">
+                            <span class="summary-label">Justificatif :</span>
+                            <span class="summary-value" id="confirm-file"></span>
+                        </div>
+                    </div>
+
+                    <!-- Validation du budget -->
+                    <div class="budget-validation" id="budget-validation">
+                        <!-- Les informations de validation du budget seront affichées ici -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeExpenseConfirmationModal()">
+                    <i class="fas fa-times"></i> Annuler
+                </button>
+                <button type="button" class="btn btn-success" id="confirm-expense-btn" onclick="confirmAndSubmitExpense()">
+                    <i class="fas fa-check"></i> Confirmer l'ajout
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Popup pour modifier une dépense -->
     <div id="edit-expense-modal" class="modal">

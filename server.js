@@ -532,6 +532,53 @@ app.get('/api/account/balance', requireAuth, async (req, res) => {
     }
 });
 
+// Route pour obtenir le solde d'un compte spécifique
+app.get('/api/account/:accountId/balance', requireAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+        
+        // Vérifications d'accès selon le rôle
+        let accessQuery = 'SELECT id, current_balance, total_credited, total_spent FROM accounts WHERE id = $1 AND is_active = true';
+        let accessParams = [accountId];
+        
+        if (userRole === 'directeur') {
+            // Les directeurs ne peuvent voir que leurs propres comptes
+            accessQuery += ' AND user_id = $2';
+            accessParams.push(userId);
+        }
+        // DG, PCA et admin peuvent accéder à tous les comptes
+        
+        const result = await pool.query(accessQuery, accessParams);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte non trouvé ou accès refusé' });
+        }
+        
+        const account = result.rows[0];
+        
+        // Calculer le total réellement dépensé pour ce compte
+        const expensesResult = await pool.query(
+            'SELECT COALESCE(SUM(total), 0) as real_total_spent FROM expenses WHERE account_id = $1',
+            [accountId]
+        );
+        
+        const realTotalSpent = parseInt(expensesResult.rows[0].real_total_spent) || 0;
+        const currentBalance = account.total_credited - realTotalSpent;
+        
+        res.json({
+            current_balance: currentBalance,
+            total_credited: account.total_credited,
+            total_spent: realTotalSpent
+        });
+        
+    } catch (error) {
+        console.error('Erreur récupération solde compte:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
 app.get('/api/expenses', requireAuth, async (req, res) => {
     try {
         const user_id = req.session.user.id;
@@ -706,6 +753,36 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         
 
         
+        // Historique des crédits par compte (période sélectionnée)
+        let creditHistoryQuery = `
+            SELECT 
+                a.account_name,
+                c.amount,
+                c.created_at,
+                u.full_name as credited_by_name,
+                c.description,
+                CASE 
+                    WHEN c.description ILIKE '%Créditer un Compte Existant%' OR c.description ILIKE '%crédit existant%' THEN 'Compte Existant'
+                    WHEN c.description ILIKE '%Nouveau compte%' OR c.description ILIKE '%nouveau crédit%' THEN 'Nouveau Compte'
+                    ELSE 'Crédit Standard'
+                END as credit_source
+            FROM credits c
+            JOIN accounts a ON c.account_id = a.id
+            JOIN users u ON c.credited_by = u.id
+            WHERE c.created_at >= $1 AND c.created_at <= $2
+        `;
+        
+        let creditParams = [startDate + ' 00:00:00', endDate + ' 23:59:59'];
+        
+        if (isDirector) {
+            creditHistoryQuery += ` AND a.user_id = $3`;
+            creditParams.push(req.session.user.id);
+        }
+        
+        creditHistoryQuery += ` ORDER BY c.created_at DESC`;
+        
+        const creditHistory = await pool.query(creditHistoryQuery, creditParams);
+
         res.json({
             daily_burn: parseInt(dailyBurn.rows[0].total),
             weekly_burn: parseInt(weeklyBurn.rows[0].total),
@@ -720,6 +797,14 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
             category_breakdown: categoryBurn.rows.map(row => ({
                 category: row.name,
                 amount: parseInt(row.total)
+            })),
+            credit_history: creditHistory.rows.map(row => ({
+                account: row.account_name,
+                amount: parseInt(row.amount),
+                date: row.created_at,
+                credited_by: row.credited_by_name,
+                description: row.description,
+                source: row.credit_source
             })),
             period: {
                 start_date: startDate,
