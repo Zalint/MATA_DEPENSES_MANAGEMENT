@@ -7319,38 +7319,6 @@ async function initStockVivantModule() {
         throw error; // Propager l'erreur
     }
 }
-function setupStockVivantEventListeners() {
-    // Configuration
-    document.getElementById('view-config-btn')?.addEventListener('click', viewStockVivantConfig);
-    document.getElementById('edit-config-btn')?.addEventListener('click', editStockVivantConfig);
-    document.getElementById('save-config-btn')?.addEventListener('click', saveStockVivantConfig);
-    document.getElementById('cancel-config-btn')?.addEventListener('click', cancelEditConfig);
-    
-    // Permissions
-    document.getElementById('grant-permission-btn')?.addEventListener('click', grantStockVivantPermission);
-    
-    // Gestion des stocks
-    document.getElementById('load-stock-vivant-btn')?.addEventListener('click', loadStockVivantForm);
-    document.getElementById('save-stock-vivant-btn')?.addEventListener('click', saveStockVivantData);
-    document.getElementById('cancel-stock-vivant-btn')?.addEventListener('click', cancelStockVivantEdit);
-    
-    // Consultation
-    document.getElementById('load-view-stock-btn')?.addEventListener('click', loadViewStockVivant);
-    
-    console.log('✅ Event listeners stock vivant configurés');
-}
-
-async function viewStockVivantConfig() {
-    const configContent = document.getElementById('config-content');
-    const configEditor = document.getElementById('config-editor');
-    
-    configEditor.value = JSON.stringify(stockVivantConfig, null, 2);
-    configEditor.readOnly = true;
-    configContent.style.display = 'block';
-    
-    document.getElementById('save-config-btn').style.display = 'none';
-    document.getElementById('cancel-config-btn').style.display = 'none';
-}
 
 function editStockVivantConfig() {
     const configContent = document.getElementById('config-content');
@@ -7606,6 +7574,26 @@ function generateStockVivantTables(existingData = []) {
     }
     
     let html = '';
+    
+    // Add Grand Total Display Section
+    html += `
+        <div class="stock-grand-total-section mb-4">
+            <div class="card bg-primary text-white">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <h5 class="card-title mb-0 text-white">
+                                <i class="fas fa-calculator me-2"></i>Total Général du Stock
+                            </h5>
+                        </div>
+                        <div class="col-auto">
+                            <h2 class="mb-0 text-white display-6" id="stock-grand-total">0 FCFA</h2>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
     
     Object.keys(stockVivantConfig.categories).forEach(category => {
         const products = stockVivantConfig.categories[category];
@@ -8136,13 +8124,15 @@ function calculateRowTotal(row) {
 // Calculer le total général
 function calculateGrandTotal() {
     let grandTotal = 0;
-    const totals = document.querySelectorAll('#stock-vivant-simple-table .stock-total');
+    const totals = document.querySelectorAll('.stock-total');
     
     totals.forEach(totalSpan => {
-        const total = parseFloat(totalSpan.textContent.replace(/[^\d.-]/g, '')) || 0;
+        const totalText = totalSpan.textContent || totalSpan.innerText || '';
+        const total = parseFloat(totalText.replace(/[^\d.-]/g, '')) || 0;
         grandTotal += total;
     });
     
+    console.log('💰 Grand total calculated:', grandTotal, 'from', totals.length, 'items');
     return grandTotal;
 }
 
@@ -8317,6 +8307,39 @@ function setupModernStockVivantEvents() {
     if (dateInput) {
         dateInput.addEventListener('change', function() {
             console.log('📅 Date changée:', this.value);
+            // Auto-reload data when date changes
+            const currentMode = document.getElementById('stock-vivant-mode').value;
+            if (currentMode === 'saisie') {
+                displaySimpleStockVivantTable();
+            } else if (currentMode === 'consultation') {
+                loadStockVivantForConsultation();
+            }
+        });
+    }
+    
+    // Load data button - THIS WAS MISSING!
+    const loadDataBtn = document.getElementById('load-stock-data-btn');
+    if (loadDataBtn) {
+        loadDataBtn.addEventListener('click', async function() {
+            const currentMode = document.getElementById('stock-vivant-mode').value;
+            console.log('🔄 Load data button clicked, mode:', currentMode);
+            
+            switch(currentMode) {
+                case 'saisie':
+                    await displaySimpleStockVivantTable();
+                    break;
+                case 'consultation':
+                    await loadStockVivantForConsultation();
+                    break;
+                case 'historique':
+                    const selectedDate = document.getElementById('stock-vivant-date').value;
+                    if (selectedDate) {
+                        await loadStockVivantBySelectedDate(selectedDate);
+                    } else {
+                        showStockVivantNotification('Veuillez sélectionner une date', 'error');
+                    }
+                    break;
+            }
         });
     }
     
@@ -8338,7 +8361,9 @@ function setupModernStockVivantEvents() {
     
     const saveBtn = document.getElementById('save-stock-btn');
     if (saveBtn) {
-        saveBtn.addEventListener('click', saveSimpleStockVivant);
+        saveBtn.addEventListener('click', async () => {
+            await saveStockVivantData();
+        });
     }
     
     const clearBtn = document.getElementById('clear-stock-btn');
@@ -8360,6 +8385,8 @@ function setupModernStockVivantEvents() {
             }
         });
     }
+    
+    console.log('✅ Event listeners stock vivant configurés');
 }
 
 // Show specific stock mode
@@ -8377,7 +8404,7 @@ async function showStockMode(mode) {
         selectedPanel.style.display = 'block';
     }
     
-    // Load data based on mode
+    // Load data based on mode and auto-load latest data
     switch(mode) {
         case 'saisie':
             console.log('📝 Mode saisie activé');
@@ -8385,7 +8412,15 @@ async function showStockMode(mode) {
             break;
         case 'consultation':
             console.log('👁️ Mode consultation activé');
-            await loadStockVivantForConsultation();
+            // Auto-load latest date for consultation
+            const latestDate = await getLastStockVivantDate();
+            if (latestDate) {
+                const dateInput = document.getElementById('stock-vivant-date');
+                if (dateInput) {
+                    dateInput.value = latestDate;
+                }
+                await loadStockVivantForConsultation();
+            }
             break;
         case 'historique':
             console.log('📜 Mode historique activé');
@@ -8403,12 +8438,21 @@ async function displaySimpleStockVivantTable() {
     }
     
     // Show loading message
-    container.innerHTML = '<p class="info-text">Chargement des données...</p>';
+    container.innerHTML = '<div class="loading-message"><i class="fas fa-spinner fa-spin"></i> Chargement des données...</div>';
     
     try {
-        // Get selected date
+        // Get selected date or use latest date if none selected
         const dateInput = document.getElementById('stock-vivant-date');
-        const selectedDate = dateInput ? dateInput.value : null;
+        let selectedDate = dateInput ? dateInput.value : null;
+        
+        // If no date selected, get the latest date with data
+        if (!selectedDate) {
+            selectedDate = await getLastStockVivantDate();
+            if (selectedDate && dateInput) {
+                dateInput.value = selectedDate;
+                console.log('📅 Auto-loaded latest date:', selectedDate);
+            }
+        }
         
         let existingData = [];
         
@@ -8418,7 +8462,9 @@ async function displaySimpleStockVivantTable() {
                 const response = await fetch(apiUrl(`/api/stock-vivant?date=${selectedDate}`));
                 if (response.ok) {
                     existingData = await response.json();
-                    console.log('📊 Données existantes chargées:', existingData.length, 'entrées');
+                    console.log('📊 Données existantes chargées:', existingData.length, 'entrées pour', selectedDate);
+                } else {
+                    console.log('📊 Aucune donnée existante pour', selectedDate);
                 }
             } catch (error) {
                 console.warn('⚠️ Impossible de charger les données existantes:', error.message);
@@ -8426,42 +8472,78 @@ async function displaySimpleStockVivantTable() {
         }
         
         // Generate table with existing data
-        container.innerHTML = generateStockVivantTables(existingData);
-        updateGrandTotal();
+        const tableHtml = generateStockVivantTables(existingData);
+        container.innerHTML = tableHtml;
+        
+        // Calculate and display grand total
+        setTimeout(() => {
+            updateGrandTotal();
+        }, 100);
+        
+        // Show data info
+        if (existingData.length > 0) {
+            showStockVivantNotification(`Données chargées pour ${formatDate(selectedDate)} (${existingData.length} entrées)`, 'success');
+        } else if (selectedDate) {
+            showStockVivantNotification(`Nouveau stock pour ${formatDate(selectedDate)}`, 'info');
+        } else {
+            showStockVivantNotification('Aucune date sélectionnée', 'warning');
+        }
         
     } catch (error) {
         console.error('❌ Erreur lors de l\'affichage du tableau:', error);
-        container.innerHTML = '<p class="info-text text-error">Erreur lors du chargement</p>';
+        container.innerHTML = '<div class="error-message"><i class="fas fa-exclamation-triangle"></i> Erreur lors du chargement</div>';
+        showStockVivantNotification('Erreur lors du chargement: ' + error.message, 'error');
     }
 }
 
 // Load stock vivant for consultation mode
 async function loadStockVivantForConsultation() {
     const container = document.getElementById('stock-vivant-view-table');
-    if (!container) return;
+    if (!container) {
+        console.error('❌ Container stock-vivant-view-table introuvable');
+        return;
+    }
+    
+    container.innerHTML = '<div class="loading-message"><i class="fas fa-spinner fa-spin"></i> Chargement...</div>';
     
     try {
         const dateInput = document.getElementById('stock-vivant-date');
-        const selectedDate = dateInput ? dateInput.value : null;
+        let selectedDate = dateInput ? dateInput.value : null;
+        
+        // If no date selected, get the latest date with data
+        if (!selectedDate) {
+            selectedDate = await getLastStockVivantDate();
+            if (selectedDate && dateInput) {
+                dateInput.value = selectedDate;
+                console.log('📅 Auto-loaded latest date for consultation:', selectedDate);
+            }
+        }
         
         if (!selectedDate) {
-            container.innerHTML = '<p class="info-text">Veuillez sélectionner une date</p>';
+            container.innerHTML = '<div class="info-message"><i class="fas fa-info-circle"></i> Aucune donnée disponible</div>';
             return;
         }
         
-        const response = await fetch(`/api/stock-vivant?date=${selectedDate}`);
+        const response = await fetch(apiUrl(`/api/stock-vivant?date=${selectedDate}`));
+        
+        if (!response.ok) {
+            throw new Error(`Erreur API: ${response.status}`);
+        }
+        
         const data = await response.json();
         
         if (data.length === 0) {
-            container.innerHTML = '<p class="info-text">Aucune donnée pour cette date</p>';
+            container.innerHTML = `<div class="info-message"><i class="fas fa-info-circle"></i> Aucune donnée pour le ${formatDate(selectedDate)}</div>`;
             return;
         }
         
         displayStockVivantViewData(data);
+        showStockVivantNotification(`Consultation: ${data.length} entrées pour ${formatDate(selectedDate)}`, 'success');
         
     } catch (error) {
-        console.error('Erreur chargement consultation:', error);
-        container.innerHTML = '<p class="info-text text-error">Erreur lors du chargement</p>';
+        console.error('❌ Erreur chargement consultation:', error);
+        container.innerHTML = '<div class="error-message"><i class="fas fa-exclamation-triangle"></i> Erreur lors du chargement</div>';
+        showStockVivantNotification('Erreur lors du chargement: ' + error.message, 'error');
     }
 }
 
@@ -8469,10 +8551,14 @@ async function loadStockVivantForConsultation() {
 async function resetStockFilters() {
     console.log('🔄 CLIENT: Réinitialisation des filtres');
     
-    // Reset date to today
+    // Get latest date with data
+    const latestDate = await getLastStockVivantDate();
+    const dateToUse = latestDate || new Date().toISOString().split('T')[0];
+    
+    // Reset date to latest date or today
     const dateInput = document.getElementById('stock-vivant-date');
     if (dateInput) {
-        dateInput.value = new Date().toISOString().split('T')[0];
+        dateInput.value = dateToUse;
     }
     
     // Reset mode to saisie
@@ -8488,6 +8574,8 @@ async function resetStockFilters() {
         categoryFilter.value = '';
         filterStockByCategory('');
     }
+    
+    showStockVivantNotification('Filtres réinitialisés', 'info');
 }
 
 // Filter stock by category
@@ -8518,21 +8606,27 @@ async function loadStockVivantBySelectedDate(selectedDate) {
     console.log('📅 CLIENT: Chargement stock pour date:', selectedDate);
     
     try {
-        const response = await fetch(`/api/stock-vivant?date=${selectedDate}`);
+        const response = await fetch(apiUrl(`/api/stock-vivant?date=${selectedDate}`));
+        
+        if (!response.ok) {
+            throw new Error(`Erreur API: ${response.status}`);
+        }
+        
         const data = await response.json();
         
         const container = document.getElementById('stock-vivant-history-table');
         if (container) {
             if (data.length === 0) {
-                container.innerHTML = '<p class="info-text">Aucune donnée pour cette date</p>';
+                container.innerHTML = `<div class="info-message"><i class="fas fa-info-circle"></i> Aucune donnée pour le ${formatDate(selectedDate)}</div>`;
             } else {
                 displayStockVivantViewData(data);
+                showStockVivantNotification(`Historique: ${data.length} entrées pour ${formatDate(selectedDate)}`, 'success');
             }
         }
         
     } catch (error) {
-        console.error('Erreur chargement historique:', error);
-        showStockVivantNotification('Erreur lors du chargement de l\'historique', 'error');
+        console.error('❌ Erreur chargement historique:', error);
+        showStockVivantNotification('Erreur lors du chargement de l\'historique: ' + error.message, 'error');
     }
 }
 
@@ -8540,32 +8634,42 @@ async function loadStockVivantBySelectedDate(selectedDate) {
 async function initializeModernStockVivant() {
     console.log('🎨 CLIENT: Initialisation interface Stock Vivant moderne');
     
-    // Set default date to today
-    const today = new Date().toISOString().split('T')[0];
-    const dateInput = document.getElementById('stock-vivant-date');
-    if (dateInput) {
-        dateInput.value = today;
-    }
-    
-    // Populate category filter
-    populateStockVivantCategoryFilter();
-    
-    // Setup modern events
-    setupModernStockVivantEvents();
-    
-    // Show default mode (saisie) only if config is loaded
-    if (stockVivantConfig && stockVivantConfig.categories) {
-        await showStockMode('saisie');
-    } else {
-        console.log('⏳ Configuration pas encore chargée, attente...');
-        // Show loading message
-        const container = document.getElementById('stock-vivant-simple-table');
-        if (container) {
-            container.innerHTML = '<p class="info-text">Chargement de la configuration...</p>';
+    try {
+        // Get latest date with data
+        const latestDate = await getLastStockVivantDate();
+        const dateToUse = latestDate || new Date().toISOString().split('T')[0];
+        
+        // Set date input
+        const dateInput = document.getElementById('stock-vivant-date');
+        if (dateInput) {
+            dateInput.value = dateToUse;
+            console.log('📅 Date par défaut définie:', dateToUse);
         }
+        
+        // Populate category filter
+        populateStockVivantCategoryFilter();
+        
+        // Setup modern events
+        setupModernStockVivantEvents();
+        
+        // Show default mode (saisie) with auto-load
+        if (stockVivantConfig && stockVivantConfig.categories) {
+            await showStockMode('saisie');
+        } else {
+            console.log('⏳ Configuration pas encore chargée, attente...');
+            // Show loading message
+            const container = document.getElementById('stock-vivant-simple-table');
+            if (container) {
+                container.innerHTML = '<div class="loading-message"><i class="fas fa-spinner fa-spin"></i> Chargement de la configuration...</div>';
+            }
+        }
+        
+        console.log('✅ CLIENT: Interface moderne initialisée');
+        
+    } catch (error) {
+        console.error('❌ Erreur initialisation interface moderne:', error);
+        showStockVivantNotification('Erreur lors de l\'initialisation: ' + error.message, 'error');
     }
-    
-    console.log('✅ CLIENT: Interface moderne initialisée');
 }
 
 // Fonctions pour le modal de confirmation de dépense
