@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Upload Debug</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test-section { border: 1px solid #ccc; padding: 20px; margin: 10px 0; }
+        .log { background: #f5f5f5; padding: 10px; margin: 10px 0; max-height: 300px; overflow-y: auto; font-family: monospace; }
+        button { padding: 10px 20px; margin: 5px; }
+        input[type="file"] { margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Test Upload Debug - Gestion des Stocks</h1>
+    
+    <div class="test-section">
+        <h2>Test 1: Vérification des éléments DOM</h2>
+        <button onclick="testDOMElements()">Tester les éléments DOM</button>
+        <div id="dom-log" class="log"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 2: Simulation d'upload</h2>
+        <form id="test-upload-form" enctype="multipart/form-data">
+            <input type="file" id="test-file-input" accept=".json" />
+            <button type="submit">Tester Upload</button>
+        </form>
+        <div id="upload-log" class="log"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>Test 3: Test API direct</h2>
+        <button onclick="testAPIConnection()">Tester API</button>
+        <div id="api-log" class="log"></div>
+    </div>
+
+    <script>
+        // Fonction de log
+        function log(containerId, message) {
+            const container = document.getElementById(containerId);
+            const timestamp = new Date().toLocaleTimeString();
+            container.innerHTML += `[${timestamp}] ${message}\n`;
+            container.scrollTop = container.scrollHeight;
+            console.log(`[${timestamp}] ${message}`);
+        }
+
+        // Test 1: Vérification des éléments DOM
+        function testDOMElements() {
+            const logContainer = 'dom-log';
+            document.getElementById(logContainer).innerHTML = '';
+            
+            log(logContainer, '🔍 Test des éléments DOM...');
+            
+            // Éléments à tester
+            const elements = [
+                'stock-soir-section',
+                'stock-upload-form', 
+                'stock-file-input',
+                'stock-tbody',
+                'stock-date-filter',
+                'stock-point-filter'
+            ];
+            
+            elements.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    log(logContainer, `✅ ${id}: Trouvé (type: ${element.tagName})`);
+                } else {
+                    log(logContainer, `❌ ${id}: Non trouvé`);
+                }
+            });
+            
+            // Test des event listeners
+            const uploadForm = document.getElementById('stock-upload-form');
+            if (uploadForm) {
+                log(logContainer, `📋 Formulaire upload:`);
+                log(logContainer, `  - Dataset initialized: ${uploadForm.dataset.initialized}`);
+                log(logContainer, `  - Dataset listenerAttached: ${uploadForm.dataset.listenerAttached}`);
+            }
+        }
+
+        // Test 2: Simulation d'upload avec logs détaillés
+        document.getElementById('test-upload-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const logContainer = 'upload-log';
+            document.getElementById(logContainer).innerHTML = '';
+            
+            log(logContainer, '🚀 Début du test d\'upload...');
+            
+            const fileInput = document.getElementById('test-file-input');
+            const file = fileInput.files[0];
+            
+            if (!file) {
+                log(logContainer, '❌ Aucun fichier sélectionné');
+                return;
+            }
+            
+            log(logContainer, `📁 Fichier sélectionné: ${file.name} (${file.size} bytes)`);
+            
+            const formData = new FormData();
+            formData.append('reconciliation', file);
+            
+            try {
+                log(logContainer, '🌐 Envoi de la requête vers /api/stock-soir/upload...');
+                
+                const response = await fetch('/api/stock-soir/upload', {
+                    method: 'POST',
+                    body: formData,
+                });
+                
+                log(logContainer, `📡 Réponse reçue: Status ${response.status} (${response.statusText})`);
+                
+                const responseText = await response.text();
+                log(logContainer, `📄 Contenu de la réponse: ${responseText}`);
+                
+                if (response.ok) {
+                    log(logContainer, '✅ Upload réussi !');
+                } else {
+                    log(logContainer, `❌ Erreur HTTP: ${response.status}`);
+                }
+                
+            } catch (error) {
+                log(logContainer, `💥 Erreur: ${error.message}`);
+                log(logContainer, `💥 Stack: ${error.stack}`);
+            }
+        });
+
+        // Test 3: Test de connexion API
+        async function testAPIConnection() {
+            const logContainer = 'api-log';
+            document.getElementById(logContainer).innerHTML = '';
+            
+            log(logContainer, '🔌 Test de connexion API...');
+            
+            // Test 1: Endpoint de base
+            try {
+                log(logContainer, '🌐 Test GET /api/stock-soir...');
+                const response = await fetch('/api/stock-soir');
+                log(logContainer, `📡 Status: ${response.status} (${response.statusText})`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(logContainer, `📄 Données reçues: ${data.length} enregistrements`);
+                } else {
+                    const errorText = await response.text();
+                    log(logContainer, `❌ Erreur: ${errorText}`);
+                }
+            } catch (error) {
+                log(logContainer, `💥 Erreur GET: ${error.message}`);
+            }
+            
+            // Test 2: Endpoint dates
+            try {
+                log(logContainer, '🌐 Test GET /api/stock-soir/dates...');
+                const response = await fetch('/api/stock-soir/dates');
+                log(logContainer, `📡 Status: ${response.status} (${response.statusText})`);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log(logContainer, `📄 Dates disponibles: ${data.length}`);
+                } else {
+                    const errorText = await response.text();
+                    log(logContainer, `❌ Erreur: ${errorText}`);
+                }
+            } catch (error) {
+                log(logContainer, `💥 Erreur GET dates: ${error.message}`);
+            }
+        }
+
+        // Auto-test au chargement de la page
+        window.addEventListener('load', function() {
+            console.log('🔍 Page de test chargée');
+            setTimeout(testDOMElements, 1000);
+        });
+    </script>
+</body>
+</html> 

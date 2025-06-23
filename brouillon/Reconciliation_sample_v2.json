@@ -1,0 +1,403 @@
+[
+  {
+    "success": true,
+    "data": {
+      "date": "19-06-2025",
+      "resume": [
+        {
+          "pointVente": "Abattage",
+          "stockMatin": 1825900,
+          "stockSoir": 0,
+          "transferts": -1759319.67,
+          "ventesTheoriques": 66580.33000000007,
+          "ventesSaisies": 85000,
+          "cashPayments": 47500,
+          "ecart": -18419.669999999925,
+          "ecartPct": "27.67",
+          "ecartCash": -37500,
+          "ecartCashPct": "78.95"
+        },
+        {
+          "pointVente": "Mbao",
+          "stockMatin": 342840.95999999996,
+          "stockSoir": 754534.84,
+          "transferts": 573580.98,
+          "ventesTheoriques": 161887.09999999998,
+          "ventesSaisies": 153100,
+          "cashPayments": 153100,
+          "ecart": 8787.099999999977,
+          "ecartPct": "5.43",
+          "ecartCash": 0,
+          "ecartCashPct": "0.00"
+        },
+        {
+          "pointVente": "O.Foire",
+          "stockMatin": 701700,
+          "stockSoir": 741990.2949999999,
+          "transferts": 672157.71,
+          "ventesTheoriques": 631867.415,
+          "ventesSaisies": 610350,
+          "cashPayments": 750300,
+          "ecart": 21517.415000000037,
+          "ecartPct": "3.41",
+          "ecartCash": 139950,
+          "ecartCashPct": "18.65"
+        },
+        {
+          "pointVente": "Linguere",
+          "stockMatin": 111000,
+          "stockSoir": 24000,
+          "transferts": 0,
+          "ventesTheoriques": 87000,
+          "ventesSaisies": 86000,
+          "cashPayments": 86000,
+          "ecart": 1000,
+          "ecartPct": "1.15",
+          "ecartCash": 0,
+          "ecartCashPct": "0.00"
+        },
+        {
+          "pointVente": "Dahra",
+          "stockMatin": 74800,
+          "stockSoir": 64600,
+          "transferts": 0,
+          "ventesTheoriques": 10200,
+          "ventesSaisies": 10200,
+          "cashPayments": 10200,
+          "ecart": 0,
+          "ecartPct": "0.00",
+          "ecartCash": 0,
+          "ecartCashPct": "0.00"
+        },
+        {
+          "pointVente": "Keur Massar",
+          "stockMatin": 112250,
+          "stockSoir": 246338.63,
+          "transferts": 569580.98,
+          "ventesTheoriques": 435492.35,
+          "ventesSaisies": 433060,
+          "cashPayments": 432875,
+          "ecart": 2432.3499999999767,
+          "ecartPct": "0.56",
+          "ecartCash": -185,
+          "ecartCashPct": "0.04"
+        }
+      ],
+      "details": {
+        "Abattage": {
+          "Bovin": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 85000
+          },
+          "Boeuf": {
+            "stockMatin": 1690900,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 1690900,
+            "ventesSaisies": 0
+          },
+          "Agneau": {
+            "stockMatin": 135000,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 135000,
+            "ventesSaisies": 0
+          },
+          "Non spécifié": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": -1759319.67,
+            "ventesTheoriques": -1759319.67,
+            "ventesSaisies": 0
+          }
+        },
+        "Mbao": {
+          "Bovin": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 139100
+          },
+          "Volaille": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 14000
+          },
+          "Boeuf": {
+            "stockMatin": 85890.95999999999,
+            "stockSoir": 522503.33999999997,
+            "transferts": 0,
+            "ventesTheoriques": -436612.38,
+            "ventesSaisies": 0
+          },
+          "Veau": {
+            "stockMatin": 23400,
+            "stockSoir": 23400,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 0
+          },
+          "Poulet": {
+            "stockMatin": 176800,
+            "stockSoir": 163200,
+            "transferts": 0,
+            "ventesTheoriques": 13600,
+            "ventesSaisies": 0
+          },
+          "Tablette": {
+            "stockMatin": 12500,
+            "stockSoir": 12500,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 0
+          },
+          "Foie": {
+            "stockMatin": 18000,
+            "stockSoir": 12000,
+            "transferts": 0,
+            "ventesTheoriques": 6000,
+            "ventesSaisies": 0
+          },
+          "Yell": {
+            "stockMatin": 6000,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 6000,
+            "ventesSaisies": 0
+          },
+          "Agneau": {
+            "stockMatin": 20250,
+            "stockSoir": 20250,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 0
+          },
+          "Déchet 400": {
+            "stockMatin": 0,
+            "stockSoir": 680,
+            "transferts": 0,
+            "ventesTheoriques": -680,
+            "ventesSaisies": 0
+          },
+          "Autres": {
+            "stockMatin": 0,
+            "stockSoir": 1.5,
+            "transferts": 0,
+            "ventesTheoriques": -1.5,
+            "ventesSaisies": 0
+          },
+          "Non spécifié": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 573580.98,
+            "ventesTheoriques": 573580.98,
+            "ventesSaisies": 0
+          }
+        },
+        "O.Foire": {
+          "Bovin": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 461750
+          },
+          "Ovin": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 31500
+          },
+          "Volaille": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 117100
+          },
+          "Poulet": {
+            "stockMatin": 567800,
+            "stockSoir": 462400,
+            "transferts": 0,
+            "ventesTheoriques": 105400,
+            "ventesSaisies": 0
+          },
+          "Tablette": {
+            "stockMatin": 115000,
+            "stockSoir": 102500,
+            "transferts": 0,
+            "ventesTheoriques": 12500,
+            "ventesSaisies": 0
+          },
+          "Foie": {
+            "stockMatin": 18900,
+            "stockSoir": 34500,
+            "transferts": 0,
+            "ventesTheoriques": -15600,
+            "ventesSaisies": 0
+          },
+          "Boeuf": {
+            "stockMatin": 0,
+            "stockSoir": 30330.295,
+            "transferts": 0,
+            "ventesTheoriques": -30330.295,
+            "ventesSaisies": 0
+          },
+          "Agneau": {
+            "stockMatin": 0,
+            "stockSoir": 103500,
+            "transferts": 0,
+            "ventesTheoriques": -103500,
+            "ventesSaisies": 0
+          },
+          "Déchet 400": {
+            "stockMatin": 0,
+            "stockSoir": 1560,
+            "transferts": 0,
+            "ventesTheoriques": -1560,
+            "ventesSaisies": 0
+          },
+          "Déchet 2000": {
+            "stockMatin": 0,
+            "stockSoir": 7200,
+            "transferts": 0,
+            "ventesTheoriques": -7200,
+            "ventesSaisies": 0
+          },
+          "Non spécifié": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 672157.71,
+            "ventesTheoriques": 672157.71,
+            "ventesSaisies": 0
+          }
+        },
+        "Linguere": {
+          "Volaille": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 86000
+          },
+          "Poulet": {
+            "stockMatin": 51000,
+            "stockSoir": 24000,
+            "transferts": 0,
+            "ventesTheoriques": 27000,
+            "ventesSaisies": 0
+          },
+          "Tablette": {
+            "stockMatin": 60000,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 60000,
+            "ventesSaisies": 0
+          }
+        },
+        "Dahra": {
+          "Volaille": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 10200
+          },
+          "Poulet": {
+            "stockMatin": 74800,
+            "stockSoir": 64600,
+            "transferts": 0,
+            "ventesTheoriques": 10200,
+            "ventesSaisies": 0
+          }
+        },
+        "Keur Massar": {
+          "Bovin": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 433060
+          },
+          "Poulet": {
+            "stockMatin": 88400,
+            "stockSoir": 88400,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 0
+          },
+          "Tablette": {
+            "stockMatin": 10000,
+            "stockSoir": 10000,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 0
+          },
+          "Foie": {
+            "stockMatin": 600,
+            "stockSoir": 600,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 0
+          },
+          "Autres": {
+            "stockMatin": 1250,
+            "stockSoir": 1250,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 0
+          },
+          "Déchet 2000": {
+            "stockMatin": 12000,
+            "stockSoir": 12000,
+            "transferts": 0,
+            "ventesTheoriques": 0,
+            "ventesSaisies": 0
+          },
+          "Boeuf": {
+            "stockMatin": 0,
+            "stockSoir": 125423.63,
+            "transferts": 0,
+            "ventesTheoriques": -125423.63,
+            "ventesSaisies": 0
+          },
+          "Yell": {
+            "stockMatin": 0,
+            "stockSoir": 6000,
+            "transferts": 0,
+            "ventesTheoriques": -6000,
+            "ventesSaisies": 0
+          },
+          "Agneau": {
+            "stockMatin": 0,
+            "stockSoir": 2385,
+            "transferts": 0,
+            "ventesTheoriques": -2385,
+            "ventesSaisies": 0
+          },
+          "Déchet 400": {
+            "stockMatin": 0,
+            "stockSoir": 280,
+            "transferts": 0,
+            "ventesTheoriques": -280,
+            "ventesSaisies": 0
+          },
+          "Non spécifié": {
+            "stockMatin": 0,
+            "stockSoir": 0,
+            "transferts": 569580.98,
+            "ventesTheoriques": 569580.98,
+            "ventesSaisies": 0
+          }
+        }
+      }
+    }
+  }
+]
