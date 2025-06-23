@@ -753,36 +753,6 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         
 
         
-        // Historique des crédits par compte (période sélectionnée)
-        let creditHistoryQuery = `
-            SELECT 
-                a.account_name,
-                c.amount,
-                c.created_at,
-                u.full_name as credited_by_name,
-                c.description,
-                CASE 
-                    WHEN c.description ILIKE '%Créditer un Compte Existant%' OR c.description ILIKE '%crédit existant%' THEN 'Compte Existant'
-                    WHEN c.description ILIKE '%Nouveau compte%' OR c.description ILIKE '%nouveau crédit%' THEN 'Nouveau Compte'
-                    ELSE 'Crédit Standard'
-                END as credit_source
-            FROM credits c
-            JOIN accounts a ON c.account_id = a.id
-            JOIN users u ON c.credited_by = u.id
-            WHERE c.created_at >= $1 AND c.created_at <= $2
-        `;
-        
-        let creditParams = [startDate + ' 00:00:00', endDate + ' 23:59:59'];
-        
-        if (isDirector) {
-            creditHistoryQuery += ` AND a.user_id = $3`;
-            creditParams.push(req.session.user.id);
-        }
-        
-        creditHistoryQuery += ` ORDER BY c.created_at DESC`;
-        
-        const creditHistory = await pool.query(creditHistoryQuery, creditParams);
-
         res.json({
             daily_burn: parseInt(dailyBurn.rows[0].total),
             weekly_burn: parseInt(weeklyBurn.rows[0].total),
@@ -797,14 +767,6 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
             category_breakdown: categoryBurn.rows.map(row => ({
                 category: row.name,
                 amount: parseInt(row.total)
-            })),
-            credit_history: creditHistory.rows.map(row => ({
-                account: row.account_name,
-                amount: parseInt(row.amount),
-                date: row.created_at,
-                credited_by: row.credited_by_name,
-                description: row.description,
-                source: row.credit_source
             })),
             period: {
                 start_date: startDate,
