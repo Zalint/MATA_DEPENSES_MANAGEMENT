@@ -7625,6 +7625,11 @@ function generateStockVivantTables(existingData = []) {
                             const total = quantite * prixUnitaire * (1 - decote);
                             const commentaire = existingItem ? existingItem.commentaire : '';
                             
+                            // Debug pour vérifier les données
+                            if (existingItem) {
+                                console.log(`🔍 Found data for ${category}/${product}:`, existingItem);
+                            }
+                            
                             return `
                                 <tr data-category="${category}" data-product="${product}">
                                     <td>${productLabel}</td>
@@ -8463,6 +8468,7 @@ async function displaySimpleStockVivantTable() {
                 if (response.ok) {
                     existingData = await response.json();
                     console.log('📊 Données existantes chargées:', existingData.length, 'entrées pour', selectedDate);
+                    console.log('📊 Sample data:', existingData.slice(0, 2)); // Log sample data for debugging
                 } else {
                     console.log('📊 Aucune donnée existante pour', selectedDate);
                 }
