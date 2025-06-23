@@ -7682,11 +7682,36 @@ function calculateStockVivantTotal(input) {
 }
 
 async function saveStockVivantData() {
-    const selectedDate = document.getElementById('stock-vivant-date').value;
+    console.log('🚀 === DEBUT SAVE STOCK VIVANT DATA ===');
+    
+    // Use more specific selector to get the actual date input, not the display element
+    const dateInput = document.querySelector('input[type="date"]#stock-vivant-date');
+    const selectedDate = dateInput ? dateInput.value : null;
+    
+    console.log('🔍 DEBUGGING - Date input element:', dateInput);
+    console.log('🔍 DEBUGGING - Selected date value:', selectedDate);
+    console.log('🔍 DEBUGGING - Date input innerHTML:', dateInput?.outerHTML);
+    console.log('🔍 DEBUGGING - User selected flag:', dateInput?.dataset?.userSelected);
+    console.log('🔍 DEBUGGING - All data attributes:', dateInput?.dataset);
+    
+    // Also check for any other date inputs that might exist
+    const allDateInputs = document.querySelectorAll('input[type="date"]');
+    console.log('🔍 DEBUGGING - All date inputs found:', allDateInputs.length);
+    allDateInputs.forEach((input, index) => {
+        console.log(`🔍 DEBUGGING - Date input ${index}:`, {
+            id: input.id,
+            value: input.value,
+            dataset: input.dataset
+        });
+    });
+    
     if (!selectedDate) {
+        console.log('❌ DEBUGGING - No date selected, aborting save');
         showStockVivantNotification('Veuillez sélectionner une date', 'error');
         return;
     }
+    
+    console.log('✅ DEBUGGING - Date validated, proceeding with save for date:', selectedDate);
     
     const stockData = [];
     
@@ -7726,40 +7751,97 @@ async function saveStockVivantData() {
     });
     
     console.log('📊 Final stock data to save:', stockData);
+    console.log('📊 Stock data length:', stockData.length);
     
     if (stockData.length === 0) {
         showStockVivantNotification('Aucune donnée à sauvegarder', 'warning');
         console.log('❌ No data found to save - check table structure');
         return;
     }
+
+    console.log('🔥 DEBUGGING - About to send API request with:');
+    console.log('🔥 DEBUGGING - Date for API (date_stock):', selectedDate);
+    console.log('🔥 DEBUGGING - API URL:', apiUrl('/api/stock-vivant/update'));
     
+    const requestBody = {
+        date_stock: selectedDate,
+        stockData: stockData,
+        replace_existing: false
+    };
+    console.log('🔥 DEBUGGING - Complete request body:', requestBody);
+    console.log('🔥 DEBUGGING - Request body JSON:', JSON.stringify(requestBody));
+
     try {
         const response = await fetch(apiUrl('/api/stock-vivant/update'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                date_stock: selectedDate,
-                stockData: stockData,
-                replace_existing: false
-            })
+            body: JSON.stringify(requestBody)
         });
         
+        console.log('🔥 DEBUGGING - API Response status:', response.status);
+        console.log('🔥 DEBUGGING - API Response ok:', response.ok);
+        
         const result = await response.json();
+        console.log('🔥 DEBUGGING - API Response result:', result);
         
         if (!response.ok) {
             if (response.status === 409 && result.error === 'duplicate_data') {
+                console.log('🔥 DEBUGGING - Conflict detected (409)');
+                console.log('🔥 DEBUGGING - selectedDate for confirmation dialog:', selectedDate);
+                console.log('🔥 DEBUGGING - formatDate(selectedDate):', formatDate(selectedDate));
+                console.log('🔥 DEBUGGING - result object:', result);
+                console.log('🔥 DEBUGGING - result.existing_date if any:', result.existing_date);
+                
                 // Demander confirmation pour remplacer les données existantes
-                if (confirm(`Des données existent déjà pour le ${formatDate(selectedDate)}. Voulez-vous les remplacer ?`)) {
-                    await saveStockVivantDataForced(selectedDate, stockData);
+                const shouldReplace = confirm(`Des données existent déjà pour le ${formatDate(selectedDate)}. Voulez-vous les remplacer ?`);
+                console.log('🔥 DEBUGGING - User choice shouldReplace:', shouldReplace);
+                
+                if (shouldReplace) {
+                    // Remplacer directement ici au lieu d'appeler une autre fonction
+                    try {
+                        console.log('🔥 DEBUGGING - Retrying with replace_existing: true');
+                        console.log('🔥 DEBUGGING - Retry date_stock:', selectedDate);
+                        
+                        const retryRequestBody = {
+                            date_stock: selectedDate,
+                            stockData: stockData,
+                            replace_existing: true
+                        };
+                        console.log('🔥 DEBUGGING - Retry request body:', retryRequestBody);
+                        
+                        const retryResponse = await fetch(apiUrl('/api/stock-vivant/update'), {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(retryRequestBody)
+                        });
+                        
+                        console.log('🔥 DEBUGGING - Retry response status:', retryResponse.status);
+                        
+                        const retryResult = await retryResponse.json();
+                        
+                        if (!retryResponse.ok) {
+                            throw new Error(retryResult.error || 'Erreur lors du remplacement des données');
+                        }
+                        
+                        showStockVivantNotification(`Stock remplacé avec succès (${retryResult.processedCount} entrées)`, 'success');
+                        // Ne pas recharger pour préserver la date sélectionnée
+                        return;
+                        
+                    } catch (retryError) {
+                        console.error('Erreur remplacement stock vivant:', retryError);
+                        showStockVivantNotification('Erreur lors du remplacement: ' + retryError.message, 'error');
+                        return;
+                    }
+                } else {
+                    showStockVivantNotification('Sauvegarde annulée', 'info');
+                    return;
                 }
-                return;
             }
             throw new Error(result.error || 'Erreur lors de la sauvegarde');
         }
         
         showStockVivantNotification(`Stock sauvegardé avec succès (${result.processedCount} entrées)`, 'success');
-        cancelStockVivantEdit();
-        loadStockVivantDates(); // Recharger les dates disponibles
+        // Ne pas recharger automatiquement pour préserver la date sélectionnée par l'utilisateur
         
     } catch (error) {
         console.error('Erreur sauvegarde stock vivant:', error);
@@ -7786,8 +7868,7 @@ async function saveStockVivantDataForced(date, stockData) {
         
         const result = await response.json();
         showStockVivantNotification(`Stock remplacé avec succès (${result.processedCount} entrées)`, 'success');
-        cancelStockVivantEdit();
-        loadStockVivantDates();
+        // Ne pas recharger automatiquement pour préserver la date sélectionnée
         
     } catch (error) {
         console.error('Erreur remplacement stock vivant:', error);
@@ -7796,9 +7877,23 @@ async function saveStockVivantDataForced(date, stockData) {
 }
 
 function cancelStockVivantEdit() {
-    document.getElementById('stock-vivant-data-container').style.display = 'none';
-    document.getElementById('stock-vivant-date').value = '';
-    document.getElementById('copy-from-date').value = '';
+    // Handle elements that may not exist in modern interface
+    const dataContainer = document.getElementById('stock-vivant-data-container');
+    if (dataContainer) {
+        dataContainer.style.display = 'none';
+    }
+    
+    const dateInput = document.getElementById('stock-vivant-date');
+    if (dateInput) {
+        dateInput.value = '';
+    }
+    
+    const copyFromDate = document.getElementById('copy-from-date');
+    if (copyFromDate) {
+        copyFromDate.value = '';
+    }
+    
+    console.log('🧹 CLIENT: Nettoyage interface stock vivant');
 }
 
 async function loadViewStockVivant() {
@@ -8108,9 +8203,7 @@ async function saveSimpleStockVivant() {
                     }
                     
                     showStockVivantNotification(`Stock remplacé avec succès (${retryResult.processedCount} entrées)`, 'success');
-                    
-                    // Recharger les données après sauvegarde
-                    await displaySimpleStockVivantTable();
+                    // Ne pas recharger pour préserver la date
                 }
                 return;
             }
@@ -8118,9 +8211,7 @@ async function saveSimpleStockVivant() {
         }
 
         showStockVivantNotification(`Stock sauvegardé avec succès (${result.processedCount} entrées)`, 'success');
-        
-        // Recharger les données après sauvegarde
-        await displaySimpleStockVivantTable();
+        // Ne pas recharger pour préserver la date sélectionnée
 
     } catch (error) {
         console.error('Erreur sauvegarde stock:', error);
@@ -8329,10 +8420,13 @@ function setupModernStockVivantEvents() {
     }
     
     // Date input
-    const dateInput = document.getElementById('stock-vivant-date');
+    const dateInput = document.querySelector('input[type="date"]#stock-vivant-date');
     if (dateInput) {
         dateInput.addEventListener('change', function() {
-            console.log('📅 Date changée:', this.value);
+            console.log('📅 Date changée par utilisateur:', this.value);
+            // Mark as user-selected to prevent auto-overriding
+            this.dataset.userSelected = 'true';
+            
             // Auto-reload data when date changes
             const currentMode = document.getElementById('stock-vivant-mode').value;
             if (currentMode === 'saisie') {
@@ -8387,14 +8481,35 @@ function setupModernStockVivantEvents() {
     
     const saveBtn = document.getElementById('save-stock-btn');
     if (saveBtn) {
-        saveBtn.addEventListener('click', async () => {
+        // Remove any existing event listeners to prevent duplicates
+        const newSaveBtn = saveBtn.cloneNode(true);
+        saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+        
+        // Add fresh event listener
+        newSaveBtn.addEventListener('click', async () => {
             await saveStockVivantData();
         });
     }
     
     const clearBtn = document.getElementById('clear-stock-btn');
     if (clearBtn) {
-        clearBtn.addEventListener('click', clearSimpleStockVivant);
+        // Remove any existing event listeners to prevent duplicates
+        const newClearBtn = clearBtn.cloneNode(true);
+        clearBtn.parentNode.replaceChild(newClearBtn, clearBtn);
+        
+        // Add fresh event listener
+        newClearBtn.addEventListener('click', clearSimpleStockVivant);
+    }
+    
+    // Copy button
+    const copyBtn = document.getElementById('copy-stock-btn');
+    if (copyBtn) {
+        // Remove any existing event listeners to prevent duplicates
+        const newCopyBtn = copyBtn.cloneNode(true);
+        copyBtn.parentNode.replaceChild(newCopyBtn, copyBtn);
+        
+        // Add fresh event listener
+        newCopyBtn.addEventListener('click', openCopyStockModal);
     }
     
     const exportBtn = document.getElementById('export-stock-btn');
@@ -8467,16 +8582,23 @@ async function displaySimpleStockVivantTable() {
     container.innerHTML = '<div class="loading-message"><i class="fas fa-spinner fa-spin"></i> Chargement des données...</div>';
     
     try {
-        // Get selected date or use latest date if none selected
-        const dateInput = document.getElementById('stock-vivant-date');
+        // Get selected date or use latest date ONLY on first load
+        const dateInput = document.querySelector('input[type="date"]#stock-vivant-date');
         let selectedDate = dateInput ? dateInput.value : null;
         
-        // If no date selected, get the latest date with data
+        // If no date selected AND it's the first load, get the latest date with data
         if (!selectedDate) {
+            // Only auto-load if the date input is empty (not manually set by user)
             selectedDate = await getLastStockVivantDate();
-            if (selectedDate && dateInput) {
+            if (selectedDate && dateInput && !dateInput.dataset.userSelected) {
                 dateInput.value = selectedDate;
                 console.log('📅 Auto-loaded latest date:', selectedDate);
+            }
+        } else {
+            // Mark that user has manually selected a date
+            if (dateInput) {
+                dateInput.dataset.userSelected = 'true';
+                console.log('📅 Using user-selected date:', selectedDate);
             }
         }
         
@@ -8929,5 +9051,269 @@ async function confirmAndSubmitExpense() {
         showNotification(`Erreur lors de l'ajout de la dépense: ${error.message}`, 'error');
         // Nettoyer les données même en cas d'erreur
         delete window.pendingExpenseFormData;
+    }
+}
+
+// === FONCTIONS DE COPIE STOCK VIVANT ===
+
+async function openCopyStockModal() {
+    console.log('📋 Ouverture du modal de copie Stock Vivant');
+    
+    // Get the target date (currently selected date)
+    const dateInput = document.querySelector('input[type="date"]#stock-vivant-date');
+    const targetDate = dateInput ? dateInput.value : null;
+    
+    if (!targetDate) {
+        showStockVivantNotification('Veuillez d\'abord sélectionner une date de destination', 'error');
+        return;
+    }
+    
+    // Display target date in modal
+    document.getElementById('copy-target-date').textContent = formatDate(targetDate);
+    
+    // Show modal
+    const modal = document.getElementById('copy-stock-modal');
+    modal.style.display = 'block';
+    
+    // Load available past dates
+    await loadPastDatesForCopy(targetDate);
+}
+
+function closeCopyStockModal() {
+    const modal = document.getElementById('copy-stock-modal');
+    modal.style.display = 'none';
+    
+    // Reset modal content
+    document.getElementById('copy-source-date').innerHTML = '<option value="">Chargement des dates disponibles...</option>';
+    document.getElementById('copy-source-preview').style.display = 'none';
+    document.getElementById('confirm-copy-btn').disabled = true;
+}
+
+async function loadPastDatesForCopy(targetDate) {
+    console.log('📅 Chargement des dates antérieures à:', targetDate);
+    
+    try {
+        // Get all available dates
+        const response = await fetch(apiUrl('/api/stock-vivant/dates'));
+        if (!response.ok) throw new Error('Erreur lors du chargement des dates');
+        
+        const datesResponse = await response.json();
+        const targetDateObj = new Date(targetDate);
+        
+        // Extract date strings from objects if needed
+        const dates = Array.isArray(datesResponse) && datesResponse.length > 0 && typeof datesResponse[0] === 'object' 
+            ? datesResponse.map(item => item.date) 
+            : datesResponse;
+        
+        console.log('📅 Dates reçues du serveur:', dates.length, 'Format:', typeof dates[0]);
+        
+        // Filter to only past dates (antérieures)
+        const pastDates = dates.filter(dateStr => {
+            const dateObj = new Date(dateStr);
+            return dateObj < targetDateObj;
+        });
+        
+        console.log('📅 Dates antérieures trouvées:', pastDates.length);
+        
+        // Vérifier quelles dates ont vraiment des données (quantité > 0 ou prix > 0)
+        const datesWithRealData = [];
+        
+        for (const dateStr of pastDates) {
+            try {
+                const response = await fetch(apiUrl(`/api/stock-vivant?date=${dateStr}`));
+                if (response.ok) {
+                    const data = await response.json();
+                    // Vérifier s'il y a des données réelles (quantité > 0 ou prix > 0)
+                    const hasRealData = data.some(item => 
+                        (item.quantite && item.quantite > 0) || 
+                        (item.prix_unitaire && item.prix_unitaire > 0)
+                    );
+                    
+                    if (hasRealData) {
+                        datesWithRealData.push(dateStr);
+                        console.log(`✅ Date ${dateStr}: ${data.length} entrées avec données`);
+                    } else {
+                        console.log(`❌ Date ${dateStr}: ${data.length} entrées mais aucune donnée réelle`);
+                    }
+                }
+            } catch (error) {
+                console.warn(`⚠️ Erreur vérification date ${dateStr}:`, error.message);
+            }
+            
+            // Limiter à 5 dates pour éviter trop de requêtes
+            if (datesWithRealData.length >= 5) break;
+        }
+        
+        console.log('📅 Dates avec vraies données:', datesWithRealData.length);
+        
+        const select = document.getElementById('copy-source-date');
+        
+        if (datesWithRealData.length === 0) {
+            select.innerHTML = '<option value="">Aucune date antérieure avec des données réelles</option>';
+            return;
+        }
+        
+        // Sort dates in descending order (most recent first) - déjà triées
+        const limitedDates = datesWithRealData;
+        
+        console.log('📅 Dates finales sélectionnées:', limitedDates.length);
+        
+        // Populate select
+        select.innerHTML = '<option value="">Sélectionner une date source</option>';
+        limitedDates.forEach(dateStr => {
+            const option = document.createElement('option');
+            option.value = dateStr;
+            option.textContent = formatDate(dateStr);
+            select.appendChild(option);
+        });
+        
+        // Add change event listener
+        select.addEventListener('change', function() {
+            if (this.value) {
+                loadSourceDataPreview(this.value);
+                document.getElementById('confirm-copy-btn').disabled = false;
+            } else {
+                document.getElementById('copy-source-preview').style.display = 'none';
+                document.getElementById('confirm-copy-btn').disabled = true;
+            }
+        });
+        
+    } catch (error) {
+        console.error('Erreur chargement dates:', error);
+        const select = document.getElementById('copy-source-date');
+        select.innerHTML = '<option value="">Erreur lors du chargement</option>';
+        showStockVivantNotification('Erreur lors du chargement des dates: ' + error.message, 'error');
+    }
+}
+
+async function loadSourceDataPreview(sourceDate) {
+    console.log('🔍 Chargement aperçu pour:', sourceDate);
+    
+    try {
+        const response = await fetch(apiUrl(`/api/stock-vivant?date=${sourceDate}`));
+        if (!response.ok) throw new Error('Erreur lors du chargement des données');
+        
+        const data = await response.json();
+        console.log('📊 Données trouvées:', data.length, 'entrées');
+        
+        const previewContainer = document.getElementById('copy-source-preview');
+        const previewContent = previewContainer.querySelector('.preview-content');
+        
+        if (data.length === 0) {
+            previewContent.innerHTML = '<p class="text-muted">Aucune donnée trouvée pour cette date</p>';
+        } else {
+            let totalValue = 0;
+            let html = '<div class="preview-summary">';
+            
+            data.forEach(item => {
+                const total = item.quantite * item.prix_unitaire * (1 - item.decote);
+                totalValue += total;
+                
+                html += `
+                    <div class="preview-item">
+                        <strong>${stockVivantConfig.labels[item.categorie] || item.categorie}</strong> - 
+                        ${stockVivantConfig.labels[item.produit] || item.produit}: 
+                        ${item.quantite} × ${formatCurrency(item.prix_unitaire)} = 
+                        <strong>${formatCurrency(total)}</strong>
+                    </div>
+                `;
+            });
+            
+            html += `<div class="preview-total"><strong>Total: ${formatCurrency(totalValue)}</strong></div>`;
+            html += '</div>';
+            
+            previewContent.innerHTML = html;
+        }
+        
+        previewContainer.style.display = 'block';
+        
+    } catch (error) {
+        console.error('Erreur chargement aperçu:', error);
+        const previewContent = document.getElementById('copy-source-preview').querySelector('.preview-content');
+        previewContent.innerHTML = '<p class="text-error">Erreur lors du chargement de l\'aperçu</p>';
+        showStockVivantNotification('Erreur lors du chargement de l\'aperçu: ' + error.message, 'error');
+    }
+}
+
+async function confirmCopyStockData() {
+    const targetDate = document.querySelector('input[type="date"]#stock-vivant-date').value;
+    const sourceDate = document.getElementById('copy-source-date').value;
+    
+    if (!targetDate || !sourceDate) {
+        showStockVivantNotification('Dates manquantes pour la copie', 'error');
+        return;
+    }
+    
+    console.log('🔄 Copie de', sourceDate, 'vers', targetDate);
+    
+    // Confirmation popup
+    const confirmMessage = `Êtes-vous sûr de vouloir copier les données du ${formatDate(sourceDate)} vers le ${formatDate(targetDate)} ?
+
+⚠️ Cette action remplacera toutes les données existantes pour le ${formatDate(targetDate)}.
+
+📋 Les données de ${formatDate(sourceDate)} seront dupliquées pour ${formatDate(targetDate)}.`;
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        // Load source data
+        const response = await fetch(apiUrl(`/api/stock-vivant?date=${sourceDate}`));
+        if (!response.ok) throw new Error('Erreur lors du chargement des données source');
+        
+        const sourceData = await response.json();
+        
+        if (sourceData.length === 0) {
+            showStockVivantNotification('Aucune donnée à copier', 'warning');
+            return;
+        }
+        
+        // Transform data for target date
+        const stockData = sourceData.map(item => ({
+            categorie: item.categorie,
+            produit: item.produit,
+            quantite: item.quantite,
+            prix_unitaire: item.prix_unitaire,
+            decote: item.decote,
+            commentaire: item.commentaire ? `${item.commentaire} (Copié depuis ${formatDate(sourceDate)})` : `Copié depuis ${formatDate(sourceDate)}`
+        }));
+        
+        console.log('📦 Données à copier:', stockData.length, 'entrées');
+        
+        // Save to target date with replace_existing = true
+        const saveResponse = await fetch(apiUrl('/api/stock-vivant/update'), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                date_stock: targetDate,
+                stockData: stockData,
+                replace_existing: true
+            })
+        });
+        
+        const saveResult = await saveResponse.json();
+        
+        if (!saveResponse.ok) {
+            throw new Error(saveResult.error || 'Erreur lors de la sauvegarde');
+        }
+        
+        console.log('✅ Copie terminée:', saveResult.processedCount, 'entrées');
+        
+        // Close modal
+        closeCopyStockModal();
+        
+        // Reload the table to show copied data
+        await displaySimpleStockVivantTable();
+        
+        // Show success message
+        showStockVivantNotification(
+            `Données copiées avec succès: ${saveResult.processedCount} entrées du ${formatDate(sourceDate)} vers le ${formatDate(targetDate)}`, 
+            'success'
+        );
+        
+    } catch (error) {
+        console.error('Erreur lors de la copie:', error);
+        showStockVivantNotification('Erreur lors de la copie: ' + error.message, 'error');
     }
 }

@@ -1213,7 +1213,7 @@
                                 <input type="date" id="stock-vivant-date" class="form-control">
                             </div>
                             
-                            <div class="filter-group">
+                            <div class="filter-group" style="display: none;">
                                 <label for="stock-vivant-mode">Mode d'affichage</label>
                                 <select id="stock-vivant-mode" class="form-control">
                                     <option value="saisie">Saisie Simple</option>
@@ -1249,6 +1249,9 @@
                                 <div class="panel-actions">
                                     <button type="button" id="save-stock-btn" class="btn btn-success">
                                         <i class="fas fa-save"></i> Sauvegarder
+                                    </button>
+                                    <button type="button" id="copy-stock-btn" class="btn btn-info">
+                                        <i class="fas fa-copy"></i> Copier depuis une date
                                     </button>
                                     <button type="button" id="clear-stock-btn" class="btn btn-warning">
                                         <i class="fas fa-eraser"></i> Effacer
@@ -1603,6 +1606,45 @@
                     <button type="submit" class="btn btn-primary" id="stock-submit-btn">Ajouter</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal pour copier depuis une date -->
+    <div id="copy-stock-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-copy"></i> Copier les données depuis une date</h2>
+                <span class="close" onclick="closeCopyStockModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="copy-stock-info">
+                    <p><strong>Date de destination :</strong> <span id="copy-target-date"></span></p>
+                    <p class="text-muted">Sélectionnez une date <strong>antérieure</strong> pour copier ses données vers la date de destination.</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="copy-source-date">Date source (date antérieure avec données)</label>
+                    <select id="copy-source-date" class="form-control">
+                        <option value="">Chargement des dates disponibles...</option>
+                    </select>
+                    <small class="form-help">Seules les 5 dates les plus récentes avec des données sont affichées</small>
+                </div>
+                
+                <div id="copy-source-preview" class="copy-preview" style="display: none;">
+                    <h4>Aperçu des données à copier :</h4>
+                    <div class="preview-content">
+                        <!-- Les données seront affichées ici -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeCopyStockModal()">
+                    <i class="fas fa-times"></i> Annuler
+                </button>
+                <button type="button" class="btn btn-primary" id="confirm-copy-btn" onclick="confirmCopyStockData()" disabled>
+                    <i class="fas fa-copy"></i> Copier les données
+                </button>
+            </div>
         </div>
     </div>
 
