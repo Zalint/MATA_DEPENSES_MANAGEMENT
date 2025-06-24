@@ -5,7 +5,8 @@
       "Belier",
       "Agneau",
       "NouveauNeMouton",
-      "Ladoum",
+      "Ladoum male",
+      "Ladoum femelle",
       "Autre"
     ],
     "Caprin": [
@@ -36,7 +37,7 @@
   },
   "labels": {
     "Ovin": "Ovin",
-    "Caprin": "Caprin", 
+    "Caprin": "Caprin",
     "Bovin": "Bovin",
     "Cheval": "Cheval",
     "Ane": "Âne",
@@ -47,6 +48,8 @@
     "Agneau": "Agneau",
     "NouveauNeMouton": "Nouveau-né Mouton",
     "Ladoum": "Ladoum",
+    "Ladoum male": "Ladoum mâle",
+    "Ladoum femelle": "Ladoum femelle",
     "Chevere": "Chèvre",
     "Boeuf": "Bœuf",
     "Veau": "Veau",
@@ -58,4 +61,4 @@
   },
   "version": "1.0.0",
   "description": "Configuration des catégories et produits pour le stock vivant"
-} 
+}
