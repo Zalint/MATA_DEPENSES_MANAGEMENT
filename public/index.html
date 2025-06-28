@@ -98,6 +98,11 @@
                             <i class="fas fa-handshake"></i> Suivi Partenaires
                         </a>
                     </li>
+                    <li id="creance-menu" style="display: none;">
+                        <a href="#" data-section="creance" class="nav-link">
+                            <i class="fas fa-file-invoice-dollar"></i> Créance
+                        </a>
+                    </li>
                     <!--<li><a href="#" data-section="remboursements" class="nav-link">
                         <i class="fas fa-money-bill-wave"></i> Remboursements
                     </a></li>-->
@@ -161,25 +166,6 @@
                             </div>
                         </div>
                         
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-calendar-week"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>Cash Burn depuis Lundi</h3>
-                                <p class="stat-value" id="weekly-burn">0 FCFA</p>
-                            </div>
-                        </div>
-                        
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-calendar-alt"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>Cash Burn du Mois</h3>
-                                <p class="stat-value" id="monthly-burn">0 FCFA</p>
-                            </div>
-                        </div>
                         
                         <div class="stat-card">
                             <div class="stat-icon">
@@ -200,6 +186,47 @@
                                 <h3>Total Général Stock Vivant</h3>
                                 <p class="stat-value" id="stock-vivant-total">0 FCFA</p>
                                 <small class="stat-period" id="stock-vivant-date">Dernière date</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-file-invoice-dollar"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Total Créances</h3>
+                                <p class="stat-value" id="total-creances">0 FCFA</p>
+                                <small class="stat-period">Soldes clients créance</small>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-week"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Cash Burn depuis Lundi</h3>
+                                <p class="stat-value" id="weekly-burn">0 FCFA</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-alt"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Cash Burn du Mois</h3>
+                                <p class="stat-value" id="monthly-burn">0 FCFA</p>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-check"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Créances du Mois</h3>
+                                <p class="stat-value" id="creances-mois">0 FCFA</p>
+                                <small class="stat-period" id="creances-mois-period">Mois en cours</small>
                             </div>
                         </div>
                     </div>
@@ -723,11 +750,7 @@
                             <label>Type de Compte</label>
                             <select id="accountType" onchange="handleAccountTypeChange()" required>
                                 <option value="">Sélectionner un type</option>
-                                <option value="classique">Compte Classique</option>
-                                <option value="partenaire">Compte Partenaire</option>
-                                <option value="statut">Compte Statut</option>
-                                <option value="Ajustement">Compte Ajustement</option>
-                                <option value="depot">Compte Dépôt</option>
+                                <!-- Les types seront chargés dynamiquement -->
                             </select>
                             <small class="form-help" id="accountTypeHelp">Sélectionnez d'abord un type pour voir la description</small>
                         </div>
@@ -876,48 +899,7 @@
                         
                         <h3 id="partner-details-title">Détails du Compte</h3>
                         
-                        <!-- Formulaire d'ajout de livraison -->
-                        <form class="account-form" id="addDeliveryForm">
-                            <h4>Ajouter une Livraison</h4>
-                            
-                            <input type="hidden" id="delivery-account-id">
-                            
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Date de Livraison</label>
-                                    <input type="date" id="delivery-date" required>
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label>Nombre d'Articles</label>
-                                    <input type="number" id="delivery-article-count" min="1" required onchange="calculateDeliveryAmount()">
-                                </div>
-                            </div>
-                            
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label>Prix Unitaire (FCFA)</label>
-                                    <input type="number" id="delivery-unit-price" min="0" step="1" required onchange="calculateDeliveryAmount()" placeholder="Prix par article">
-                                </div>
-                                
-                                <div class="form-group">
-                                    <label>Montant (FCFA)</label>
-                                    <input type="number" id="delivery-amount" min="1" required placeholder="Calculé automatiquement">
-                                    <small class="form-help">Se calcule automatiquement ou modifiez manuellement</small>
-                                </div>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>Description</label>
-                                <textarea id="delivery-description" placeholder="Description des articles livrés..." required></textarea>
-                            </div>
-                            
-                            <div id="delivery-authorization-warning" class="warning-message" style="display: none;">
-                                <strong>Attention:</strong> <span id="delivery-warning-text"></span>
-                            </div>
-                            
-                            <button type="submit" class="btn btn-primary" id="add-delivery-btn">Ajouter la Livraison</button>
-                        </form>
+                        <!-- Formulaire d'ajout de livraison supprimé (doublon) -->
 
                         <!-- Liste des livraisons -->
                         <div class="deliveries-list">
@@ -949,6 +931,173 @@
                         
                         <div id="partner-accounts-config">
                             <!-- Les comptes partenaires seront chargés ici -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section Gestion Créances -->
+                <section id="creance-section" class="section">
+                    <h2><i class="fas fa-file-invoice-dollar"></i> Gestion des Créances</h2>
+                    <p class="section-description">Suivi des créances clients par compte</p>
+
+                    <!-- Sélection du compte créance -->
+                    <div class="creance-account-selector">
+                        <div class="form-group">
+                            <label for="creance-account-select">Sélectionner un compte créance</label>
+                            <select id="creance-account-select" class="form-control">
+                                <option value="">Choisir un compte créance...</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Zone principale - masquée jusqu'à sélection d'un compte -->
+                    <div id="creance-main-content" style="display: none;">
+                        <!-- En-tête du compte sélectionné -->
+                        <div class="creance-account-header">
+                            <h3 id="creance-account-title">Compte : [Nom du compte]</h3>
+                            <p id="creance-account-director">Directeur assigné : [Nom du directeur]</p>
+                        </div>
+
+                        <!-- Tableau récapitulatif par client -->
+                        <div class="creance-summary-section">
+                            <div class="section-card">
+                                <h4><i class="fas fa-table"></i> Récapitulatif par Client</h4>
+                                
+                                <div class="table-container">
+                                    <table id="clients-summary-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Client</th>
+                                                <th>Téléphone</th>
+                                                <th>Crédit Initial</th>
+                                                <th>Total Avances</th>
+                                                <th>Total Remboursements</th>
+                                                <th>Solde Final</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="clients-summary-tbody">
+                                            <!-- Les données seront chargées ici -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Gestion des clients (Admin/DG/PCA uniquement) -->
+                        <div id="creance-admin-section" class="creance-section" style="display: none;">
+                            <div class="section-card">
+                                <h4><i class="fas fa-users"></i> Gestion des Clients</h4>
+                                
+                                <!-- Formulaire d'ajout de client -->
+                                <div class="add-client-form">
+                                    <h5>Ajouter un nouveau client</h5>
+                                    <form id="add-client-form">
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="client-name">Nom du client *</label>
+                                                <input type="text" id="client-name" name="client-name" required placeholder="Nom complet du client">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="client-phone">Téléphone</label>
+                                                <input type="text" id="client-phone" name="client-phone" placeholder="Numéro de téléphone">
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="client-address">Adresse</label>
+                                                <input type="text" id="client-address" name="client-address" placeholder="Adresse du client">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="initial-credit">Crédit initial (FCFA)</label>
+                                                <input type="number" id="initial-credit" name="initial-credit" min="0" value="0" placeholder="0">
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-success">
+                                            <i class="fas fa-plus"></i> Ajouter le client
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Opérations créance (Tous les utilisateurs autorisés) -->
+                        <div id="creance-operations-section" class="creance-section">
+                            <div class="section-card">
+                                <h4><i class="fas fa-exchange-alt"></i> Opérations Créance</h4>
+                                
+                                <!-- Formulaire d'ajout d'opération -->
+                                <div class="add-operation-form">
+                                    <h5>Nouvelle opération</h5>
+                                    <form id="add-operation-form">
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="operation-client">Client *</label>
+                                                <select id="operation-client" name="operation-client" required>
+                                                    <option value="">Sélectionner un client...</option>
+                                                </select>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="operation-type">Type d'opération *</label>
+                                                <select id="operation-type" name="operation-type" required>
+                                                    <option value="">Sélectionner...</option>
+                                                    <option value="credit">Avance (+)</option>
+                                                    <option value="debit">Remboursement (-)</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="operation-amount">Montant (FCFA) *</label>
+                                                <input type="number" id="operation-amount" name="operation-amount" min="1" required placeholder="Montant en FCFA">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="operation-date">Date *</label>
+                                                <input type="date" id="operation-date" name="operation-date" required>
+                                            </div>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="operation-description">Description</label>
+                                            <input type="text" id="operation-description" name="operation-description" placeholder="Description de l'opération">
+                                        </div>
+                                        <div class="form-actions">
+                                            <button type="submit" class="btn btn-primary">
+                                                <i class="fas fa-plus"></i> Enregistrer l'opération
+                                            </button>
+                                            <button type="button" class="btn btn-secondary" id="cancel-operation-edit" onclick="cancelOperationEdit()" style="display: none;">
+                                                <i class="fas fa-times"></i> Annuler
+                                            </button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+
+
+
+                        <!-- Historique des opérations -->
+                        <div class="creance-history-section">
+                            <div class="section-card">
+                                <h4><i class="fas fa-history"></i> Historique des Opérations</h4>
+                                
+                                <div class="table-container">
+                                    <table id="operations-history-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Client</th>
+                                                <th>Type</th>
+                                                <th>Montant</th>
+                                                <th>Description</th>
+                                                <th>Créé par</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="operations-history-tbody">
+                                            <!-- L'historique sera chargé ici -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </section>

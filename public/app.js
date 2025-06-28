@@ -149,6 +149,11 @@ async function showApp() {
         document.getElementById('user-column').style.display = 'table-cell';
     }
     
+    // Afficher le menu créance pour les utilisateurs autorisés
+    if (['directeur_general', 'pca', 'admin', 'directeur'].includes(currentUser.role)) {
+        document.getElementById('creance-menu').style.display = 'block';
+    }
+    
     // Initialize Stock Vivant module (similar to credit module)
     await initDirectorStockVivantModule();
 }
@@ -241,12 +246,25 @@ async function showSection(sectionName) {
                 showNotification('Erreur lors du chargement de la Configuration', 'error');
             }
             break;
+        case 'creance':
+            console.log('🔄 CLIENT: showSection - creance appelé');
+            try {
+                await initCreanceSection();
+                console.log('✅ CLIENT: showSection - creance terminé avec succès');
+            } catch (error) {
+                console.error('❌ CLIENT: Erreur dans showSection - creance:', error);
+                showNotification('Erreur lors du chargement des Créances', 'error');
+            }
+            break;
     }
 }
 
 // Chargement des données initiales
 async function loadInitialData() {
     await loadCategories();
+    
+    // Charger les types de comptes pour le formulaire de création
+    await loadAccountTypes();
     
     // Définir les dates par défaut AVANT de charger le dashboard
     // Utiliser une plage de dates élargie pour inclure toutes les dépenses existantes
@@ -667,6 +685,8 @@ async function loadDashboard() {
         await loadDashboardData();
         await loadStockSummary();
         await loadStockVivantTotal(); // Ajouter le chargement du total stock vivant
+        await loadTotalCreances(); // Charger le total des créances
+        await loadCreancesMois(); // Charger les créances du mois
         await loadTransfersCard(); // Ajouter le chargement des transferts
     } catch (error) {
         console.error('Erreur lors du chargement du dashboard:', error);
@@ -2586,6 +2606,10 @@ function resetAccountForm() {
     document.getElementById('categoryTypeGroup').style.display = 'none';
     document.getElementById('permissionsSection').style.display = 'none';
     document.getElementById('userSelectGroup').style.display = 'block';
+    
+    // Rétablir la visibilité du montant initial
+    const initialAmountGroup = document.getElementById('initialAmount')?.closest('.form-group');
+    if (initialAmountGroup) initialAmountGroup.style.display = 'block';
 }
 
 // Fonction pour charger les comptes pour le crédit
@@ -2959,6 +2983,46 @@ function handleUserAssignmentChange() {
     }
 }
 
+// Fonction pour charger les types de comptes depuis l'API
+async function loadAccountTypes() {
+    try {
+        const response = await fetch('/api/accounts/types');
+        if (!response.ok) throw new Error('Failed to fetch account types');
+        const accountTypes = await response.json();
+        
+        const select = document.getElementById('accountType');
+        if (!select) return;
+        
+        // Vider le select et ajouter l'option par défaut
+        select.innerHTML = '<option value="">Sélectionner un type</option>';
+        
+        // Ajouter les options depuis l'API
+        accountTypes.forEach(type => {
+            const option = document.createElement('option');
+            option.value = type.id;
+            option.textContent = type.name;
+            select.appendChild(option);
+        });
+        
+        console.log('[loadAccountTypes] Account types loaded successfully:', accountTypes.length);
+    } catch (error) {
+        console.error('Erreur chargement types de comptes:', error);
+        // En cas d'erreur, restaurer les options par défaut
+        const select = document.getElementById('accountType');
+        if (select) {
+            select.innerHTML = `
+                <option value="">Sélectionner un type</option>
+                <option value="classique">Compte Classique</option>
+                <option value="partenaire">Compte Partenaire</option>
+                <option value="statut">Compte Statut</option>
+                <option value="Ajustement">Compte Ajustement</option>
+                <option value="depot">Compte Dépôt</option>
+                <option value="creance">Compte Créance</option>
+            `;
+        }
+    }
+}
+
 function handleAccountTypeChange() {
     console.log('[handleAccountTypeChange] Fired.');
     const accountType = document.getElementById('accountType').value;
@@ -2971,6 +3035,9 @@ function handleAccountTypeChange() {
     const permissionsSection = document.getElementById('permissionsSection');
     const creditPermissionGroup = document.getElementById('creditPermissionGroup');
     
+    // Gérer l'affichage du champ montant initial
+    const initialAmountGroup = document.getElementById('initialAmount')?.closest('.form-group');
+    
     // Cacher toutes les sections spécifiques
     console.log('[handleAccountTypeChange] Hiding all specific sections.');
     categoryTypeGroup.style.display = 'none';
@@ -2980,6 +3047,9 @@ function handleAccountTypeChange() {
     // Rétablir la visibilité du sélecteur d'utilisateur par défaut
     userSelectGroup.style.display = 'block';
     createDirectorSelect.required = true;
+    
+    // Rétablir la visibilité du montant initial par défaut
+    if (initialAmountGroup) initialAmountGroup.style.display = 'block';
 
     // Messages d'aide selon le type
     const helpMessages = {
@@ -2987,7 +3057,8 @@ function handleAccountTypeChange() {
         'partenaire': 'Compte accessible à tous les utilisateurs.',
         'statut': 'Compte où le crédit écrase le solde existant (DG/PCA uniquement).',
         'Ajustement': 'Compte spécial pour les ajustements comptables (DG/PCA uniquement).',
-        'depot': 'Compte dépôt exclu du calcul de solde global (DG/PCA uniquement).'
+        'depot': 'Compte dépôt exclu du calcul de solde global (DG/PCA uniquement).',
+        'creance': 'Compte spécial pour le suivi des créances clients. Isolé des calculs généraux.'
     };
      
     if (accountType && helpMessages[accountType]) {
@@ -3004,10 +3075,20 @@ function handleAccountTypeChange() {
             console.log('[handleAccountTypeChange] Type is "classique". Showing specific groups.');
             categoryTypeGroup.style.display = 'block';
             creditPermissionGroup.style.display = 'block';
+            // Afficher le champ montant initial
+            if (initialAmountGroup) initialAmountGroup.style.display = 'block';
             // La section des permissions existantes n'est montrée que pour la modification
             // permissionsSection.style.display = 'block';
             loadCategoryTypes(); // Charger les types de catégories
             loadDirectorsForCreditPermission(); // Charger les directeurs pour la permission
+            break;
+            
+        case 'creance':
+            console.log('[handleAccountTypeChange] Type is "creance". Compte créance assignable à un directeur.');
+            // Les comptes créance peuvent être assignés à un directeur comme les comptes classiques
+            // Mais sans les options de catégorie et permission de crédit
+            // Masquer le champ montant initial car le crédit est géré par client
+            if (initialAmountGroup) initialAmountGroup.style.display = 'none';
             break;
             
         case 'partenaire':
@@ -3017,6 +3098,13 @@ function handleAccountTypeChange() {
             console.log(`[handleAccountTypeChange] Type is "${accountType}". Hiding userSelectGroup.`);
             userSelectGroup.style.display = 'none';
             createDirectorSelect.required = false;
+            // Afficher le champ montant initial pour ces types
+            if (initialAmountGroup) initialAmountGroup.style.display = 'block';
+            break;
+        
+        default:
+            // Pour les types non reconnus, afficher le montant initial par défaut
+            if (initialAmountGroup) initialAmountGroup.style.display = 'block';
             break;
     }
 }
@@ -6437,6 +6525,8 @@ async function loadDashboard() {
         await loadDashboardData();
         await loadStockSummary();
         await loadStockVivantTotal(); // Ajouter le chargement du total stock vivant
+        await loadTotalCreances(); // Charger le total des créances
+        await loadCreancesMois(); // Charger les créances du mois
         await loadTransfersCard(); // Ajouter le chargement des transferts
     } catch (error) {
         console.error('Erreur lors du chargement du dashboard:', error);
@@ -8414,6 +8504,69 @@ async function loadStockVivantTotal() {
     }
 }
 
+// Charger le total des créances
+async function loadTotalCreances() {
+    try {
+        const response = await fetch(apiUrl('/api/dashboard/total-creances'));
+        
+        if (!response.ok) {
+            throw new Error(`Erreur ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        const totalElement = document.getElementById('total-creances');
+        
+        if (totalElement) {
+            totalElement.textContent = data.formatted;
+        }
+        
+    } catch (error) {
+        console.error('Erreur chargement total créances:', error);
+        const totalElement = document.getElementById('total-creances');
+        if (totalElement) {
+            totalElement.textContent = '0 FCFA';
+        }
+    }
+}
+
+// Charger les créances du mois en cours
+async function loadCreancesMois() {
+    try {
+        const response = await fetch(apiUrl('/api/dashboard/creances-mois'));
+        
+        if (!response.ok) {
+            throw new Error(`Erreur ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        const totalElement = document.getElementById('creances-mois');
+        const periodElement = document.getElementById('creances-mois-period');
+        
+        if (totalElement) {
+            totalElement.textContent = data.formatted;
+        }
+        
+        if (periodElement) {
+            periodElement.textContent = data.period;
+        }
+        
+    } catch (error) {
+        console.error('Erreur chargement créances du mois:', error);
+        const totalElement = document.getElementById('creances-mois');
+        const periodElement = document.getElementById('creances-mois-period');
+        
+        if (totalElement) {
+            totalElement.textContent = '0 FCFA';
+        }
+        
+        if (periodElement) {
+            periodElement.textContent = 'Mois en cours';
+        }
+    }
+}
+
 // === MODULE STOCK VIVANT POUR DIRECTEURS ===
 
 // Initialiser le module stock vivant pour directeurs (identique au module crédit)
@@ -10037,3 +10190,606 @@ function setupBraceHighlightCleanup(configType) {
     editor.addEventListener('input', () => clearBraceHighlights(configType));
     editor.addEventListener('keydown', () => clearBraceHighlights(configType));
 }
+
+// ===== GESTION DES CRÉANCES =====
+
+// Variables globales pour créances
+let currentCreanceAccount = null;
+
+// Charger les comptes créance au démarrage
+async function loadCreanceAccounts() {
+    try {
+        const response = await fetch(apiUrl('/api/creance/accounts'));
+        if (!response.ok) {
+            throw new Error(`Erreur ${response.status}: ${response.statusText}`);
+        }
+        
+        const accounts = await response.json();
+        const select = document.getElementById('creance-account-select');
+        
+        if (!select) return;
+        
+        // Vider les options existantes
+        select.innerHTML = '<option value="">Choisir un compte créance...</option>';
+        
+        // Ajouter les comptes
+        accounts.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            option.textContent = account.account_name;
+            option.dataset.director = account.assigned_director_name || 'Non assigné';
+            select.appendChild(option);
+        });
+        
+        // Si il n'y a qu'un seul compte, le sélectionner automatiquement
+        if (accounts.length === 1) {
+            select.value = accounts[0].id;
+            // Déclencher l'événement de sélection pour charger les données du compte
+            handleCreanceAccountSelection();
+        }
+        
+    } catch (error) {
+        console.error('Erreur chargement comptes créance:', error);
+        showNotification('Erreur lors du chargement des comptes créance', 'error');
+    }
+}
+
+// Gérer la sélection d'un compte créance
+function handleCreanceAccountSelection() {
+    const select = document.getElementById('creance-account-select');
+    const mainContent = document.getElementById('creance-main-content');
+    const adminSection = document.getElementById('creance-admin-section');
+    
+    if (!select || !mainContent) return;
+    
+    const accountId = select.value;
+    
+    if (!accountId) {
+        mainContent.style.display = 'none';
+        currentCreanceAccount = null;
+        return;
+    }
+    
+    // Obtenir les infos du compte sélectionné
+    const selectedOption = select.selectedOptions[0];
+    const accountName = selectedOption.textContent;
+    const directorName = selectedOption.dataset.director;
+    
+    currentCreanceAccount = {
+        id: accountId,
+        name: accountName,
+        director: directorName
+    };
+    
+    // Mettre à jour l'en-tête
+    document.getElementById('creance-account-title').textContent = `Compte : ${accountName}`;
+    document.getElementById('creance-account-director').textContent = `Directeur assigné : ${directorName}`;
+    
+    // Afficher le contenu principal
+    mainContent.style.display = 'block';
+    
+    // Afficher la section admin si l'utilisateur est admin/DG/PCA
+    if (currentUser.role === 'admin' || currentUser.role === 'directeur_general' || currentUser.role === 'pca') {
+        adminSection.style.display = 'block';
+    } else {
+        adminSection.style.display = 'none';
+    }
+    
+    // Charger les données du compte
+    loadCreanceAccountData(accountId);
+}
+
+// Charger les données d'un compte créance (clients et opérations)
+async function loadCreanceAccountData(accountId) {
+    try {
+        // Charger les clients
+        await loadCreanceClients(accountId);
+        
+        // Charger l'historique des opérations
+        await loadCreanceOperations(accountId);
+        
+    } catch (error) {
+        console.error('Erreur chargement données créance:', error);
+        showNotification('Erreur lors du chargement des données', 'error');
+    }
+}
+
+// Charger les clients d'un compte créance
+async function loadCreanceClients(accountId) {
+    try {
+        const response = await fetch(apiUrl(`/api/creance/${accountId}/clients`));
+        if (!response.ok) {
+            throw new Error(`Erreur ${response.status}`);
+        }
+        
+        const clients = await response.json();
+        
+        // Mettre à jour le tableau récapitulatif
+        updateClientsSummaryTable(clients);
+        
+        // Mettre à jour la liste des clients pour les opérations
+        updateOperationClientSelect(clients);
+        
+    } catch (error) {
+        console.error('Erreur chargement clients:', error);
+        showNotification('Erreur lors du chargement des clients', 'error');
+    }
+}
+
+// Mettre à jour le tableau récapitulatif des clients
+function updateClientsSummaryTable(clients) {
+    const tbody = document.getElementById('clients-summary-tbody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    if (clients.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">Aucun client trouvé</td></tr>';
+        return;
+    }
+    
+    clients.forEach(client => {
+        const row = document.createElement('tr');
+        
+        const balance = parseInt(client.balance);
+        let balanceClass = 'amount-neutral';
+        if (balance > 0) balanceClass = 'amount-positive';
+        else if (balance < 0) balanceClass = 'amount-negative';
+        
+        row.innerHTML = `
+            <td>${client.client_name}</td>
+            <td>${client.client_phone || '-'}</td>
+            <td class="amount-neutral">${formatCurrency(client.initial_credit)}</td>
+            <td class="amount-positive">${formatCurrency(client.total_credits)}</td>
+            <td class="amount-negative">${formatCurrency(client.total_debits)}</td>
+            <td class="${balanceClass}">${formatCurrency(balance)}</td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+}
+
+// Mettre à jour la liste des clients pour les opérations
+function updateOperationClientSelect(clients) {
+    const select = document.getElementById('operation-client');
+    if (!select) return;
+    
+    select.innerHTML = '<option value="">Sélectionner un client...</option>';
+    
+    clients.forEach(client => {
+        const option = document.createElement('option');
+        option.value = client.id;
+        option.textContent = client.client_name;
+        select.appendChild(option);
+    });
+}
+
+// Charger l'historique des opérations
+async function loadCreanceOperations(accountId) {
+    try {
+        const response = await fetch(apiUrl(`/api/creance/${accountId}/operations`));
+        if (!response.ok) {
+            throw new Error(`Erreur ${response.status}`);
+        }
+        
+        const operations = await response.json();
+        updateOperationsHistoryTable(operations);
+        
+    } catch (error) {
+        console.error('Erreur chargement opérations:', error);
+        showNotification('Erreur lors du chargement de l\'historique', 'error');
+    }
+}
+
+// Mettre à jour le tableau de l'historique des opérations
+function updateOperationsHistoryTable(operations) {
+    const tbody = document.getElementById('operations-history-tbody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    if (operations.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">Aucune opération trouvée</td></tr>';
+        return;
+    }
+    
+    operations.forEach(operation => {
+        const row = document.createElement('tr');
+        
+        const typeClass = operation.operation_type === 'credit' ? 'amount-positive' : 'amount-negative';
+        const typeText = operation.operation_type === 'credit' ? 'Avance (+)' : 'Remboursement (-)';
+        
+        // Générer les boutons d'actions selon les permissions
+        const actionsHtml = generateCreanceOperationActions(operation);
+        
+        row.innerHTML = `
+            <td>${formatDate(operation.operation_date)}</td>
+            <td>${operation.client_name}</td>
+            <td class="${typeClass}">${typeText}</td>
+            <td class="${typeClass}">${formatCurrency(operation.amount)}</td>
+            <td>${operation.description || '-'}</td>
+            <td>${operation.created_by_name}</td>
+            <td>${actionsHtml}</td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+}
+
+// Générer les boutons d'actions pour une opération créance
+function generateCreanceOperationActions(operation) {
+    const actions = [];
+    
+    // Vérifier les permissions de modification
+    if (canEditCreanceOperation(operation)) {
+        actions.push(`
+            <button type="button" class="btn-action btn-edit" onclick="editCreanceOperation(${operation.id})" title="Modifier">
+                <i class="fas fa-edit"></i>
+            </button>
+        `);
+    }
+    
+    // Vérifier les permissions de suppression
+    if (canDeleteCreanceOperation(operation)) {
+        actions.push(`
+            <button type="button" class="btn-action btn-delete" onclick="deleteCreanceOperation(${operation.id})" title="Supprimer">
+                <i class="fas fa-trash"></i>
+            </button>
+        `);
+    }
+    
+    return actions.length > 0 ? actions.join(' ') : '<span class="text-muted">-</span>';
+}
+
+// Vérifier si l'utilisateur peut modifier une opération créance
+function canEditCreanceOperation(operation) {
+    const userRole = currentUser.role;
+    const currentUserId = currentUser.id;
+    const operationCreatedBy = operation.created_by;
+    
+    // Admin, DG, PCA peuvent toujours modifier
+    if (['admin', 'directeur_general', 'pca'].includes(userRole)) {
+        return true;
+    }
+    
+    // Directeur peut modifier ses propres opérations dans les 48h
+    if (userRole === 'directeur' && operationCreatedBy === currentUserId) {
+        return isWithin48Hours(operation.created_at);
+    }
+    
+    return false;
+}
+
+// Vérifier si l'utilisateur peut supprimer une opération créance  
+function canDeleteCreanceOperation(operation) {
+    const userRole = currentUser.role;
+    const currentUserId = currentUser.id;
+    const operationCreatedBy = operation.created_by;
+    
+    // Seul l'admin peut supprimer
+    if (userRole === 'admin') {
+        return true;
+    }
+    
+    // Directeur peut supprimer ses propres opérations dans les 48h
+    if (userRole === 'directeur' && operationCreatedBy === currentUserId) {
+        return isWithin48Hours(operation.created_at);
+    }
+    
+    return false;
+}
+
+// Vérifier si une date est dans les 48 heures
+function isWithin48Hours(dateString) {
+    if (!dateString) return false;
+    
+    const operationDate = new Date(dateString);
+    const now = new Date();
+    const diffHours = (now - operationDate) / (1000 * 60 * 60);
+    
+    return diffHours <= 48;
+}
+
+// Modifier une opération créance
+async function editCreanceOperation(operationId) {
+    try {
+        // Charger les données de l'opération
+        const response = await fetch(apiUrl(`/api/creance/operations/${operationId}`));
+        if (!response.ok) {
+            throw new Error('Erreur lors du chargement de l\'opération');
+        }
+        
+        const operation = await response.json();
+        
+        // Pré-remplir le formulaire avec les données existantes
+        document.getElementById('operation-client').value = operation.client_id;
+        document.getElementById('operation-type').value = operation.operation_type;
+        document.getElementById('operation-amount').value = operation.amount;
+        document.getElementById('operation-date').value = operation.operation_date.split('T')[0];
+        document.getElementById('operation-description').value = operation.description || '';
+        
+        // Modifier le bouton pour indiquer la mise à jour
+        const submitButton = document.querySelector('#add-operation-form button[type="submit"]');
+        const cancelButton = document.getElementById('cancel-operation-edit');
+        
+        submitButton.innerHTML = '<i class="fas fa-save"></i> Mettre à jour l\'opération';
+        submitButton.dataset.editingId = operationId;
+        
+        // Afficher le bouton Annuler
+        if (cancelButton) {
+            cancelButton.style.display = 'inline-block';
+        }
+        
+        // Faire défiler vers le formulaire
+        document.getElementById('add-operation-form').scrollIntoView({ behavior: 'smooth' });
+        
+        showNotification('Formulaire prêt pour la modification', 'info');
+        
+    } catch (error) {
+        console.error('Erreur modification opération:', error);
+        showNotification(error.message, 'error');
+    }
+}
+
+// Supprimer une opération créance
+async function deleteCreanceOperation(operationId) {
+    if (!confirm('Êtes-vous sûr de vouloir supprimer cette opération ? Cette action est irréversible.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(apiUrl(`/api/creance/operations/${operationId}`), {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors de la suppression');
+        }
+        
+        const result = await response.json();
+        showNotification(result.message, 'success');
+        
+        // Recharger les données
+        if (currentCreanceAccount) {
+            loadCreanceAccountData(currentCreanceAccount.id);
+        }
+        
+    } catch (error) {
+        console.error('Erreur suppression opération:', error);
+        showNotification(error.message, 'error');
+    }
+}
+
+// Annuler la modification d'une opération
+function cancelOperationEdit() {
+    // Réinitialiser le formulaire
+    const form = document.getElementById('add-operation-form');
+    if (form) {
+        form.reset();
+    }
+    
+    // Remettre le bouton en mode "ajouter"
+    const submitButton = document.querySelector('#add-operation-form button[type="submit"]');
+    const cancelButton = document.getElementById('cancel-operation-edit');
+    
+    if (submitButton) {
+        submitButton.innerHTML = '<i class="fas fa-plus"></i> Enregistrer l\'opération';
+        delete submitButton.dataset.editingId;
+    }
+    
+    // Cacher le bouton Annuler
+    if (cancelButton) {
+        cancelButton.style.display = 'none';
+    }
+    
+    // Remettre la date d'aujourd'hui par défaut
+    const operationDateInput = document.getElementById('operation-date');
+    if (operationDateInput) {
+        operationDateInput.value = new Date().toISOString().split('T')[0];
+    }
+    
+    showNotification('Modification annulée', 'info');
+}
+
+// Ajouter un nouveau client (Admin seulement)
+async function handleAddClient(event) {
+    event.preventDefault();
+    
+    if (!currentCreanceAccount) {
+        showNotification('Aucun compte sélectionné', 'error');
+        return;
+    }
+    
+    const formData = new FormData(event.target);
+    const clientData = {
+        client_name: formData.get('client-name'),
+        client_phone: formData.get('client-phone'),
+        client_address: formData.get('client-address'),
+        initial_credit: formData.get('initial-credit') || 0
+    };
+    
+    // Validation
+    if (!clientData.client_name || !clientData.client_name.trim()) {
+        showNotification('Le nom du client est obligatoire', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(apiUrl(`/api/creance/${currentCreanceAccount.id}/clients`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(clientData)
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors de l\'ajout du client');
+        }
+        
+        const result = await response.json();
+        showNotification(result.message, 'success');
+        
+        // Réinitialiser le formulaire
+        event.target.reset();
+        
+        // Recharger les données
+        loadCreanceAccountData(currentCreanceAccount.id);
+        
+    } catch (error) {
+        console.error('Erreur ajout client:', error);
+        showNotification(error.message, 'error');
+    }
+}
+
+// Ajouter une nouvelle opération ou mettre à jour une existante
+async function handleAddOperation(event) {
+    event.preventDefault();
+    
+    if (!currentCreanceAccount) {
+        showNotification('Aucun compte sélectionné', 'error');
+        return;
+    }
+    
+    const submitButton = event.target.querySelector('button[type="submit"]');
+    const isEditing = submitButton.dataset.editingId;
+    
+    const formData = new FormData(event.target);
+    const operationData = {
+        client_id: formData.get('operation-client'),
+        operation_type: formData.get('operation-type'),
+        amount: formData.get('operation-amount'),
+        operation_date: formData.get('operation-date'),
+        description: formData.get('operation-description')
+    };
+    
+    // Validation
+    if (!operationData.client_id) {
+        showNotification('Veuillez sélectionner un client', 'error');
+        return;
+    }
+    
+    if (!operationData.operation_type) {
+        showNotification('Veuillez sélectionner le type d\'opération', 'error');
+        return;
+    }
+    
+    if (!operationData.amount || parseInt(operationData.amount) <= 0) {
+        showNotification('Le montant doit être supérieur à 0', 'error');
+        return;
+    }
+    
+    if (!operationData.operation_date) {
+        showNotification('La date est obligatoire', 'error');
+        return;
+    }
+    
+    try {
+        let response;
+        
+        if (isEditing) {
+            // Mise à jour d'une opération existante
+            response = await fetch(apiUrl(`/api/creance/operations/${isEditing}`), {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(operationData)
+            });
+        } else {
+            // Création d'une nouvelle opération
+            response = await fetch(apiUrl(`/api/creance/${currentCreanceAccount.id}/operations`), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(operationData)
+            });
+        }
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || `Erreur lors de ${isEditing ? 'la mise à jour' : 'l\'enregistrement'} de l'opération`);
+        }
+        
+        const result = await response.json();
+        showNotification(result.message, 'success');
+        
+        // Réinitialiser le formulaire et le bouton
+        event.target.reset();
+        submitButton.innerHTML = '<i class="fas fa-plus"></i> Enregistrer l\'opération';
+        delete submitButton.dataset.editingId;
+        
+        // Cacher le bouton Annuler
+        const cancelButton = document.getElementById('cancel-operation-edit');
+        if (cancelButton) {
+            cancelButton.style.display = 'none';
+        }
+        
+        // Recharger les données
+        loadCreanceAccountData(currentCreanceAccount.id);
+        
+    } catch (error) {
+        console.error('Erreur opération créance:', error);
+        showNotification(error.message, 'error');
+    }
+}
+
+// Initialiser la section créance
+async function initCreanceSection() {
+    // Afficher le menu créance pour les utilisateurs autorisés
+    if (['directeur_general', 'pca', 'admin', 'directeur'].includes(currentUser.role)) {
+        document.getElementById('creance-menu').style.display = 'block';
+    }
+    
+    // Charger les comptes créance
+    await loadCreanceAccounts();
+    
+    // Gérer la sélection du compte
+    const accountSelect = document.getElementById('creance-account-select');
+    if (accountSelect) {
+        accountSelect.addEventListener('change', handleCreanceAccountSelection);
+    }
+    
+    // Gérer l'ajout de client
+    const addClientForm = document.getElementById('add-client-form');
+    if (addClientForm) {
+        addClientForm.addEventListener('submit', handleAddClient);
+    }
+    
+    // Gérer l'ajout d'opération
+    const addOperationForm = document.getElementById('add-operation-form');
+    if (addOperationForm) {
+        addOperationForm.addEventListener('submit', handleAddOperation);
+    }
+    
+    // Définir la date d'aujourd'hui par défaut
+    const operationDateInput = document.getElementById('operation-date');
+    if (operationDateInput) {
+        operationDateInput.value = new Date().toISOString().split('T')[0];
+    }
+}
+
+// Initialization functions
+document.addEventListener('DOMContentLoaded', async () => {
+    // Vérifier la session
+    try {
+        const response = await fetch(apiUrl('/api/check-session'));
+        if (response.ok) {
+            const data = await response.json();
+            currentUser = data.user;
+            await showApp();
+            await loadInitialData();
+        } else {
+            showLogin();
+        }
+    } catch (error) {
+        console.error('Erreur vérification session:', error);
+        showLogin();
+    }
+    
+    // Setup mobile menu
+    setupMobileMenu();
+});

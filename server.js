@@ -811,11 +811,11 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         
 
         
-        // 2. Montant Restant Total (soldes actuels de tous les comptes, sauf dépôts et partenaires)
+        // 2. Montant Restant Total (soldes actuels de tous les comptes, sauf dépôts, partenaires et créances)
         let totalRemainingQuery = `
             SELECT COALESCE(SUM(a.current_balance), 0) as total 
             FROM accounts a 
-            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire'
+            WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
         `;
         let remainingParams = [];
         
@@ -827,11 +827,11 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         const totalRemainingResult = await pool.query(totalRemainingQuery, remainingParams);
         const totalRemaining = parseInt(totalRemainingResult.rows[0].total);
         
-        // 3. Total Crédité avec Dépenses (comptes qui ont eu des dépenses, sauf dépôts et partenaires)
+        // 3. Total Crédité avec Dépenses (comptes qui ont eu des dépenses, sauf dépôts, partenaires et créances)
         let creditedWithExpensesQuery = `
             SELECT COALESCE(SUM(DISTINCT a.total_credited), 0) as total 
             FROM accounts a
-            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire'
+            WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
             AND EXISTS (
                 SELECT 1 FROM expenses e WHERE e.account_id = a.id
         `;
@@ -852,11 +852,11 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         const creditedWithExpensesResult = await pool.query(creditedWithExpensesQuery, creditedExpensesParams);
         const totalCreditedWithExpenses = parseInt(creditedWithExpensesResult.rows[0].total);
         
-        // 4. Total Crédité Général (tous les comptes actifs, sauf dépôts et partenaires)
+        // 4. Total Crédité Général (tous les comptes actifs, sauf dépôts, partenaires et créances)
         let totalCreditedQuery = `
             SELECT COALESCE(SUM(a.total_credited), 0) as total 
             FROM accounts a 
-            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire'
+            WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
         `;
         let creditedParams = [];
         
@@ -1206,6 +1206,7 @@ app.get('/api/accounts/:accountName/expenses', requireAuth, async (req, res) => 
             WHERE a.account_name = $1
             AND e.expense_date >= $2 
             AND e.expense_date <= $3
+            AND a.account_type != 'creance'
         `;
         
         let params = [accountName, startDate, endDate];
@@ -2110,15 +2111,15 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
         const created_by = req.session.user.id;
         
         // Validation du type de compte
-        const validTypes = ['classique', 'partenaire', 'statut', 'Ajustement', 'depot'];
+        const validTypes = ['classique', 'partenaire', 'statut', 'Ajustement', 'depot', 'creance'];
         if (account_type && !validTypes.includes(account_type)) {
             return res.status(400).json({ error: 'Type de compte invalide' });
         }
         
         const finalAccountType = account_type || 'classique';
         
-        // Vérifier le directeur seulement pour les comptes classiques
-        if (finalAccountType === 'classique' && user_id) {
+        // Vérifier le directeur pour les comptes classiques et créance
+        if ((finalAccountType === 'classique' || finalAccountType === 'creance') && user_id) {
             // Vérifier que l'utilisateur existe et est un directeur
             const userResult = await pool.query(
                 'SELECT * FROM users WHERE id = $1 AND role = $2',
@@ -2147,7 +2148,7 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
             `INSERT INTO accounts (user_id, account_name, current_balance, total_credited, total_spent, created_by, account_type, access_restricted, allowed_roles, category_type) 
              VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9) RETURNING *`,
             [
-                finalAccountType === 'partenaire' || finalAccountType === 'statut' || finalAccountType === 'Ajustement' || finalAccountType === 'depot' ? null : user_id,
+                (finalAccountType === 'classique' || finalAccountType === 'creance') ? user_id : null,
                 account_name, 
                 parseInt(initial_amount) || 0, 
                 parseInt(initial_amount) || 0, 
@@ -2278,9 +2279,9 @@ app.put('/api/accounts/:accountId/update', requireAdminAuth, async (req, res) =>
         // Mettre à jour les informations de base du compte
         const updateResult = await pool.query(
             `UPDATE accounts 
-             SET user_id = $1, account_name = $2, description = $3, account_type = $4, category_type = $5
-             WHERE id = $6 RETURNING *`,
-            [user_id, account_name, description, account_type, category_type, accountId]
+             SET user_id = $1, account_name = $2, account_type = $3, category_type = $4
+             WHERE id = $5 RETURNING *`,
+            [user_id, account_name, account_type, category_type, accountId]
         );
         
         if (updateResult.rows.length === 0) {
@@ -2377,7 +2378,8 @@ app.get('/api/accounts/types', requireAuth, (req, res) => {
         { id: 'classique', name: 'Compte Classique', description: 'Compte standard assigné à un directeur. Le DG peut donner des permissions de crédit.' },
         { id: 'partenaire', name: 'Compte Partenaire', description: 'Compte accessible à tous les utilisateurs' },
         { id: 'statut', name: 'Compte Statut', description: 'Compte où le crédit écrase le solde existant (DG/PCA uniquement)' },
-        { id: 'Ajustement', name: 'Compte Ajustement', description: 'Compte spécial pour les ajustements comptables (DG/PCA uniquement)' }
+        { id: 'Ajustement', name: 'Compte Ajustement', description: 'Compte spécial pour les ajustements comptables (DG/PCA uniquement)' },
+        { id: 'creance', name: 'Compte Créance', description: 'Compte spécial pour le suivi des créances clients. Isolé des calculs généraux.' }
     ];
     res.json(accountTypes);
 });
@@ -4834,5 +4836,612 @@ app.get('/api/stock-vivant/total', requireAuth, async (req, res) => {
     } catch (error) {
         console.error('Erreur récupération total stock vivant:', error);
         res.status(500).json({ error: 'Erreur lors de la récupération du total stock vivant' });
+    }
+});
+
+// ===== GESTION DES COMPTES CREANCE =====
+
+// Créer les tables pour les créances si elles n'existent pas
+async function createCreanceTablesIfNotExists() {
+    try {
+        // Table pour les clients des comptes créance
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS creance_clients (
+                id SERIAL PRIMARY KEY,
+                account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+                client_name VARCHAR(255) NOT NULL,
+                client_phone VARCHAR(50),
+                client_address TEXT,
+                initial_credit INTEGER DEFAULT 0,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_active BOOLEAN DEFAULT true,
+                UNIQUE(account_id, client_name)
+            )
+        `);
+
+        // Table pour les opérations créance (avances/remboursements)
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS creance_operations (
+                id SERIAL PRIMARY KEY,
+                account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+                client_id INTEGER REFERENCES creance_clients(id) ON DELETE CASCADE,
+                operation_type VARCHAR(10) NOT NULL CHECK (operation_type IN ('credit', 'debit')),
+                amount INTEGER NOT NULL,
+                operation_date DATE NOT NULL,
+                description TEXT,
+                created_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        `);
+
+        console.log('Tables créance créées avec succès');
+    } catch (error) {
+        console.error('Erreur création tables créance:', error);
+    }
+}
+
+// Initialiser les tables créance au démarrage
+createCreanceTablesIfNotExists();
+
+// Route pour obtenir les comptes créance accessibles à l'utilisateur
+app.get('/api/creance/accounts', requireAuth, async (req, res) => {
+    try {
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+
+        let query;
+        let params = [];
+
+        if (userRole === 'directeur_general' || userRole === 'pca' || userRole === 'admin') {
+            // Admin peut voir tous les comptes créance
+            query = `
+                SELECT a.*, u.full_name as assigned_director_name 
+                FROM accounts a 
+                LEFT JOIN users u ON a.user_id = u.id 
+                WHERE a.account_type = 'creance' AND a.is_active = true 
+                ORDER BY a.account_name
+            `;
+        } else if (userRole === 'directeur') {
+            // Directeur ne peut voir que ses comptes assignés
+            query = `
+                SELECT a.*, u.full_name as assigned_director_name 
+                FROM accounts a 
+                LEFT JOIN users u ON a.user_id = u.id 
+                WHERE a.account_type = 'creance' AND a.is_active = true AND a.user_id = $1 
+                ORDER BY a.account_name
+            `;
+            params = [userId];
+        } else {
+            return res.status(403).json({ error: 'Accès non autorisé' });
+        }
+
+        const result = await pool.query(query, params);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération comptes créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir les clients d'un compte créance
+app.get('/api/creance/:accountId/clients', requireAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+
+        // Vérifier l'accès au compte
+        const accountResult = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
+            [accountId, 'creance']
+        );
+
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte créance non trouvé' });
+        }
+
+        const account = accountResult.rows[0];
+
+        // Vérifier les permissions
+        if (userRole === 'directeur' && account.user_id !== userId) {
+            return res.status(403).json({ error: 'Accès non autorisé à ce compte' });
+        }
+
+        const result = await pool.query(`
+            SELECT cc.*, 
+                   COALESCE(SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE 0 END), 0) as total_credits,
+                   COALESCE(SUM(CASE WHEN co.operation_type = 'debit' THEN co.amount ELSE 0 END), 0) as total_debits,
+                   (cc.initial_credit + COALESCE(SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN co.operation_type = 'debit' THEN co.amount ELSE 0 END), 0)) as balance
+            FROM creance_clients cc
+            LEFT JOIN creance_operations co ON cc.id = co.client_id
+            WHERE cc.account_id = $1 AND cc.is_active = true
+            GROUP BY cc.id
+            ORDER BY cc.client_name
+        `, [accountId]);
+
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération clients créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour ajouter un client à un compte créance (Admin seulement)
+app.post('/api/creance/:accountId/clients', requireAdminAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const { client_name, client_phone, client_address, initial_credit } = req.body;
+        const created_by = req.session.user.id;
+
+        // Vérifier que le compte existe et est de type créance
+        const accountResult = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
+            [accountId, 'creance']
+        );
+
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte créance non trouvé' });
+        }
+
+        const result = await pool.query(`
+            INSERT INTO creance_clients (account_id, client_name, client_phone, client_address, initial_credit, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+        `, [accountId, client_name, client_phone || null, client_address || null, parseInt(initial_credit) || 0, created_by]);
+
+        res.json({ 
+            message: 'Client ajouté avec succès', 
+            client: result.rows[0] 
+        });
+    } catch (error) {
+        if (error.code === '23505') { // Violation unique constraint
+            res.status(400).json({ error: 'Un client avec ce nom existe déjà pour ce compte' });
+        } else {
+            console.error('Erreur ajout client créance:', error);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    }
+});
+
+    // Route pour ajouter une opération créance (avance/remboursement)
+app.post('/api/creance/:accountId/operations', requireAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const { client_id, operation_type, amount, operation_date, description } = req.body;
+        const created_by = req.session.user.id;
+        const userRole = req.session.user.role;
+
+        // Vérifier que le compte existe et est de type créance
+        const accountResult = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
+            [accountId, 'creance']
+        );
+
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte créance non trouvé' });
+        }
+
+        const account = accountResult.rows[0];
+
+        // Vérifier les permissions
+        if (userRole === 'directeur' && account.user_id !== created_by) {
+            return res.status(403).json({ error: 'Vous n\'êtes pas autorisé à effectuer des opérations sur ce compte' });
+        }
+
+        // Vérifier que le client existe et appartient au compte
+        const clientResult = await pool.query(
+            'SELECT * FROM creance_clients WHERE id = $1 AND account_id = $2 AND is_active = true',
+            [client_id, accountId]
+        );
+
+        if (clientResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé pour ce compte' });
+        }
+
+        const result = await pool.query(`
+            INSERT INTO creance_operations (account_id, client_id, operation_type, amount, operation_date, description, created_by)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *
+        `, [accountId, client_id, operation_type, parseInt(amount), operation_date, description || null, created_by]);
+
+        res.json({ 
+            message: `${operation_type === 'credit' ? 'Avance' : 'Remboursement'} ajouté avec succès`, 
+            operation: result.rows[0] 
+        });
+    } catch (error) {
+        console.error('Erreur ajout opération créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir l'historique des opérations d'un compte créance
+app.get('/api/creance/:accountId/operations', requireAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+
+        // Vérifier l'accès au compte
+        const accountResult = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
+            [accountId, 'creance']
+        );
+
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte créance non trouvé' });
+        }
+
+        const account = accountResult.rows[0];
+
+        // Vérifier les permissions
+        if (userRole === 'directeur' && account.user_id !== userId) {
+            return res.status(403).json({ error: 'Accès non autorisé à ce compte' });
+        }
+
+        const result = await pool.query(`
+            SELECT co.*, cc.client_name, u.full_name as created_by_name
+            FROM creance_operations co
+            JOIN creance_clients cc ON co.client_id = cc.id
+            JOIN users u ON co.created_by = u.id
+            WHERE co.account_id = $1
+            ORDER BY co.operation_date DESC, co.created_at DESC
+        `, [accountId]);
+
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération opérations créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer une opération créance spécifique
+app.get('/api/creance/operations/:operationId', requireAuth, async (req, res) => {
+    try {
+        const { operationId } = req.params;
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+
+        // Récupérer l'opération
+        const operationResult = await pool.query(`
+            SELECT co.*, cc.client_name, u.full_name as created_by_name,
+                   a.user_id as account_assigned_to
+            FROM creance_operations co
+            JOIN creance_clients cc ON co.client_id = cc.id  
+            JOIN users u ON co.created_by = u.id
+            JOIN accounts a ON co.account_id = a.id
+            WHERE co.id = $1
+        `, [operationId]);
+
+        if (operationResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Opération non trouvée' });
+        }
+
+        const operation = operationResult.rows[0];
+
+        // Vérifier les permissions d'accès
+        if (userRole === 'directeur') {
+            // Le directeur ne peut accéder qu'aux opérations de ses comptes
+            if (operation.account_assigned_to !== userId) {
+                return res.status(403).json({ error: 'Accès non autorisé' });
+            }
+        }
+
+        res.json(operation);
+
+    } catch (error) {
+        console.error('Erreur récupération opération créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour modifier une opération créance
+app.put('/api/creance/operations/:operationId', requireAuth, async (req, res) => {
+    try {
+        const { operationId } = req.params;
+        const { client_id, operation_type, amount, operation_date, description } = req.body;
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+
+        // Validation des données
+        if (!client_id || !operation_type || !amount || !operation_date) {
+            return res.status(400).json({ error: 'Données manquantes' });
+        }
+
+        if (!['credit', 'debit'].includes(operation_type)) {
+            return res.status(400).json({ error: 'Type d\'opération invalide' });
+        }
+
+        if (amount <= 0) {
+            return res.status(400).json({ error: 'Le montant doit être supérieur à 0' });
+        }
+
+        // Récupérer l'opération existante pour vérifier les permissions
+        const operationResult = await pool.query(`
+            SELECT co.*, a.user_id as account_assigned_to
+            FROM creance_operations co
+            JOIN accounts a ON co.account_id = a.id
+            WHERE co.id = $1
+        `, [operationId]);
+
+        if (operationResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Opération non trouvée' });
+        }
+
+        const operation = operationResult.rows[0];
+
+        // Vérifier les permissions de modification
+        const canEdit = checkCreanceOperationEditPermission(
+            userRole, 
+            userId, 
+            operation.created_by, 
+            operation.account_assigned_to,
+            operation.created_at
+        );
+
+        if (!canEdit) {
+            return res.status(403).json({ 
+                error: userRole === 'directeur' 
+                    ? 'Vous ne pouvez modifier que vos propres opérations dans les 48h'
+                    : 'Permission refusée' 
+            });
+        }
+
+        // Mettre à jour l'opération
+        const updateResult = await pool.query(`
+            UPDATE creance_operations 
+            SET client_id = $1, operation_type = $2, amount = $3, 
+                operation_date = $4, description = $5
+            WHERE id = $6 
+            RETURNING *
+        `, [client_id, operation_type, amount, operation_date, description, operationId]);
+
+        res.json({ 
+            message: `${operation_type === 'credit' ? 'Avance' : 'Remboursement'} mis à jour avec succès`, 
+            operation: updateResult.rows[0] 
+        });
+
+    } catch (error) {
+        console.error('Erreur modification opération créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour supprimer une opération créance  
+app.delete('/api/creance/operations/:operationId', requireAuth, async (req, res) => {
+    try {
+        const { operationId } = req.params;
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+
+        // Récupérer l'opération existante pour vérifier les permissions
+        const operationResult = await pool.query(`
+            SELECT co.*, a.user_id as account_assigned_to, cc.client_name
+            FROM creance_operations co
+            JOIN accounts a ON co.account_id = a.id
+            JOIN creance_clients cc ON co.client_id = cc.id
+            WHERE co.id = $1
+        `, [operationId]);
+
+        if (operationResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Opération non trouvée' });
+        }
+
+        const operation = operationResult.rows[0];
+
+        // Vérifier les permissions de suppression
+        const canDelete = checkCreanceOperationDeletePermission(
+            userRole, 
+            userId, 
+            operation.created_by, 
+            operation.account_assigned_to,
+            operation.created_at
+        );
+
+        if (!canDelete) {
+            return res.status(403).json({ 
+                error: userRole === 'directeur' 
+                    ? 'Vous ne pouvez supprimer que vos propres opérations dans les 48h'
+                    : 'Seul l\'admin peut supprimer les opérations' 
+            });
+        }
+
+        // Supprimer l'opération
+        await pool.query('DELETE FROM creance_operations WHERE id = $1', [operationId]);
+
+        res.json({ 
+            message: `Opération supprimée avec succès (${operation.client_name} - ${operation.amount} FCFA)` 
+        });
+
+    } catch (error) {
+        console.error('Erreur suppression opération créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Fonction utilitaire pour vérifier les permissions de modification
+function checkCreanceOperationEditPermission(userRole, userId, operationCreatedBy, accountAssignedTo, operationCreatedAt) {
+    // Admin, DG, PCA peuvent toujours modifier
+    if (['admin', 'directeur_general', 'pca'].includes(userRole)) {
+        return true;
+    }
+    
+    // Directeur peut modifier ses propres opérations dans les 48h
+    if (userRole === 'directeur' && 
+        operationCreatedBy === userId && 
+        accountAssignedTo === userId) {
+        return isWithin48Hours(operationCreatedAt);
+    }
+    
+    return false;
+}
+
+// Fonction utilitaire pour vérifier les permissions de suppression
+function checkCreanceOperationDeletePermission(userRole, userId, operationCreatedBy, accountAssignedTo, operationCreatedAt) {
+    // Seul l'admin peut supprimer
+    if (userRole === 'admin') {
+        return true;
+    }
+    
+    // Directeur peut supprimer ses propres opérations dans les 48h
+    if (userRole === 'directeur' && 
+        operationCreatedBy === userId && 
+        accountAssignedTo === userId) {
+        return isWithin48Hours(operationCreatedAt);
+    }
+    
+    return false;
+}
+
+// Fonction utilitaire pour vérifier si une date est dans les 48 heures
+function isWithin48Hours(dateString) {
+    if (!dateString) return false;
+    
+    const operationDate = new Date(dateString);
+    const now = new Date();
+    const diffHours = (now - operationDate) / (1000 * 60 * 60);
+    
+    return diffHours <= 48;
+}
+
+// Route pour obtenir le total des créances (somme des soldes de tous les clients)
+app.get('/api/dashboard/total-creances', requireAuth, async (req, res) => {
+    try {
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+
+        let accountFilter = '';
+        let params = [];
+
+        // Filtrer selon les permissions
+        if (userRole === 'directeur') {
+            accountFilter = 'AND a.user_id = $1';
+            params = [userId];
+        }
+
+        const result = await pool.query(`
+            SELECT 
+                COALESCE(SUM(
+                    cc.initial_credit + 
+                    COALESCE(credits.total_credits, 0) - 
+                    COALESCE(debits.total_debits, 0)
+                ), 0) as total_creances
+            FROM creance_clients cc
+            JOIN accounts a ON cc.account_id = a.id
+            LEFT JOIN (
+                SELECT client_id, SUM(amount) as total_credits
+                FROM creance_operations 
+                WHERE operation_type = 'credit'
+                GROUP BY client_id
+            ) credits ON cc.id = credits.client_id
+            LEFT JOIN (
+                SELECT client_id, SUM(amount) as total_debits
+                FROM creance_operations 
+                WHERE operation_type = 'debit'
+                GROUP BY client_id
+            ) debits ON cc.id = debits.client_id
+            WHERE a.account_type = 'creance' 
+            AND a.is_active = true 
+            AND cc.is_active = true
+            ${accountFilter}
+        `, params);
+
+        const totalCreances = parseInt(result.rows[0].total_creances) || 0;
+
+        res.json({ 
+            total_creances: totalCreances,
+            formatted: `${totalCreances.toLocaleString('fr-FR')} FCFA`
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération total créances:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir les créances du mois en cours
+app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
+    try {
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+
+        let accountFilter = '';
+        let params = [];
+
+        // Filtrer selon les permissions
+        if (userRole === 'directeur') {
+            accountFilter = 'AND a.user_id = $1';
+            params = [userId];
+        }
+
+        // Calculer le début et la fin du mois en cours
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+
+        const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
+        const endOfMonthStr = endOfMonth.toISOString().split('T')[0] + ' 23:59:59';
+
+        // Paramètres pour la requête
+        const queryParams = userRole === 'directeur' ? [userId, startOfMonthStr, endOfMonthStr] : [startOfMonthStr, endOfMonthStr];
+
+        const result = await pool.query(`
+            SELECT 
+                COALESCE(
+                    -- Soldes initiaux des clients créés ce mois
+                    (SELECT SUM(initial_credit) 
+                     FROM creance_clients cc_month
+                     JOIN accounts a_month ON cc_month.account_id = a_month.id
+                     WHERE cc_month.created_at >= $${userRole === 'directeur' ? '2' : '1'} 
+                     AND cc_month.created_at <= $${userRole === 'directeur' ? '3' : '2'}
+                     AND a_month.account_type = 'creance' 
+                     AND a_month.is_active = true 
+                     AND cc_month.is_active = true
+                     ${accountFilter.replace('AND a.user_id', 'AND a_month.user_id')}
+                    ), 0
+                ) +
+                COALESCE(
+                    -- Avances du mois (tous clients)
+                    (SELECT SUM(co.amount)
+                     FROM creance_operations co
+                     JOIN creance_clients cc ON co.client_id = cc.id
+                     JOIN accounts a ON cc.account_id = a.id
+                     WHERE co.operation_type = 'credit'
+                     AND co.operation_date >= $${userRole === 'directeur' ? '2' : '1'}
+                     AND co.operation_date <= $${userRole === 'directeur' ? '3' : '2'}
+                     AND a.account_type = 'creance' 
+                     AND a.is_active = true 
+                     AND cc.is_active = true
+                     ${accountFilter}
+                    ), 0
+                ) -
+                COALESCE(
+                    -- Remboursements du mois (tous clients)
+                    (SELECT SUM(co.amount)
+                     FROM creance_operations co
+                     JOIN creance_clients cc ON co.client_id = cc.id
+                     JOIN accounts a ON cc.account_id = a.id
+                     WHERE co.operation_type = 'debit'
+                     AND co.operation_date >= $${userRole === 'directeur' ? '2' : '1'}
+                     AND co.operation_date <= $${userRole === 'directeur' ? '3' : '2'}
+                     AND a.account_type = 'creance' 
+                     AND a.is_active = true 
+                     AND cc.is_active = true
+                     ${accountFilter}
+                    ), 0
+                ) as creances_mois
+        `, queryParams);
+
+        const creancesMois = parseInt(result.rows[0].creances_mois) || 0;
+
+        res.json({ 
+            creances_mois: creancesMois,
+            formatted: `${creancesMois.toLocaleString('fr-FR')} FCFA`,
+            period: `${startOfMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération créances du mois:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
