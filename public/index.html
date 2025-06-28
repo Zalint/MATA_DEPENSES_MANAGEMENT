@@ -140,6 +140,22 @@
                 <section id="dashboard-section" class="section active">
                     <h2>Tableau de bord de Suivi</h2>
                     
+                    <!-- Sélecteur de mois pour gestion mensuelle -->
+                    <div class="month-selector">
+                        <div class="form-group">
+                            <label for="dashboard-month">
+                                <i class="fas fa-calendar-alt"></i> Mois de gestion
+                            </label>
+                            <input type="month" id="dashboard-month" class="form-control">
+                        </div>
+                        <button id="load-month-data" class="btn btn-primary">
+                            <i class="fas fa-refresh"></i> Charger le mois
+                        </button>
+                        <div class="month-info">
+                            <span id="current-month-display"></span>
+                        </div>
+                    </div>
+                    
                     <div class="stats-grid">
                         <div class="stat-card">
                             <div class="stat-icon">

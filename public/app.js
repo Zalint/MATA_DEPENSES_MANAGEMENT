@@ -2885,14 +2885,28 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Gestionnaires pour les filtres du dashboard
     document.getElementById('filter-dashboard').addEventListener('click', function() {
-        loadDashboard();
+        // Utiliser le mois sélectionné pour actualiser les données
+        if (selectedMonth) {
+            loadMonthlyDashboard(selectedMonth);
+        } else {
+            loadDashboard();
+        }
     });
     
     document.getElementById('reset-dashboard').addEventListener('click', function() {
-        // Remettre la date d'aujourd'hui
-        const today = new Date().toISOString().split('T')[0];
-        document.getElementById('dashboard-start-date').value = today;
-        document.getElementById('dashboard-end-date').value = today;
+        // Remettre le mois en cours
+        const currentDate = new Date();
+        const currentMonth = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+        
+        // Mettre à jour le sélecteur de mois
+        const monthInput = document.getElementById('dashboard-month');
+        if (monthInput) {
+            monthInput.value = currentMonth;
+            selectedMonth = currentMonth;
+            updateMonthDisplay(currentMonth);
+            updateDateFilters(currentMonth);
+        }
+        
         loadDashboard();
     });
     
@@ -6550,20 +6564,145 @@ async function loadStockSummary() {
     }
 }
 
-// Fonction principale pour charger le dashboard
+// Variable globale pour le mois sélectionné
+let selectedMonth = null;
+
+// Initialiser le sélecteur de mois
+function initMonthSelector() {
+    const monthInput = document.getElementById('dashboard-month');
+    const loadButton = document.getElementById('load-month-data');
+    const monthDisplay = document.getElementById('current-month-display');
+    
+    if (!monthInput || !loadButton || !monthDisplay) return;
+    
+    // Définir le mois en cours par défaut
+    const currentDate = new Date();
+    const currentMonth = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+    monthInput.value = currentMonth;
+    selectedMonth = currentMonth;
+    
+    // Afficher le mois actuel et mettre à jour les filtres de date
+    updateMonthDisplay(currentMonth);
+    updateDateFilters(currentMonth);
+    
+    // Gestionnaire de changement de mois
+    monthInput.addEventListener('change', function() {
+        selectedMonth = this.value;
+        updateMonthDisplay(selectedMonth);
+        updateDateFilters(selectedMonth);
+    });
+    
+    // Gestionnaire du bouton de chargement
+    loadButton.addEventListener('click', async function() {
+        if (selectedMonth) {
+            await loadMonthlyDashboard(selectedMonth);
+        }
+    });
+}
+
+// Mettre à jour les filtres de date avec le premier et dernier jour du mois
+function updateDateFilters(monthYear) {
+    const [year, month] = monthYear.split('-').map(Number);
+    
+    // CORRECTION: Utiliser le fuseau horaire local au lieu d'UTC pour éviter les décalages
+    
+    // Premier jour du mois
+    const firstDayStr = `${year}-${month.toString().padStart(2, '0')}-01`;
+    
+    // Dernier jour du mois - calculer le nombre de jours dans le mois
+    const lastDayOfMonth = new Date(year, month, 0).getDate();
+    const lastDayStr = `${year}-${month.toString().padStart(2, '0')}-${lastDayOfMonth.toString().padStart(2, '0')}`;
+    
+    // Mettre à jour les champs de filtres de date
+    const dashboardStartDate = document.getElementById('dashboard-start-date');
+    const dashboardEndDate = document.getElementById('dashboard-end-date');
+    
+    if (dashboardStartDate && dashboardEndDate) {
+        dashboardStartDate.value = firstDayStr;
+        dashboardEndDate.value = lastDayStr;
+        console.log(`📅 Filtres de date mis à jour pour ${monthYear}: ${firstDayStr} à ${lastDayStr}`);
+    } else {
+        console.error('❌ Éléments de date non trouvés:', { dashboardStartDate, dashboardEndDate });
+    }
+}
+
+// Mettre à jour l'affichage du mois sélectionné
+function updateMonthDisplay(monthYear) {
+    const monthDisplay = document.getElementById('current-month-display');
+    if (!monthDisplay) return;
+    
+    const [year, month] = monthYear.split('-');
+    const monthName = new Date(year, month - 1).toLocaleDateString('fr-FR', { 
+        month: 'long', 
+        year: 'numeric' 
+    });
+    
+    monthDisplay.textContent = `Données pour ${monthName}`;
+}
+
+// Charger le dashboard pour un mois spécifique
+async function loadMonthlyDashboard(monthYear) {
+    try {
+        showNotification('Chargement des données du mois...', 'info');
+        
+        // Mettre à jour les filtres de date avec le mois sélectionné
+        updateDateFilters(monthYear);
+        
+        // Charger d'abord les données actuelles (soldes, etc.)
+        await loadDashboardData();
+        
+        // Mettre à jour les cartes de statistiques avec les nouvelles dates
+        const [year, month] = monthYear.split('-').map(Number);
+        const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
+        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
+        await updateStatsCards(startDate, endDate);
+        
+        // Puis charger SEULEMENT les données mensuelles spécifiques
+        await loadMonthlySpecificData(monthYear);
+        await loadStockSummary();
+        await loadStockVivantTotal(); 
+        await loadMonthlyCreances(monthYear);
+        await loadMonthlyCreancesMois(monthYear);
+        await loadMonthlyCashBictorys(monthYear);
+        await loadTransfersCard();
+        
+        showNotification(`Données chargées pour ${getMonthName(monthYear)}`, 'success');
+    } catch (error) {
+        console.error('Erreur lors du chargement mensuel:', error);
+        showNotification('Erreur lors du chargement des données mensuelles', 'error');
+    }
+}
+
+// Fonction principale pour charger le dashboard (par défaut mois en cours)
 async function loadDashboard() {
     try {
-        await loadDashboardData();
-        await loadStockSummary();
-        await loadStockVivantTotal(); // Ajouter le chargement du total stock vivant
-        await loadTotalCreances(); // Charger le total des créances
-        await loadCreancesMois(); // Charger les créances du mois
-        await loadCashBictorysLatest(); // Charger la dernière valeur Cash Bictorys du mois
-        await loadTransfersCard(); // Ajouter le chargement des transferts
+        // Initialiser le sélecteur si pas encore fait
+        if (!selectedMonth) {
+            initMonthSelector();
+        }
+        
+        // Charger les données du mois sélectionné ou mois en cours
+        const currentMonth = selectedMonth || getCurrentMonth();
+        await loadMonthlyDashboard(currentMonth);
     } catch (error) {
         console.error('Erreur lors du chargement du dashboard:', error);
         showAlert('Erreur lors du chargement du dashboard', 'danger');
     }
+}
+
+// Obtenir le mois en cours au format YYYY-MM
+function getCurrentMonth() {
+    const currentDate = new Date();
+    return `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+}
+
+// Obtenir le nom du mois formaté
+function getMonthName(monthYear) {
+    const [year, month] = monthYear.split('-');
+    return new Date(year, month - 1).toLocaleDateString('fr-FR', { 
+        month: 'long', 
+        year: 'numeric' 
+    });
 }
 
 // === MODULE DE CREDIT POUR DIRECTEURS ===
@@ -8623,6 +8762,127 @@ async function loadCashBictorysLatest() {
         if (latestElement) {
             latestElement.textContent = '0 FCFA';
         }
+    }
+}
+
+// ===== FONCTIONS DE CHARGEMENT MENSUEL =====
+
+// Charger SEULEMENT les données spécifiques au mois (sans affecter les soldes actuels)
+async function loadMonthlySpecificData(monthYear) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/monthly-data?month=${monthYear}`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            // Mettre à jour SEULEMENT les données mensuelles (pas les soldes actuels)
+            document.getElementById('monthly-burn').textContent = data.monthlyBurn || '0 FCFA';
+            
+            // Mettre à jour les cartes de statistiques mensuelles
+            document.getElementById('total-spent-amount').textContent = data.totalSpent || '0 FCFA';
+            document.getElementById('total-credited-with-expenses').textContent = data.totalCreditedWithExpenses || '0 FCFA';
+            
+            // Mettre à jour les graphiques pour le mois sélectionné
+            if (data.accountChart) {
+                createChart('account-chart', data.accountChart, 'account');
+            }
+            if (data.categoryChart) {
+                createChart('category-chart', data.categoryChart, 'category');
+            }
+        } else {
+            console.error('Erreur données mensuelles:', data.error);
+        }
+    } catch (error) {
+        console.error('Erreur chargement données mensuelles:', error);
+    }
+}
+
+// Charger les données principales du dashboard pour un mois (DEPRECATED - remplacée par loadMonthlySpecificData)
+async function loadMonthlyDashboardData(monthYear) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/monthly-data?month=${monthYear}`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            // Mettre à jour les cartes principales
+            document.getElementById('solde-amount').textContent = data.currentBalance || '0 FCFA';
+            document.getElementById('total-depot-balance').textContent = data.depotBalance || '0 FCFA';
+            document.getElementById('total-partner-balance').textContent = data.partnerBalance || '0 FCFA';
+            document.getElementById('weekly-burn').textContent = data.weeklyBurn || '0 FCFA';
+            document.getElementById('monthly-burn').textContent = data.monthlyBurn || '0 FCFA';
+            
+            // Mettre à jour les cartes de statistiques
+            document.getElementById('total-spent-amount').textContent = data.totalSpent || '0 FCFA';
+            document.getElementById('total-remaining-amount').textContent = data.totalRemaining || '0 FCFA';
+            document.getElementById('total-credited-with-expenses').textContent = data.totalCreditedWithExpenses || '0 FCFA';
+            document.getElementById('total-credited-general').textContent = data.totalCreditedGeneral || '0 FCFA';
+            
+            // Mettre à jour les graphiques
+            if (data.accountChart) {
+                createChart('account-chart', data.accountChart, 'account');
+            }
+            if (data.categoryChart) {
+                createChart('category-chart', data.categoryChart, 'category');
+            }
+        } else {
+            console.error('Erreur données mensuelles:', data.error);
+        }
+    } catch (error) {
+        console.error('Erreur chargement données mensuelles:', error);
+    }
+}
+
+// Charger les créances totales pour un mois
+async function loadMonthlyCreances(monthYear) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/monthly-creances?month=${monthYear}`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            document.getElementById('total-creances').textContent = data.formatted;
+        } else {
+            console.error('Erreur créances mensuelles:', data.error);
+            document.getElementById('total-creances').textContent = '0 FCFA';
+        }
+    } catch (error) {
+        console.error('Erreur chargement créances mensuelles:', error);
+        document.getElementById('total-creances').textContent = '0 FCFA';
+    }
+}
+
+// Charger les créances du mois pour un mois spécifique
+async function loadMonthlyCreancesMois(monthYear) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/creances-mois?month=${monthYear}`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            document.getElementById('creances-mois').textContent = data.formatted;
+            document.getElementById('creances-mois-period').textContent = data.period;
+        } else {
+            console.error('Erreur créances du mois:', data.error);
+            document.getElementById('creances-mois').textContent = '0 FCFA';
+        }
+    } catch (error) {
+        console.error('Erreur chargement créances du mois:', error);
+        document.getElementById('creances-mois').textContent = '0 FCFA';
+    }
+}
+
+// Charger Cash Bictorys pour un mois spécifique
+async function loadMonthlyCashBictorys(monthYear) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/monthly-cash-bictorys?month=${monthYear}`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            document.getElementById('cash-bictorys-latest').textContent = data.formatted;
+        } else {
+            console.error('Erreur Cash Bictorys mensuel:', data.error);
+            document.getElementById('cash-bictorys-latest').textContent = '0 FCFA';
+        }
+    } catch (error) {
+        console.error('Erreur chargement Cash Bictorys mensuel:', error);
+        document.getElementById('cash-bictorys-latest').textContent = '0 FCFA';
     }
 }
 

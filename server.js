@@ -5774,3 +5774,229 @@ app.get('/api/dashboard/cash-bictorys-latest', requireAuth, async (req, res) => 
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
+
+// ===== APIS DE GESTION MENSUELLE =====
+
+// Route pour obtenir toutes les données du dashboard pour un mois spécifique
+app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
+    try {
+        const { month } = req.query; // Format YYYY-MM
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+
+        if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        // Calculer les dates de début et fin du mois
+        const [year, monthNum] = month.split('-').map(Number);
+        const startDate = new Date(year, monthNum - 1, 1);
+        const endDate = new Date(year, monthNum, 0, 23, 59, 59);
+        const startDateStr = startDate.toISOString().split('T')[0];
+        const endDateStr = endDate.toISOString().split('T')[0] + ' 23:59:59';
+
+        let accountFilter = '';
+        let params = [startDateStr, endDateStr];
+        
+        // Filtrer selon les permissions
+        if (userRole === 'directeur') {
+            accountFilter = 'AND a.user_id = $3';
+            params.push(userId);
+        }
+
+        // Récupérer les données ACTUELLES (indépendantes du mois)
+        const balanceResult = await pool.query(`
+            SELECT 
+                COALESCE(SUM(CASE WHEN a.account_type = 'depot' THEN a.current_balance ELSE 0 END), 0) as depot_balance,
+                COALESCE(SUM(CASE WHEN a.account_type = 'partenaire' THEN a.current_balance ELSE 0 END), 0) as partner_balance,
+                COALESCE(SUM(a.current_balance), 0) as total_balance,
+                COALESCE(SUM(a.total_credited), 0) as total_credited_general
+            FROM accounts a
+            WHERE a.is_active = true ${accountFilter}
+        `, userRole === 'directeur' ? [userId] : []);
+
+        // Calculer les dépenses du mois
+        const expensesResult = await pool.query(`
+            SELECT 
+                COALESCE(SUM(e.total), 0) as monthly_spent,
+                COALESCE(SUM(CASE WHEN a.total_credited > 0 THEN e.total ELSE 0 END), 0) as spent_with_expenses
+            FROM expenses e
+            JOIN accounts a ON e.account_id = a.id
+            WHERE e.expense_date >= $1 AND e.expense_date <= $2 ${accountFilter}
+        `, params);
+
+        // Calculer les crédits du mois
+        const creditsResult = await pool.query(`
+            SELECT COALESCE(SUM(ch.amount), 0) as monthly_credits
+            FROM credit_history ch
+            JOIN accounts a ON ch.account_id = a.id
+            WHERE ch.created_at >= $1 AND ch.created_at <= $2 ${accountFilter}
+        `, params);
+
+        // Données par compte pour le graphique
+        const accountDataResult = await pool.query(`
+            SELECT 
+                a.account_name as account,
+                COALESCE(SUM(e.total), 0) as spent,
+                a.current_balance,
+                a.total_credited
+            FROM accounts a
+            LEFT JOIN expenses e ON a.id = e.account_id 
+                AND e.expense_date >= $1 AND e.expense_date <= $2
+            WHERE a.is_active = true ${accountFilter}
+            GROUP BY a.id, a.account_name, a.current_balance, a.total_credited
+            ORDER BY spent DESC
+        `, params);
+
+        // Données par catégorie pour le graphique
+        const categoryDataResult = await pool.query(`
+            SELECT 
+                e.category as category,
+                COALESCE(SUM(e.total), 0) as amount
+            FROM expenses e
+            JOIN accounts a ON e.account_id = a.id
+            WHERE e.expense_date >= $1 AND e.expense_date <= $2 ${accountFilter}
+            GROUP BY e.category
+            ORDER BY amount DESC
+        `, params);
+
+        const balance = balanceResult.rows[0];
+        const expenses = expensesResult.rows[0];
+        const credits = creditsResult.rows[0];
+
+        // Calculer Cash Burn depuis lundi (TOUJOURS semaine en cours, indépendant du mois sélectionné)
+        const now = new Date();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - now.getDay() + 1);
+        const mondayStr = monday.toISOString().split('T')[0];
+
+        const weeklyBurnParams = userRole === 'directeur' ? [mondayStr, userId] : [mondayStr];
+        const weeklyBurnResult = await pool.query(`
+            SELECT COALESCE(SUM(e.total), 0) as weekly_burn
+            FROM expenses e
+            JOIN accounts a ON e.account_id = a.id
+            WHERE e.expense_date >= $1 ${accountFilter}
+        `, weeklyBurnParams);
+
+        res.json({
+            currentBalance: `${parseInt(balance.total_balance).toLocaleString('fr-FR')} FCFA`,
+            depotBalance: `${parseInt(balance.depot_balance).toLocaleString('fr-FR')} FCFA`,
+            partnerBalance: `${parseInt(balance.partner_balance).toLocaleString('fr-FR')} FCFA`,
+            monthlyBurn: `${parseInt(expenses.monthly_spent).toLocaleString('fr-FR')} FCFA`,
+            weeklyBurn: `${parseInt(weeklyBurnResult.rows[0].weekly_burn).toLocaleString('fr-FR')} FCFA`,
+            totalSpent: `${parseInt(expenses.monthly_spent).toLocaleString('fr-FR')} FCFA`,
+            totalRemaining: `${parseInt(balance.total_balance).toLocaleString('fr-FR')} FCFA`,
+            totalCreditedWithExpenses: `${parseInt(expenses.spent_with_expenses).toLocaleString('fr-FR')} FCFA`,
+            totalCreditedGeneral: `${parseInt(balance.total_credited_general).toLocaleString('fr-FR')} FCFA`,
+            accountChart: accountDataResult.rows,
+            categoryChart: categoryDataResult.rows,
+            monthInfo: {
+                month,
+                monthName: new Date(year, monthNum - 1).toLocaleDateString('fr-FR', { 
+                    month: 'long', 
+                    year: 'numeric' 
+                })
+            }
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération données mensuelles:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir les créances totales pour un mois
+app.get('/api/dashboard/monthly-creances', requireAuth, async (req, res) => {
+    try {
+        const { month } = req.query;
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+
+        if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        let accountFilter = '';
+        let params = [];
+
+        if (userRole === 'directeur') {
+            accountFilter = 'AND a.user_id = $1';
+            params = [userId];
+        }
+
+        // Calculer le solde total des créances pour le mois (inclut report + nouvelles opérations)
+        const result = await pool.query(`
+            SELECT 
+                COALESCE(SUM(
+                    cc.initial_credit + 
+                    COALESCE(credits.total_credits, 0) - 
+                    COALESCE(debits.total_debits, 0)
+                ), 0) as total_creances
+            FROM creance_clients cc
+            JOIN accounts a ON cc.account_id = a.id
+            LEFT JOIN (
+                SELECT client_id, SUM(amount) as total_credits
+                FROM creance_operations 
+                WHERE operation_type = 'credit'
+                GROUP BY client_id
+            ) credits ON cc.id = credits.client_id
+            LEFT JOIN (
+                SELECT client_id, SUM(amount) as total_debits
+                FROM creance_operations 
+                WHERE operation_type = 'debit'
+                GROUP BY client_id
+            ) debits ON cc.id = debits.client_id
+            WHERE a.account_type = 'creance' 
+            AND a.is_active = true 
+            AND cc.is_active = true
+            ${accountFilter}
+        `, params);
+
+        const totalCreances = parseInt(result.rows[0].total_creances) || 0;
+
+        res.json({ 
+            total_creances: totalCreances,
+            formatted: `${totalCreances.toLocaleString('fr-FR')} FCFA`
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération créances mensuelles:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir Cash Bictorys pour un mois spécifique
+app.get('/api/dashboard/monthly-cash-bictorys', requireAuth, async (req, res) => {
+    try {
+        const { month } = req.query;
+
+        if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        const result = await pool.query(`
+            SELECT amount
+            FROM cash_bictorys
+            WHERE date = (
+                SELECT MAX(date)
+                FROM cash_bictorys
+                WHERE amount != 0 
+                AND month_year = $1
+            )
+            AND amount != 0
+            AND month_year = $1
+        `, [month]);
+
+        const latestAmount = result.rows.length > 0 ? parseInt(result.rows[0].amount) || 0 : 0;
+
+        res.json({
+            latest_amount: latestAmount,
+            formatted: `${latestAmount.toLocaleString('fr-FR')} FCFA`,
+            month_year: month
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération Cash Bictorys mensuel:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
