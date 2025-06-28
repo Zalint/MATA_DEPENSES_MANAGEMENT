@@ -10324,7 +10324,7 @@ function updateClientsSummaryTable(clients) {
     tbody.innerHTML = '';
     
     if (clients.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #999;">Aucun client trouvé</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">Aucun client trouvé</td></tr>';
         return;
     }
     
@@ -10336,6 +10336,9 @@ function updateClientsSummaryTable(clients) {
         if (balance > 0) balanceClass = 'amount-positive';
         else if (balance < 0) balanceClass = 'amount-negative';
         
+        // Générer les boutons d'actions selon les permissions
+        const actionsHtml = generateCreanceClientActions(client);
+        
         row.innerHTML = `
             <td>${client.client_name}</td>
             <td>${client.client_phone || '-'}</td>
@@ -10343,10 +10346,124 @@ function updateClientsSummaryTable(clients) {
             <td class="amount-positive">${formatCurrency(client.total_credits)}</td>
             <td class="amount-negative">${formatCurrency(client.total_debits)}</td>
             <td class="${balanceClass}">${formatCurrency(balance)}</td>
+            <td>${actionsHtml}</td>
         `;
         
         tbody.appendChild(row);
     });
+}
+
+// Générer les boutons d'actions pour un client créance
+function generateCreanceClientActions(client) {
+    const actions = [];
+    
+    // Vérifier les permissions de modification (DG, PCA, Admin)
+    if (canEditCreanceClient()) {
+        actions.push(`
+            <button type="button" class="btn-action btn-edit" onclick="editCreanceClient(${client.id})" title="Modifier le client">
+                <i class="fas fa-edit"></i>
+            </button>
+        `);
+    }
+    
+    // Vérifier les permissions de suppression (Admin seulement)
+    if (canDeleteCreanceClient()) {
+        actions.push(`
+            <button type="button" class="btn-action btn-delete" onclick="deleteCreanceClient(${client.id}, '${client.client_name}')" title="Supprimer le client">
+                <i class="fas fa-trash"></i>
+            </button>
+        `);
+    }
+    
+    return actions.length > 0 ? actions.join(' ') : '<span class="text-muted">-</span>';
+}
+
+// Vérifier si l'utilisateur peut modifier un client créance
+function canEditCreanceClient() {
+    const userRole = currentUser.role;
+    return ['admin', 'directeur_general', 'pca'].includes(userRole);
+}
+
+// Vérifier si l'utilisateur peut supprimer un client créance
+function canDeleteCreanceClient() {
+    const userRole = currentUser.role;
+    return userRole === 'admin';
+}
+
+// Modifier un client créance
+async function editCreanceClient(clientId) {
+    try {
+        if (!currentCreanceAccount) {
+            showNotification('Aucun compte sélectionné', 'error');
+            return;
+        }
+        
+        // Charger les données du client
+        const response = await fetch(apiUrl(`/api/creance/${currentCreanceAccount.id}/clients`));
+        if (!response.ok) {
+            throw new Error('Erreur lors du chargement des clients');
+        }
+        
+        const clients = await response.json();
+        const client = clients.find(c => c.id === clientId);
+        
+        if (!client) {
+            throw new Error('Client non trouvé');
+        }
+        
+        // Pré-remplir le formulaire avec les données existantes
+        document.getElementById('client-name').value = client.client_name;
+        document.getElementById('client-phone').value = client.client_phone || '';
+        document.getElementById('client-address').value = client.client_address || '';
+        document.getElementById('initial-credit').value = client.initial_credit || 0;
+        
+        // Modifier le bouton pour indiquer la mise à jour
+        const submitButton = document.querySelector('#add-client-form button[type="submit"]');
+        submitButton.innerHTML = '<i class="fas fa-save"></i> Modifier le client';
+        submitButton.dataset.editingId = clientId;
+        
+        // Faire défiler vers le formulaire
+        document.getElementById('add-client-form').scrollIntoView({ behavior: 'smooth' });
+        
+        showNotification('Formulaire prêt pour la modification du client', 'info');
+        
+    } catch (error) {
+        console.error('Erreur modification client:', error);
+        showNotification(error.message, 'error');
+    }
+}
+
+// Supprimer un client créance
+async function deleteCreanceClient(clientId, clientName) {
+    if (!confirm(`Êtes-vous sûr de vouloir supprimer le client "${clientName}" ?\n\nCette action supprimera également toutes les opérations liées à ce client.\n\nCette action est irréversible.`)) {
+        return;
+    }
+    
+    try {
+        if (!currentCreanceAccount) {
+            showNotification('Aucun compte sélectionné', 'error');
+            return;
+        }
+        
+        const response = await fetch(apiUrl(`/api/creance/${currentCreanceAccount.id}/clients/${clientId}`), {
+            method: 'DELETE'
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors de la suppression');
+        }
+        
+        const result = await response.json();
+        showNotification(result.message, 'success');
+        
+        // Recharger les données
+        loadCreanceAccountData(currentCreanceAccount.id);
+        
+    } catch (error) {
+        console.error('Erreur suppression client:', error);
+        showNotification(error.message, 'error');
+    }
 }
 
 // Mettre à jour la liste des clients pour les opérations
@@ -10592,7 +10709,7 @@ function cancelOperationEdit() {
     showNotification('Modification annulée', 'info');
 }
 
-// Ajouter un nouveau client (Admin seulement)
+// Ajouter un nouveau client ou mettre à jour un existant
 async function handleAddClient(event) {
     event.preventDefault();
     
@@ -10600,6 +10717,9 @@ async function handleAddClient(event) {
         showNotification('Aucun compte sélectionné', 'error');
         return;
     }
+    
+    const submitButton = event.target.querySelector('button[type="submit"]');
+    const isEditing = submitButton.dataset.editingId;
     
     const formData = new FormData(event.target);
     const clientData = {
@@ -10616,30 +10736,46 @@ async function handleAddClient(event) {
     }
     
     try {
-        const response = await fetch(apiUrl(`/api/creance/${currentCreanceAccount.id}/clients`), {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(clientData)
-        });
+        let response;
+        
+        if (isEditing) {
+            // Mise à jour d'un client existant
+            response = await fetch(apiUrl(`/api/creance/${currentCreanceAccount.id}/clients/${isEditing}`), {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(clientData)
+            });
+        } else {
+            // Création d'un nouveau client
+            response = await fetch(apiUrl(`/api/creance/${currentCreanceAccount.id}/clients`), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(clientData)
+            });
+        }
         
         if (!response.ok) {
             const error = await response.json();
-            throw new Error(error.error || 'Erreur lors de l\'ajout du client');
+            throw new Error(error.error || `Erreur lors de ${isEditing ? 'la modification' : 'l\'ajout'} du client`);
         }
         
         const result = await response.json();
         showNotification(result.message, 'success');
         
-        // Réinitialiser le formulaire
+        // Réinitialiser le formulaire et le bouton
         event.target.reset();
+        submitButton.innerHTML = '<i class="fas fa-plus"></i> Ajouter le client';
+        delete submitButton.dataset.editingId;
         
         // Recharger les données
         loadCreanceAccountData(currentCreanceAccount.id);
         
     } catch (error) {
-        console.error('Erreur ajout client:', error);
+        console.error('Erreur client créance:', error);
         showNotification(error.message, 'error');
     }
 }

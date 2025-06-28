@@ -5445,3 +5445,115 @@ app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
+
+// Route pour modifier un client créance (DG, PCA, Admin)
+app.put('/api/creance/:accountId/clients/:clientId', requireAdminAuth, async (req, res) => {
+    try {
+        const { accountId, clientId } = req.params;
+        const { client_name, client_phone, client_address, initial_credit } = req.body;
+
+        // Vérifier que le compte existe et est de type créance
+        const accountResult = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
+            [accountId, 'creance']
+        );
+
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte créance non trouvé' });
+        }
+
+        // Vérifier que le client existe pour ce compte
+        const clientResult = await pool.query(
+            'SELECT * FROM creance_clients WHERE id = $1 AND account_id = $2 AND is_active = true',
+            [clientId, accountId]
+        );
+
+        if (clientResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé pour ce compte' });
+        }
+
+        // Mettre à jour le client
+        const updateResult = await pool.query(`
+            UPDATE creance_clients 
+            SET client_name = $1, client_phone = $2, client_address = $3, initial_credit = $4
+            WHERE id = $5 AND account_id = $6
+            RETURNING *
+        `, [client_name, client_phone || null, client_address || null, parseInt(initial_credit) || 0, clientId, accountId]);
+
+        res.json({ 
+            message: 'Client modifié avec succès', 
+            client: updateResult.rows[0] 
+        });
+    } catch (error) {
+        if (error.code === '23505') { // Violation unique constraint
+            res.status(400).json({ error: 'Un client avec ce nom existe déjà pour ce compte' });
+        } else {
+            console.error('Erreur modification client créance:', error);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    }
+});
+
+// Middleware pour vérifier les permissions admin strictes (admin seulement)
+const requireStrictAdminAuth = (req, res, next) => {
+    if (!req.session?.user || req.session.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Accès refusé - Seul l\'admin peut effectuer cette action' });
+    }
+    next();
+};
+
+// Route pour supprimer un client créance (Admin seulement)
+app.delete('/api/creance/:accountId/clients/:clientId', requireStrictAdminAuth, async (req, res) => {
+    try {
+        const { accountId, clientId } = req.params;
+
+        // Vérifier que le compte existe et est de type créance
+        const accountResult = await pool.query(
+            'SELECT * FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
+            [accountId, 'creance']
+        );
+
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte créance non trouvé' });
+        }
+
+        // Vérifier que le client existe pour ce compte
+        const clientResult = await pool.query(
+            'SELECT * FROM creance_clients WHERE id = $1 AND account_id = $2 AND is_active = true',
+            [clientId, accountId]
+        );
+
+        if (clientResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Client non trouvé pour ce compte' });
+        }
+
+        const client = clientResult.rows[0];
+
+        await pool.query('BEGIN');
+
+        try {
+            // Supprimer toutes les opérations liées au client
+            await pool.query('DELETE FROM creance_operations WHERE client_id = $1', [clientId]);
+
+            // Supprimer le client (soft delete)
+            await pool.query(
+                'UPDATE creance_clients SET is_active = false WHERE id = $1',
+                [clientId]
+            );
+
+            await pool.query('COMMIT');
+
+            res.json({ 
+                message: `Client "${client.client_name}" supprimé avec succès (ainsi que toutes ses opérations)` 
+            });
+
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+
+    } catch (error) {
+        console.error('Erreur suppression client créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
