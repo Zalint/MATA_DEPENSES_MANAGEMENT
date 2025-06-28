@@ -4855,9 +4855,15 @@ async function createCreanceTablesIfNotExists() {
                 initial_credit INTEGER DEFAULT 0,
                 created_by INTEGER REFERENCES users(id),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_active BOOLEAN DEFAULT true,
-                UNIQUE(account_id, client_name)
+                is_active BOOLEAN DEFAULT true
             )
+        `);
+
+        // Créer un index unique partiel pour les clients actifs seulement
+        await pool.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_creance_clients_unique_active
+            ON creance_clients (account_id, client_name) 
+            WHERE is_active = true
         `);
 
         // Table pour les opérations créance (avances/remboursements)
@@ -4984,6 +4990,16 @@ app.post('/api/creance/:accountId/clients', requireAdminAuth, async (req, res) =
             return res.status(404).json({ error: 'Compte créance non trouvé' });
         }
 
+        // Vérifier qu'aucun client ACTIF avec ce nom n'existe déjà pour ce compte
+        const existingClientResult = await pool.query(
+            'SELECT id FROM creance_clients WHERE account_id = $1 AND client_name = $2 AND is_active = true',
+            [accountId, client_name]
+        );
+
+        if (existingClientResult.rows.length > 0) {
+            return res.status(400).json({ error: 'Un client avec ce nom existe déjà pour ce compte' });
+        }
+
         const result = await pool.query(`
             INSERT INTO creance_clients (account_id, client_name, client_phone, client_address, initial_credit, created_by)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -4995,12 +5011,8 @@ app.post('/api/creance/:accountId/clients', requireAdminAuth, async (req, res) =
             client: result.rows[0] 
         });
     } catch (error) {
-        if (error.code === '23505') { // Violation unique constraint
-            res.status(400).json({ error: 'Un client avec ce nom existe déjà pour ce compte' });
-        } else {
-            console.error('Erreur ajout client créance:', error);
-            res.status(500).json({ error: 'Erreur serveur' });
-        }
+        console.error('Erreur ajout client créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
@@ -5359,7 +5371,7 @@ app.get('/api/dashboard/total-creances', requireAuth, async (req, res) => {
     }
 });
 
-// Route pour obtenir les créances du mois en cours
+// Route pour obtenir les créances du mois en cours (Total Avances seulement)
 app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
     try {
         const userRole = req.session.user.role;
@@ -5388,20 +5400,7 @@ app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
         const result = await pool.query(`
             SELECT 
                 COALESCE(
-                    -- Soldes initiaux des clients créés ce mois
-                    (SELECT SUM(initial_credit) 
-                     FROM creance_clients cc_month
-                     JOIN accounts a_month ON cc_month.account_id = a_month.id
-                     WHERE cc_month.created_at >= $${userRole === 'directeur' ? '2' : '1'} 
-                     AND cc_month.created_at <= $${userRole === 'directeur' ? '3' : '2'}
-                     AND a_month.account_type = 'creance' 
-                     AND a_month.is_active = true 
-                     AND cc_month.is_active = true
-                     ${accountFilter.replace('AND a.user_id', 'AND a_month.user_id')}
-                    ), 0
-                ) +
-                COALESCE(
-                    -- Avances du mois (tous clients)
+                    -- Total des avances (crédits) du mois seulement
                     (SELECT SUM(co.amount)
                      FROM creance_operations co
                      JOIN creance_clients cc ON co.client_id = cc.id
@@ -5414,34 +5413,20 @@ app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
                      AND cc.is_active = true
                      ${accountFilter}
                     ), 0
-                ) -
-                COALESCE(
-                    -- Remboursements du mois (tous clients)
-                    (SELECT SUM(co.amount)
-                     FROM creance_operations co
-                     JOIN creance_clients cc ON co.client_id = cc.id
-                     JOIN accounts a ON cc.account_id = a.id
-                     WHERE co.operation_type = 'debit'
-                     AND co.operation_date >= $${userRole === 'directeur' ? '2' : '1'}
-                     AND co.operation_date <= $${userRole === 'directeur' ? '3' : '2'}
-                     AND a.account_type = 'creance' 
-                     AND a.is_active = true 
-                     AND cc.is_active = true
-                     ${accountFilter}
-                    ), 0
-                ) as creances_mois
+                ) as total_avances_mois
         `, queryParams);
 
-        const creancesMois = parseInt(result.rows[0].creances_mois) || 0;
+        const totalAvancesMois = parseInt(result.rows[0].total_avances_mois) || 0;
 
         res.json({ 
-            creances_mois: creancesMois,
-            formatted: `${creancesMois.toLocaleString('fr-FR')} FCFA`,
-            period: `${startOfMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`
+            creances_mois: totalAvancesMois,
+            formatted: `${totalAvancesMois.toLocaleString('fr-FR')} FCFA`,
+            period: `${startOfMonth.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}`,
+            description: 'Total Avances'
         });
 
     } catch (error) {
-        console.error('Erreur récupération créances du mois:', error);
+        console.error('Erreur récupération total avances du mois:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
@@ -5472,6 +5457,16 @@ app.put('/api/creance/:accountId/clients/:clientId', requireAdminAuth, async (re
             return res.status(404).json({ error: 'Client non trouvé pour ce compte' });
         }
 
+        // Vérifier qu'aucun autre client ACTIF avec ce nom n'existe pour ce compte
+        const existingClientResult = await pool.query(
+            'SELECT id FROM creance_clients WHERE account_id = $1 AND client_name = $2 AND is_active = true AND id != $3',
+            [accountId, client_name, clientId]
+        );
+
+        if (existingClientResult.rows.length > 0) {
+            return res.status(400).json({ error: 'Un autre client avec ce nom existe déjà pour ce compte' });
+        }
+
         // Mettre à jour le client
         const updateResult = await pool.query(`
             UPDATE creance_clients 
@@ -5485,12 +5480,8 @@ app.put('/api/creance/:accountId/clients/:clientId', requireAdminAuth, async (re
             client: updateResult.rows[0] 
         });
     } catch (error) {
-        if (error.code === '23505') { // Violation unique constraint
-            res.status(400).json({ error: 'Un client avec ce nom existe déjà pour ce compte' });
-        } else {
-            console.error('Erreur modification client créance:', error);
-            res.status(500).json({ error: 'Erreur serveur' });
-        }
+        console.error('Erreur modification client créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
@@ -5535,16 +5526,13 @@ app.delete('/api/creance/:accountId/clients/:clientId', requireStrictAdminAuth, 
             // Supprimer toutes les opérations liées au client
             await pool.query('DELETE FROM creance_operations WHERE client_id = $1', [clientId]);
 
-            // Supprimer le client (soft delete)
-            await pool.query(
-                'UPDATE creance_clients SET is_active = false WHERE id = $1',
-                [clientId]
-            );
+            // Supprimer définitivement le client
+            await pool.query('DELETE FROM creance_clients WHERE id = $1', [clientId]);
 
             await pool.query('COMMIT');
 
             res.json({ 
-                message: `Client "${client.client_name}" supprimé avec succès (ainsi que toutes ses opérations)` 
+                message: `Client "${client.client_name}" supprimé définitivement avec succès (ainsi que toutes ses opérations)` 
             });
 
         } catch (error) {
@@ -5554,6 +5542,235 @@ app.delete('/api/creance/:accountId/clients/:clientId', requireStrictAdminAuth, 
 
     } catch (error) {
         console.error('Erreur suppression client créance:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// ===== GESTION CASH BICTORYS MOIS =====
+
+// Créer la table Cash Bictorys si elle n'existe pas
+async function createCashBictorysTableIfNotExists() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS cash_bictorys (
+                id SERIAL PRIMARY KEY,
+                date DATE NOT NULL,
+                amount INTEGER DEFAULT 0,
+                month_year VARCHAR(7) NOT NULL, -- Format YYYY-MM
+                created_by INTEGER REFERENCES users(id),
+                updated_by INTEGER REFERENCES users(id),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(date)
+            )
+        `);
+
+        console.log('Table cash_bictorys créée avec succès');
+    } catch (error) {
+        console.error('Erreur création table cash_bictorys:', error);
+    }
+}
+
+// Initialiser la table au démarrage
+createCashBictorysTableIfNotExists();
+
+// Middleware pour vérifier les permissions Cash Bictorys (Tous les utilisateurs connectés)
+const requireCashBictorysAuth = (req, res, next) => {
+    if (!req.session?.user) {
+        return res.status(403).json({ error: 'Accès refusé - Connexion requise' });
+    }
+    next();
+};
+
+// Route pour obtenir les données Cash Bictorys d'un mois donné
+app.get('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, res) => {
+    try {
+        const { monthYear } = req.params; // Format YYYY-MM
+        
+        // Valider le format
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        // Générer toutes les dates du mois
+        const [year, month] = monthYear.split('-').map(Number);
+        const daysInMonth = new Date(year, month, 0).getDate();
+        const allDates = [];
+        
+        for (let day = 1; day <= daysInMonth; day++) {
+            allDates.push({
+                date: `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
+                amount: 0 // Valeur par défaut
+            });
+        }
+
+        // Récupérer les données existantes
+        const result = await pool.query(`
+            SELECT date, amount
+            FROM cash_bictorys 
+            WHERE month_year = $1
+            ORDER BY date
+        `, [monthYear]);
+
+        // Fusionner les données existantes avec les dates par défaut
+        const existingData = result.rows.reduce((acc, row) => {
+            const dateStr = row.date.toISOString().split('T')[0];
+            acc[dateStr] = parseInt(row.amount) || 0;
+            return acc;
+        }, {});
+
+        const finalData = allDates.map(dateObj => ({
+            date: dateObj.date,
+            amount: existingData[dateObj.date] || 0
+        }));
+
+        res.json({
+            monthYear,
+            data: finalData,
+            monthName: new Date(year, month - 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération Cash Bictorys:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour mettre à jour les données Cash Bictorys d'un mois
+app.put('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, res) => {
+    try {
+        const { monthYear } = req.params;
+        const { data } = req.body; // Array d'objets {date, amount}
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+
+        // Valider le format
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        // Vérifier les permissions de modification
+        const currentDate = new Date();
+        const currentMonthYear = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+        
+        // DG et PCA peuvent modifier seulement le mois en cours, Admin peut tout modifier
+        if (userRole !== 'admin' && monthYear !== currentMonthYear) {
+            return res.status(403).json({ 
+                error: 'Vous ne pouvez modifier que les données du mois en cours' 
+            });
+        }
+
+        if (!Array.isArray(data)) {
+            return res.status(400).json({ error: 'Les données doivent être un tableau' });
+        }
+
+        await pool.query('BEGIN');
+
+        try {
+            // Mettre à jour chaque entrée
+            for (const entry of data) {
+                const { date, amount } = entry;
+                
+                if (!date || amount === undefined) {
+                    continue; // Ignorer les entrées invalides
+                }
+
+                // Vérifier que la date appartient au mois spécifié
+                if (!date.startsWith(monthYear)) {
+                    continue;
+                }
+
+                const amountValue = parseInt(amount) || 0;
+
+                // Insérer ou mettre à jour
+                await pool.query(`
+                    INSERT INTO cash_bictorys (date, amount, month_year, created_by, updated_by)
+                    VALUES ($1, $2, $3, $4, $4)
+                    ON CONFLICT (date) 
+                    DO UPDATE SET 
+                        amount = $2,
+                        updated_by = $4,
+                        updated_at = CURRENT_TIMESTAMP
+                `, [date, amountValue, monthYear, userId]);
+            }
+
+            await pool.query('COMMIT');
+
+            res.json({ 
+                message: 'Données Cash Bictorys mises à jour avec succès',
+                monthYear
+            });
+
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+
+    } catch (error) {
+        console.error('Erreur mise à jour Cash Bictorys:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir le total Cash Bictorys d'un mois (pour le dashboard)
+app.get('/api/cash-bictorys/:monthYear/total', requireCashBictorysAuth, async (req, res) => {
+    try {
+        const { monthYear } = req.params;
+        
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        const result = await pool.query(`
+            SELECT COALESCE(SUM(amount), 0) as total
+            FROM cash_bictorys 
+            WHERE month_year = $1
+        `, [monthYear]);
+
+        const total = parseInt(result.rows[0].total) || 0;
+
+        res.json({
+            monthYear,
+            total,
+            formatted: `${total.toLocaleString('fr-FR')} FCFA`
+        });
+
+    } catch (error) {
+        console.error('Erreur total Cash Bictorys:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir la dernière valeur Cash Bictorys du mois en cours pour le dashboard
+app.get('/api/dashboard/cash-bictorys-latest', requireAuth, async (req, res) => {
+    try {
+        // Calculer le mois en cours au format YYYY-MM
+        const currentDate = new Date();
+        const currentMonthYear = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+        
+        const result = await pool.query(`
+            SELECT amount
+            FROM cash_bictorys
+            WHERE date = (
+                SELECT MAX(date)
+                FROM cash_bictorys
+                WHERE amount != 0 
+                AND month_year = $1
+            )
+            AND amount != 0
+            AND month_year = $1
+        `, [currentMonthYear]);
+
+        const latestAmount = result.rows.length > 0 ? parseInt(result.rows[0].amount) || 0 : 0;
+
+        res.json({
+            latest_amount: latestAmount,
+            formatted: `${latestAmount.toLocaleString('fr-FR')} FCFA`,
+            month_year: currentMonthYear
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération dernière valeur Cash Bictorys:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });

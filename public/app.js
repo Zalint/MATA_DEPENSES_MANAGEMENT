@@ -256,6 +256,34 @@ async function showSection(sectionName) {
                 showNotification('Erreur lors du chargement des Créances', 'error');
             }
             break;
+            
+        case 'cash-bictorys':
+            console.log('🔄 CLIENT: showSection - cash-bictorys appelé');
+            try {
+                await initCashBictorysSection();
+                console.log('✅ CLIENT: showSection - cash-bictorys terminé avec succès');
+            } catch (error) {
+                console.error('❌ CLIENT: Erreur dans showSection - cash-bictorys:', error);
+                showNotification('Erreur lors du chargement de Cash Bictorys', 'error');
+            }
+            break;
+    }
+}
+
+// Initialiser la visibilité des menus selon les permissions
+function initMenuVisibility() {
+    // Menu Cash Bictorys pour TOUS les utilisateurs
+    const cashBictorysMenu = document.getElementById('cash-bictorys-menu');
+    if (cashBictorysMenu) {
+        cashBictorysMenu.style.display = 'block';
+    }
+    
+    // Menu Créance pour DG, PCA, Admin, Directeur
+    if (['directeur_general', 'pca', 'admin', 'directeur'].includes(currentUser.role)) {
+        const creanceMenu = document.getElementById('creance-menu');
+        if (creanceMenu) {
+            creanceMenu.style.display = 'block';
+        }
     }
 }
 
@@ -265,6 +293,9 @@ async function loadInitialData() {
     
     // Charger les types de comptes pour le formulaire de création
     await loadAccountTypes();
+    
+    // Initialiser les menus selon les permissions
+    initMenuVisibility();
     
     // Définir les dates par défaut AVANT de charger le dashboard
     // Utiliser une plage de dates élargie pour inclure toutes les dépenses existantes
@@ -6527,6 +6558,7 @@ async function loadDashboard() {
         await loadStockVivantTotal(); // Ajouter le chargement du total stock vivant
         await loadTotalCreances(); // Charger le total des créances
         await loadCreancesMois(); // Charger les créances du mois
+        await loadCashBictorysLatest(); // Charger la dernière valeur Cash Bictorys du mois
         await loadTransfersCard(); // Ajouter le chargement des transferts
     } catch (error) {
         console.error('Erreur lors du chargement du dashboard:', error);
@@ -8563,6 +8595,33 @@ async function loadCreancesMois() {
         
         if (periodElement) {
             periodElement.textContent = 'Mois en cours';
+        }
+    }
+}
+
+// Charger la dernière valeur Cash Bictorys pour le dashboard
+async function loadCashBictorysLatest() {
+    try {
+        const response = await fetch(apiUrl('/api/dashboard/cash-bictorys-latest'));
+        
+        if (!response.ok) {
+            throw new Error(`Erreur ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        const latestElement = document.getElementById('cash-bictorys-latest');
+        
+        if (latestElement) {
+            latestElement.textContent = data.formatted;
+        }
+        
+    } catch (error) {
+        console.error('Erreur chargement Cash Bictorys latest:', error);
+        const latestElement = document.getElementById('cash-bictorys-latest');
+        
+        if (latestElement) {
+            latestElement.textContent = '0 FCFA';
         }
     }
 }
@@ -10875,10 +10934,6 @@ async function handleAddOperation(event) {
 
 // Initialiser la section créance
 async function initCreanceSection() {
-    // Afficher le menu créance pour les utilisateurs autorisés
-    if (['directeur_general', 'pca', 'admin', 'directeur'].includes(currentUser.role)) {
-        document.getElementById('creance-menu').style.display = 'block';
-    }
     
     // Charger les comptes créance
     await loadCreanceAccounts();
@@ -10929,3 +10984,260 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Setup mobile menu
     setupMobileMenu();
 });
+
+// ===== GESTION CASH BICTORYS MOIS =====
+
+// Variables globales pour Cash Bictorys
+let currentCashBictorysData = [];
+let currentMonthYear = '';
+let canEditCashBictorys = false;
+
+// Initialiser la section Cash Bictorys
+async function initCashBictorysSection() {
+    
+    // Définir le mois en cours par défaut
+    const today = new Date();
+    const currentMonth = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}`;
+    
+    const monthInput = document.getElementById('cash-bictorys-month');
+    if (monthInput) {
+        monthInput.value = currentMonth;
+    }
+    
+    // Événements
+    setupCashBictorysEventListeners();
+}
+
+// Configurer les événements Cash Bictorys
+function setupCashBictorysEventListeners() {
+    // Charger le mois
+    const loadBtn = document.getElementById('load-cash-bictorys-btn');
+    if (loadBtn) {
+        loadBtn.addEventListener('click', handleLoadCashBictorysMonth);
+    }
+    
+    // Sauvegarder
+    const saveBtn = document.getElementById('save-cash-bictorys-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', handleSaveCashBictorys);
+    }
+}
+
+// Gérer le chargement d'un mois
+async function handleLoadCashBictorysMonth() {
+    const monthInput = document.getElementById('cash-bictorys-month');
+    const monthYear = monthInput.value;
+    
+    if (!monthYear) {
+        showNotification('Veuillez sélectionner un mois', 'error');
+        return;
+    }
+    
+    await loadCashBictorysMonth(monthYear);
+}
+
+// Charger les données d'un mois spécifique
+async function loadCashBictorysMonth(monthYear) {
+    try {
+        const response = await fetch(apiUrl(`/api/cash-bictorys/${monthYear}`));
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors du chargement');
+        }
+        
+        const data = await response.json();
+        
+        currentCashBictorysData = data.data;
+        currentMonthYear = monthYear;
+        
+        // Afficher la zone principale
+        document.getElementById('cash-bictorys-main-content').style.display = 'block';
+        
+        // Mettre à jour l'en-tête
+        document.getElementById('cash-bictorys-month-title').textContent = `Mois : ${data.monthName}`;
+        
+        // Mettre à jour les permissions
+        updateCashBictorysPermissions(monthYear);
+        
+        // Afficher les données dans le tableau
+        displayCashBictorysTable(currentCashBictorysData);
+        
+        // Calculer et afficher le total
+        updateCashBictorysTotal();
+        
+        // Activer le bouton de sauvegarde si les permissions le permettent
+        updateSaveButtonState();
+        
+        showNotification(`Données du mois ${data.monthName} chargées`, 'success');
+        
+    } catch (error) {
+        console.error('Erreur chargement Cash Bictorys:', error);
+        showNotification(error.message, 'error');
+    }
+}
+
+// Mettre à jour les informations de permissions
+function updateCashBictorysPermissions(monthYear) {
+    const userRole = currentUser.role;
+    const today = new Date();
+    const currentMonth = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}`;
+    
+    let permissionText = '';
+    canEditCashBictorys = false;
+    
+    if (userRole === 'admin') {
+        canEditCashBictorys = true;
+        permissionText = 'Admin : Vous pouvez modifier toutes les données';
+    } else if (['directeur_general', 'pca'].includes(userRole)) {
+        if (monthYear === currentMonth) {
+            canEditCashBictorys = true;
+            permissionText = 'Vous pouvez modifier les données du mois en cours';
+        } else {
+            canEditCashBictorys = false;
+            permissionText = 'Vous ne pouvez modifier que les données du mois en cours';
+        }
+    } else {
+        canEditCashBictorys = false;
+        permissionText = 'Accès en lecture seule';
+    }
+    
+    document.getElementById('permissions-text').textContent = permissionText;
+}
+
+// Afficher les données dans le tableau
+function displayCashBictorysTable(data) {
+    const tbody = document.getElementById('cash-bictorys-tbody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    data.forEach((dayData, index) => {
+        const row = document.createElement('tr');
+        
+        // Convertir la date en objet Date pour obtenir le nom du jour
+        const dateObj = new Date(dayData.date + 'T00:00:00');
+        const dayName = dateObj.toLocaleDateString('fr-FR', { weekday: 'long' });
+        
+        // Classe pour distinguer les week-ends
+        const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
+        if (isWeekend) {
+            row.classList.add('weekend-row');
+        }
+        
+        row.innerHTML = `
+            <td>${formatDate(dayData.date)}</td>
+            <td class="day-name ${isWeekend ? 'weekend' : ''}">${dayName}</td>
+            <td class="amount-cell">
+                ${canEditCashBictorys 
+                    ? `<input type="number" class="cash-amount-input" 
+                         data-date="${dayData.date}" 
+                         value="${dayData.amount}" 
+                         min="0" step="1" 
+                         onchange="updateCashBictorysValue('${dayData.date}', this.value)">` 
+                    : `<span class="amount-display">${formatCurrency(dayData.amount)}</span>`
+                }
+            </td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+}
+
+// Mettre à jour une valeur dans les données
+function updateCashBictorysValue(date, value) {
+    const numericValue = parseInt(value) || 0;
+    
+    // Mettre à jour dans les données locales
+    const dataItem = currentCashBictorysData.find(item => item.date === date);
+    if (dataItem) {
+        dataItem.amount = numericValue;
+    }
+    
+    // Recalculer le total
+    updateCashBictorysTotal();
+}
+
+// Calculer et afficher le total du mois (valeur de la dernière date avec valeur non-zéro)
+function updateCashBictorysTotal() {
+    let latestValue = 0;
+    
+    if (currentCashBictorysData && currentCashBictorysData.length > 0) {
+        // Trier les données par date (la plus récente en premier)
+        const sortedData = [...currentCashBictorysData].sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+        // Trouver la dernière date avec une valeur différente de zéro
+        const latestNonZeroEntry = sortedData.find(item => {
+            const amount = parseInt(item.amount) || 0;
+            return amount !== 0;
+        });
+        
+        if (latestNonZeroEntry) {
+            latestValue = parseInt(latestNonZeroEntry.amount) || 0;
+        }
+    }
+    
+    const totalElement = document.getElementById('cash-bictorys-total');
+    if (totalElement) {
+        totalElement.textContent = formatCurrency(latestValue);
+        
+        // Couleur selon le montant
+        totalElement.className = 'total-value';
+        if (latestValue > 0) totalElement.classList.add('amount-positive');
+        else if (latestValue < 0) totalElement.classList.add('amount-negative');
+        else totalElement.classList.add('amount-neutral');
+    }
+}
+
+// Mettre à jour l'état du bouton de sauvegarde
+function updateSaveButtonState() {
+    const saveBtn = document.getElementById('save-cash-bictorys-btn');
+    if (saveBtn) {
+        saveBtn.disabled = !canEditCashBictorys;
+        
+        if (canEditCashBictorys) {
+            saveBtn.classList.remove('btn-disabled');
+            saveBtn.title = 'Sauvegarder les modifications';
+        } else {
+            saveBtn.classList.add('btn-disabled');
+            saveBtn.title = 'Vous n\'avez pas les permissions pour modifier';
+        }
+    }
+}
+
+// Gérer la sauvegarde
+async function handleSaveCashBictorys() {
+    if (!canEditCashBictorys) {
+        showNotification('Vous n\'avez pas les permissions pour modifier ces données', 'error');
+        return;
+    }
+    
+    if (!currentMonthYear || currentCashBictorysData.length === 0) {
+        showNotification('Aucune donnée à sauvegarder', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(apiUrl(`/api/cash-bictorys/${currentMonthYear}`), {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                data: currentCashBictorysData
+            })
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors de la sauvegarde');
+        }
+        
+        const result = await response.json();
+        showNotification(result.message, 'success');
+        
+    } catch (error) {
+        console.error('Erreur sauvegarde Cash Bictorys:', error);
+        showNotification(error.message, 'error');
+    }
+}

@@ -103,6 +103,11 @@
                             <i class="fas fa-file-invoice-dollar"></i> Créance
                         </a>
                     </li>
+                    <li id="cash-bictorys-menu" style="display: none;">
+                        <a href="#" data-section="cash-bictorys" class="nav-link">
+                            <i class="fas fa-money-bill-wave"></i> Cash Bictorys Mois
+                        </a>
+                    </li>
                     <!--<li><a href="#" data-section="remboursements" class="nav-link">
                         <i class="fas fa-money-bill-wave"></i> Remboursements
                     </a></li>-->
@@ -227,6 +232,17 @@
                                 <h3>Créances du Mois</h3>
                                 <p class="stat-value" id="creances-mois">0 FCFA</p>
                                 <small class="stat-period" id="creances-mois-period">Mois en cours</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-money-bill-wave"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Cash Bictorys Du mois</h3>
+                                <p class="stat-value" id="cash-bictorys-latest">0 FCFA</p>
+                                <small class="stat-period">Dernière valeur</small>
                             </div>
                         </div>
                     </div>
@@ -1102,6 +1118,190 @@
                         </div>
                     </div>
                 </section>
+
+                <!-- Section Cash Bictorys Mois -->
+                <section id="cash-bictorys-section" class="section">
+                    <h2><i class="fas fa-money-bill-wave"></i> Cash Bictorys Mois</h2>
+                    <p class="section-description">Suivi quotidien des valeurs Cash Bictorys par mois</p>
+
+                    <!-- Sélection du mois -->
+                    <div class="cash-bictorys-controls">
+                        <div class="form-group">
+                            <label for="cash-bictorys-month">Sélectionner le mois</label>
+                            <input type="month" id="cash-bictorys-month" class="form-control">
+                        </div>
+                        <div class="form-actions">
+                            <button id="load-cash-bictorys-btn" class="btn btn-primary">
+                                <i class="fas fa-calendar-alt"></i> Charger le mois
+                            </button>
+                            <button id="save-cash-bictorys-btn" class="btn btn-success" disabled>
+                                <i class="fas fa-save"></i> Sauvegarder
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Zone principale - masquée jusqu'à sélection d'un mois -->
+                    <div id="cash-bictorys-main-content" style="display: none;">
+                        <!-- En-tête du mois sélectionné -->
+                        <div class="cash-bictorys-header">
+                            <h3 id="cash-bictorys-month-title">Mois : [Nom du mois]</h3>
+                                                    <div class="month-total">
+                            <span class="total-label">Dernière valeur :</span>
+                            <span id="cash-bictorys-total" class="total-value">0 FCFA</span>
+                        </div>
+                        </div>
+
+                        <!-- Permissions d'édition -->
+                        <div id="cash-bictorys-permissions-info" class="permissions-info">
+                            <i class="fas fa-info-circle"></i>
+                            <span id="permissions-text">Chargement des permissions...</span>
+                        </div>
+
+                        <!-- Tableau des valeurs quotidiennes -->
+                        <div class="cash-bictorys-table-section">
+                            <div class="section-card">
+                                <h4><i class="fas fa-table"></i> Valeurs Quotidiennes</h4>
+                                
+                                <div class="table-container">
+                                    <table id="cash-bictorys-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Jour</th>
+                                                <th>Valeur (FCFA)</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="cash-bictorys-tbody">
+                                            <!-- Les données seront chargées ici -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <style>
+                /* Styles spécifiques pour Cash Bictorys */
+                .cash-bictorys-controls {
+                    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    align-items: end;
+                    gap: 20px;
+                    flex-wrap: wrap;
+                }
+                
+                .cash-bictorys-header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    flex-wrap: wrap;
+                }
+                
+                .cash-bictorys-header h3 {
+                    margin: 0;
+                    font-size: 1.4em;
+                }
+                
+                .month-total {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                
+                .total-label {
+                    font-weight: 500;
+                    opacity: 0.9;
+                }
+                
+                .total-value {
+                    font-size: 1.2em;
+                    font-weight: bold;
+                    padding: 8px 16px;
+                    background: rgba(255, 255, 255, 0.2);
+                    border-radius: 8px;
+                }
+                
+                .permissions-info {
+                    background: #e3f2fd;
+                    border: 1px solid #bbdefb;
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin-bottom: 20px;
+                    color: #1976d2;
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                }
+                
+                .cash-amount-input {
+                    width: 120px;
+                    padding: 6px 8px;
+                    border: 1px solid #ddd;
+                    border-radius: 4px;
+                    text-align: right;
+                    font-family: monospace;
+                }
+                
+                .cash-amount-input:focus {
+                    outline: none;
+                    border-color: #667eea;
+                    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+                }
+                
+                .amount-display {
+                    font-family: monospace;
+                    font-weight: 500;
+                }
+                
+                .day-name {
+                    text-transform: capitalize;
+                    font-weight: 500;
+                }
+                
+                .day-name.weekend {
+                    color: #f44336;
+                    font-weight: bold;
+                }
+                
+                .weekend-row {
+                    background-color: #fff8e1;
+                }
+                
+                .amount-cell {
+                    text-align: right;
+                }
+                
+                .btn-disabled {
+                    opacity: 0.5;
+                    cursor: not-allowed;
+                }
+                
+                @media (max-width: 768px) {
+                    .cash-bictorys-controls {
+                        flex-direction: column;
+                        align-items: stretch;
+                    }
+                    
+                    .cash-bictorys-header {
+                        flex-direction: column;
+                        gap: 15px;
+                        text-align: center;
+                    }
+                    
+                    .cash-amount-input {
+                        width: 100px;
+                    }
+                }
+                </style>
 
                 <!-- Gérer les utilisateurs (Admin uniquement) -->
                 <section id="manage-users-section" class="section">
