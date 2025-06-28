@@ -6719,13 +6719,8 @@ async function loadMonthlyDashboard(monthYear) {
         updateDateFilters(monthYear);
         
         // Charger d'abord les données actuelles (soldes, etc.)
+        // loadDashboardData() appelle déjà updateStatsCards avec les dates des filtres
         await loadDashboardData();
-        
-        // Mettre à jour les cartes de statistiques avec les nouvelles dates
-        const [year, month] = monthYear.split('-').map(Number);
-        const startDate = new Date(year, month - 1, 1).toISOString().split('T')[0];
-        const endDate = new Date(year, month, 0).toISOString().split('T')[0];
-        await updateStatsCards(startDate, endDate);
         
         // Puis charger SEULEMENT les données mensuelles spécifiques
         await loadMonthlySpecificData(monthYear);
