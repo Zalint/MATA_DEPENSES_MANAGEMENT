@@ -261,6 +261,30 @@
                                 <small class="stat-period">Dernière valeur</small>
                             </div>
                         </div>
+
+                        <!-- Nouvelle carte PL (sans stock + charges) -->
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-chart-pie"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>PL (sans stock + sans charges)</h3>
+                                <p class="stat-value" id="pl-sans-stock-charges">0 FCFA</p>
+                                <small class="stat-period">Cash Bictorys + Créances + Stock PV - Cash Burn</small>
+                            </div>
+                        </div>
+
+                        <!-- Nouvelle carte PL avec estimation charges -->
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-calculator"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>PL (sans stock + estim. charges)</h3>
+                                <p class="stat-value" id="pl-estim-charges">0 FCFA</p>
+                                <small class="stat-period">PL avec estimation charges fixes au prorata</small>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Filtres de date pour le dashboard -->
@@ -1704,6 +1728,9 @@
                             <button type="button" class="tab-button" data-config="stock-vivant">
                                 <i class="fas fa-seedling"></i> Configuration Stock Vivant
                             </button>
+                            <button type="button" class="tab-button" data-config="financial">
+                                <i></i> Paramètres Financiers
+                            </button>
                         </div>
 
                         <!-- Configuration des Catégories -->
@@ -1828,6 +1855,70 @@
                                     <small class="form-help">
                                         <i class="fas fa-info-circle"></i> 
                                         Cette configuration définit les catégories et labels pour le stock vivant.
+                                        Utilisez les outils ci-dessus pour formater et valider votre JSON.
+                                    </small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Configuration des Paramètres Financiers -->
+                        <div id="financial-config" class="config-panel">
+                            <div class="config-header">
+                                <h3><i></i> Paramètres Financiers</h3>
+                                <div class="config-actions">
+                                    <button type="button" id="save-financial-config" class="btn btn-success" disabled>
+                                        <i class="fas fa-save"></i> Sauvegarder
+                                    </button>
+                                    <button type="button" id="reload-financial-config" class="btn btn-secondary">
+                                        <i class="fas fa-sync"></i> Recharger
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="config-editor">
+                                <div class="form-group">
+                                    <label for="financial-json-editor">Configuration JSON des Paramètres Financiers</label>
+                                    
+                                    <!-- Toolbar pour l'éditeur -->
+                                    <div class="json-toolbar">
+                                        <div class="toolbar-group">
+                                            <button type="button" class="btn btn-sm btn-tool" id="format-financial-json" title="Formater le JSON">
+                                                <i class="fas fa-code"></i> Formater
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="minify-financial-json" title="Minifier le JSON">
+                                                <i class="fas fa-compress"></i> Minifier
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="validate-financial-json" title="Valider le JSON">
+                                                <i class="fas fa-check-circle"></i> Valider
+                                            </button>
+                                        </div>
+                                        <div class="toolbar-group">
+                                            <button type="button" class="btn btn-sm btn-tool" id="undo-financial" title="Annuler">
+                                                <i class="fas fa-undo"></i>
+                                            </button>
+                                            <button type="button" class="btn btn-sm btn-tool" id="redo-financial" title="Refaire">
+                                                <i class="fas fa-redo"></i>
+                                            </button>
+                                        </div>
+                                        <div class="toolbar-info">
+                                            <span class="line-info" id="financial-line-info">Ligne 1, Col 1</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="json-editor-container">
+                                        <div class="json-line-numbers" id="financial-line-numbers">1</div>
+                                        <textarea id="financial-json-editor" class="json-editor" rows="25" placeholder="Chargement de la configuration..."></textarea>
+                                    </div>
+                                    
+                                    <div class="json-status" id="financial-json-status">
+                                        <span class="status-indicator status-valid">
+                                            <i class="fas fa-check-circle"></i> JSON valide
+                                        </span>
+                                    </div>
+                                    
+                                    <small class="form-help">
+                                        <i class="fas fa-info-circle"></i> 
+                                        Cette configuration contient les paramètres financiers comme l'estimation des charges fixes.
                                         Utilisez les outils ci-dessus pour formater et valider votre JSON.
                                     </small>
                                 </div>

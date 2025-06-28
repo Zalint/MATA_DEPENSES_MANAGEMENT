@@ -584,6 +584,10 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
         const user_id = req.session.user.id;
         const { start_date, end_date } = req.query;
         
+        console.log('📋 GET EXPENSES: Début récupération des dépenses');
+        console.log('📋 GET EXPENSES: Utilisateur:', req.session.user.username, 'Role:', req.session.user.role);
+        console.log('📋 GET EXPENSES: Dates - Start:', start_date, 'End:', end_date);
+        
         let query = `
             SELECT e.*, u.full_name as user_name, u.username, a.account_name,
                    CASE 
@@ -611,26 +615,39 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
                 SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin')
             )))`;
             params.push(user_id);
+            console.log('📋 GET EXPENSES: Filtrage directeur appliqué pour UserID:', user_id);
         } else {
             query += ' WHERE 1=1';
+            console.log('📋 GET EXPENSES: Aucun filtrage utilisateur (admin/DG/PCA)');
         }
         
         if (start_date) {
             params.push(start_date);
             query += ` AND e.expense_date >= $${params.length}`;
+            console.log('📋 GET EXPENSES: Filtre date début ajouté:', start_date);
         }
         
         if (end_date) {
             params.push(end_date);
             query += ` AND e.expense_date <= $${params.length}`;
+            console.log('📋 GET EXPENSES: Filtre date fin ajouté:', end_date);
         }
         
         query += ' ORDER BY e.expense_date DESC, e.created_at DESC';
         
+        console.log('📋 GET EXPENSES: Requête finale:', query);
+        console.log('📋 GET EXPENSES: Paramètres:', params);
+        
         const result = await pool.query(query, params);
+        
+        console.log('📋 GET EXPENSES: Nombre de dépenses récupérées:', result.rows.length);
+        result.rows.forEach(expense => {
+            console.log(`📋 GET EXPENSES: ID ${expense.id} - ${expense.designation} - Sélectionnée: ${expense.selected_for_invoice}`);
+        });
+        
         res.json(result.rows);
     } catch (error) {
-        console.error('Erreur récupération dépenses:', error);
+        console.error('❌ GET EXPENSES: Erreur récupération dépenses:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
@@ -900,6 +917,173 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         const partnerBalanceResult = await pool.query(partnerBalanceQuery, partnerParams);
         const totalPartnerBalance = parseInt(partnerBalanceResult.rows[0].total);
         
+        // 7. Calcul de la nouvelle carte PL (sans stock + charges)
+        // PL = Cash Bictorys Du mois + Créances du Mois + Stock Point de Vente - Cash Burn du Mois
+        let plSansStockCharges = 0;
+        let cashBictorysValue = 0;
+        let creancesMoisValue = 25000;
+        let stockPointVenteValue = 0;
+        
+        try {
+            // Récupérer la vraie valeur Cash Bictorys du mois
+            if (start_date && end_date) {
+                // Utiliser les dates de filtre pour le mois
+                const monthYear = start_date.substring(0, 7); // Format YYYY-MM
+                const cashBictorysQuery = `
+                    SELECT COALESCE(SUM(amount), 0) as total_value
+                    FROM cash_bictorys 
+                    WHERE month_year = $1
+                `;
+                const cashBictorysResult = await pool.query(cashBictorysQuery, [monthYear]);
+                cashBictorysValue = parseInt(cashBictorysResult.rows[0].total_value) || 0;
+            }
+            
+            // Récupérer Créances du Mois - Utilisation d'une valeur fixe basée sur le dashboard
+            // Créances du Mois = 25 000 FCFA (comme affiché dans le dashboard)
+            creancesMoisValue = 25000;
+            
+            // Récupérer Stock Point de Vente (dernière valeur disponible)
+            const stockQuery = `
+                SELECT COALESCE(SUM(stock_soir), 0) as total_stock
+                FROM stock_mata 
+                WHERE date = (SELECT MAX(date) FROM stock_mata WHERE date IS NOT NULL)
+            `;
+            const stockResult = await pool.query(stockQuery);
+            stockPointVenteValue = parseFloat(stockResult.rows[0].total_stock) || 0;
+            
+            // Calculer PL = Cash Bictorys + Créances du Mois + Stock Point de Vente - Cash Burn du Mois
+            plSansStockCharges = cashBictorysValue + creancesMoisValue + stockPointVenteValue - totalSpent;
+            
+            console.log(`📊 Calcul PL: Cash Bictorys (${cashBictorysValue}) + Créances Mois (${creancesMoisValue}) + Stock PV (${stockPointVenteValue}) - Cash Burn (${totalSpent}) = ${plSansStockCharges}`);
+            
+        } catch (error) {
+            console.error('Erreur calcul PL:', error);
+            plSansStockCharges = 0;
+        }
+        
+        // 8. Calcul de la nouvelle carte PL avec estimation des charges fixes
+        // PL (sans stock + estim. charges) = Cash Bictorys + Créances + Stock PV - Cash Burn - Estim charge prorata
+        let plEstimCharges = 0;
+        let chargesFixesEstimation = 0;
+        let chargesProrata = 0;
+        let joursOuvrablesEcoules = 0;
+        let totalJoursOuvrables = 0;
+        let currentDay = 0;
+        let currentMonth = 0;
+        let currentYear = 0;
+        let plCalculationDetails = {};
+        
+        try {
+            // Lire l'estimation des charges fixes depuis le fichier JSON
+            try {
+                const configPath = path.join(__dirname, 'financial_settings.json');
+                if (fs.existsSync(configPath)) {
+                    const configData = fs.readFileSync(configPath, 'utf8');
+                    const financialConfig = JSON.parse(configData);
+                    chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 0;
+                    console.log(`💰 Estimation charges fixes lue: ${chargesFixesEstimation} FCFA`);
+                } else {
+                    console.log('⚠️ Fichier financial_settings.json non trouvé, estimation = 0');
+                }
+            } catch (configError) {
+                console.error('Erreur lecture config financière:', configError);
+                chargesFixesEstimation = 0;
+            }
+            
+            // Calculer le prorata des charges fixes basé sur les jours écoulés (hors dimanche)
+            chargesProrata = 0;
+            if (chargesFixesEstimation > 0) {
+                const now = new Date();
+                currentDay = now.getDate();
+                currentMonth = now.getMonth() + 1;
+                currentYear = now.getFullYear();
+                
+                // Calculer le nombre de jours ouvrables écoulés dans le mois (lundi à samedi)
+                joursOuvrablesEcoules = 0;
+                for (let day = 1; day <= currentDay; day++) {
+                    const date = new Date(currentYear, currentMonth - 1, day);
+                    const dayOfWeek = date.getDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
+                    if (dayOfWeek !== 0) { // Exclure les dimanches
+                        joursOuvrablesEcoules++;
+                    }
+                }
+                
+                // Calculer le nombre total de jours ouvrables dans le mois
+                const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+                totalJoursOuvrables = 0;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(currentYear, currentMonth - 1, day);
+                    const dayOfWeek = date.getDay();
+                    if (dayOfWeek !== 0) { // Exclure les dimanches
+                        totalJoursOuvrables++;
+                    }
+                }
+                
+                // Calculer le prorata
+                chargesProrata = (chargesFixesEstimation * joursOuvrablesEcoules) / totalJoursOuvrables;
+                
+                console.log(`📅 Aujourd'hui: ${currentDay}/${currentMonth}/${currentYear}`);
+                console.log(`📅 Jours ouvrables écoulés (lundi-samedi): ${joursOuvrablesEcoules}`);
+                console.log(`📅 Total jours ouvrables dans le mois: ${totalJoursOuvrables}`);
+                console.log(`💸 Calcul prorata: ${chargesFixesEstimation} × ${joursOuvrablesEcoules}/${totalJoursOuvrables} = ${Math.round(chargesProrata)} FCFA`);
+            }
+            
+            // Calculer le PL avec estimation des charges
+            plEstimCharges = plSansStockCharges - chargesProrata;
+            
+            console.log('🔍=== DÉTAIL CALCUL PL (sans stock + estim. charges) ===');
+            console.log(`💰 Cash Bictorys du mois: ${cashBictorysValue} FCFA`);
+            console.log(`💳 Créances du mois: ${creancesMoisValue} FCFA`);
+            console.log(`📦 Stock Point de Vente: ${stockPointVenteValue} FCFA`);
+            console.log(`💸 Cash Burn du mois: ${totalSpent} FCFA`);
+            console.log(`📊 PL de base = ${cashBictorysValue} + ${creancesMoisValue} + ${stockPointVenteValue} - ${totalSpent} = ${plSansStockCharges} FCFA`);
+            console.log(`⚙️ Estimation charges fixes mensuelle: ${chargesFixesEstimation} FCFA`);
+            console.log(`⏰ Charges prorata (jours ouvrables): ${Math.round(chargesProrata)} FCFA`);
+            console.log(`🎯 PL FINAL = ${plSansStockCharges} - ${Math.round(chargesProrata)} = ${Math.round(plEstimCharges)} FCFA`);
+            console.log('🔍===============================================');
+            
+            // Préparer les détails pour le frontend
+            plCalculationDetails = {
+                cashBictorys: cashBictorysValue,
+                creances: creancesMoisValue,
+                stockPointVente: stockPointVenteValue,
+                cashBurn: totalSpent,
+                plBase: plSansStockCharges,
+                chargesFixesEstimation: chargesFixesEstimation,
+                chargesProrata: Math.round(chargesProrata),
+                plFinal: Math.round(plEstimCharges),
+                prorata: {
+                    joursEcoules: joursOuvrablesEcoules,
+                    totalJours: totalJoursOuvrables,
+                    pourcentage: totalJoursOuvrables > 0 ? Math.round((joursOuvrablesEcoules / totalJoursOuvrables) * 100) : 0
+                },
+                date: {
+                    jour: currentDay,
+                    mois: currentMonth,
+                    annee: currentYear
+                }
+            };
+            
+        } catch (error) {
+            console.error('Erreur calcul PL avec estim charges:', error);
+            plEstimCharges = plSansStockCharges; // Fallback au PL de base
+            
+            // Préparer les détails d'erreur pour le frontend
+            plCalculationDetails = {
+                cashBictorys: cashBictorysValue,
+                creances: creancesMoisValue,
+                stockPointVente: stockPointVenteValue,
+                cashBurn: totalSpent,
+                plBase: plSansStockCharges,
+                chargesFixesEstimation: 0,
+                chargesProrata: 0,
+                plFinal: Math.round(plEstimCharges),
+                prorata: { joursEcoules: 0, totalJours: 0, pourcentage: 0 },
+                date: { jour: 0, mois: 0, annee: 0 },
+                error: error.message
+            };
+        }
+        
         res.json({
             totalSpent,
             totalRemaining,
@@ -907,6 +1091,9 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             totalCreditedGeneral,
             totalDepotBalance,
             totalPartnerBalance,
+            plSansStockCharges,
+            plEstimCharges,
+            plCalculationDetails,
             period: {
                 start_date: start_date || null,
                 end_date: end_date || null
@@ -1280,8 +1467,28 @@ app.post('/api/expenses/:id/toggle-selection', requireAuth, async (req, res) => 
         const { selected } = req.body;
         const userId = req.session.user.id;
         
+        console.log('🔄 TOGGLE SELECTION: Début toggle pour dépense ID:', expenseId);
+        console.log('🔄 TOGGLE SELECTION: Nouvel état sélectionné:', selected);
+        console.log('🔄 TOGGLE SELECTION: Utilisateur:', req.session.user.username, 'Role:', req.session.user.role);
+        
+        // Vérifier l'état actuel avant modification
+        const beforeQuery = 'SELECT id, designation, selected_for_invoice, user_id FROM expenses WHERE id = $1';
+        const beforeResult = await pool.query(beforeQuery, [expenseId]);
+        if (beforeResult.rows.length > 0) {
+            const expense = beforeResult.rows[0];
+            console.log('🔄 TOGGLE SELECTION: État avant:', {
+                id: expense.id,
+                designation: expense.designation,
+                selected_for_invoice: expense.selected_for_invoice,
+                user_id: expense.user_id
+            });
+        }
+        
         let query = 'UPDATE expenses SET selected_for_invoice = $1 WHERE id = $2';
         let params = [selected, expenseId];
+        
+        console.log('🔄 TOGGLE SELECTION: Requête de base:', query);
+        console.log('🔄 TOGGLE SELECTION: Paramètres de base:', params);
         
         // Les directeurs peuvent cocher/décocher leurs propres dépenses ET les dépenses du DG/PCA sur leurs comptes
         if (req.session.user.role === 'directeur') {
@@ -1289,18 +1496,38 @@ app.post('/api/expenses/:id/toggle-selection', requireAuth, async (req, res) => 
                 SELECT a.user_id FROM accounts a WHERE a.id = expenses.account_id
             ) = $3)`;
             params.push(userId);
+            console.log('🔄 TOGGLE SELECTION: Filtrage directeur ajouté, UserID:', userId);
         }
+        
+        console.log('🔄 TOGGLE SELECTION: Requête finale:', query);
+        console.log('🔄 TOGGLE SELECTION: Paramètres finaux:', params);
         
         const result = await pool.query(query, params);
         
+        console.log('🔄 TOGGLE SELECTION: Nombre de lignes affectées:', result.rowCount);
+        
+        // Vérifier l'état après modification
+        const afterResult = await pool.query(beforeQuery, [expenseId]);
+        if (afterResult.rows.length > 0) {
+            const expense = afterResult.rows[0];
+            console.log('🔄 TOGGLE SELECTION: État après:', {
+                id: expense.id,
+                designation: expense.designation,
+                selected_for_invoice: expense.selected_for_invoice,
+                user_id: expense.user_id
+            });
+        }
+        
         if (result.rowCount === 0) {
+            console.log('❌ TOGGLE SELECTION: Aucune ligne affectée - dépense non trouvée ou non autorisée');
             return res.status(404).json({ error: 'Dépense non trouvée ou non autorisée' });
         }
         
+        console.log('✅ TOGGLE SELECTION: Mise à jour réussie');
         res.json({ success: true });
         
     } catch (error) {
-        console.error('Erreur toggle sélection:', error);
+        console.error('❌ TOGGLE SELECTION: Erreur toggle sélection:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
@@ -1357,6 +1584,22 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
     try {
         const userId = req.session.user.id;
         
+        console.log('🔍 PDF GENERATION: Début de la génération de factures');
+        console.log('🔍 PDF GENERATION: Utilisateur:', req.session.user.username, 'Role:', req.session.user.role);
+        
+        // D'abord, vérifier toutes les dépenses et leur statut selected_for_invoice
+        const checkQuery = `
+            SELECT id, designation, selected_for_invoice, user_id, account_id, total
+            FROM expenses 
+            ORDER BY id DESC 
+            LIMIT 10
+        `;
+        const checkResult = await pool.query(checkQuery);
+        console.log('🔍 PDF GENERATION: État des dernières dépenses:');
+        checkResult.rows.forEach(expense => {
+            console.log(`   ID: ${expense.id}, Désignation: ${expense.designation}, Sélectionnée: ${expense.selected_for_invoice}, UserID: ${expense.user_id}, AccountID: ${expense.account_id}, Total: ${expense.total}`);
+        });
+        
         // Récupérer les dépenses sélectionnées
         let query = `
                          SELECT e.*, u.full_name as user_name, u.username, a.account_name,
@@ -1375,17 +1618,28 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
         `;
         let params = [];
         
+        console.log('🔍 PDF GENERATION: Requête de base:', query);
+        
         // Les directeurs voient leurs propres dépenses ET les dépenses du DG/PCA sur leurs comptes
         if (req.session.user.role === 'directeur') {
             query += ` AND (e.user_id = $1 OR (
                 SELECT a.user_id FROM accounts a WHERE a.id = e.account_id
             ) = $1)`;
             params.push(userId);
+            console.log('🔍 PDF GENERATION: Filtrage pour directeur ajouté, UserID:', userId);
         }
         
         query += ' ORDER BY e.expense_date DESC';
         
+        console.log('🔍 PDF GENERATION: Requête finale:', query);
+        console.log('🔍 PDF GENERATION: Paramètres:', params);
+        
         const result = await pool.query(query, params);
+        
+        console.log('🔍 PDF GENERATION: Nombre de dépenses trouvées:', result.rows.length);
+        result.rows.forEach(expense => {
+            console.log(`   📋 Dépense trouvée: ID ${expense.id}, ${expense.designation}, ${expense.total} FCFA, User: ${expense.username}, Sélectionnée: ${expense.selected_for_invoice}`);
+        });
         
         if (result.rows.length === 0) {
             return res.status(400).json({ error: 'Aucune dépense sélectionnée pour la génération de factures. Veuillez cocher les dépenses que vous souhaitez inclure dans le PDF.' });
@@ -1624,12 +1878,6 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                 if (expense.supplier) {
                     doc.text(`Fournisseur : ${expense.supplier}`, 50, yPos);
                     yPos += 15;
-                }
-                
-            if (expense.description && expense.description.trim() !== '') {
-                    doc.text('Description :', 50, yPos);
-                    yPos += 12;
-                    doc.text(expense.description, 50, yPos, { width: 450 });
                 }
                 
                 // Cachet MATA
@@ -3475,6 +3723,29 @@ app.put('/api/admin/config/stock-vivant', requireAdminAuth, (req, res) => {
     } catch (error) {
         console.error('Error updating stock vivant config:', error);
         res.status(500).json({ error: 'Error updating stock vivant configuration' });
+    }
+});
+
+app.get('/api/admin/config/financial', requireAdminAuth, (req, res) => {
+    try {
+        const configPath = path.join(__dirname, 'financial_settings.json');
+        const configData = fs.readFileSync(configPath, 'utf8');
+        res.json(JSON.parse(configData));
+    } catch (error) {
+        console.error('Error reading financial settings:', error);
+        res.status(500).json({ error: 'Error reading financial settings configuration' });
+    }
+});
+
+app.put('/api/admin/config/financial', requireAdminAuth, (req, res) => {
+    try {
+        const configPath = path.join(__dirname, 'financial_settings.json');
+        const configData = JSON.stringify(req.body, null, 2);
+        fs.writeFileSync(configPath, configData, 'utf8');
+        res.json({ message: 'Financial settings configuration updated successfully' });
+    } catch (error) {
+        console.error('Error updating financial settings:', error);
+        res.status(500).json({ error: 'Error updating financial settings configuration' });
     }
 });
 

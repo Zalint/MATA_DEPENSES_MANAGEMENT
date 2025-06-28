@@ -783,6 +783,48 @@ async function updateStatsCards(startDate, endDate) {
         document.getElementById('total-credited-general').textContent = formatCurrency(stats.totalCreditedGeneral || 0);
         document.getElementById('total-depot-balance').textContent = formatCurrency(stats.totalDepotBalance || 0);
         document.getElementById('total-partner-balance').textContent = formatCurrency(stats.totalPartnerBalance || 0);
+        document.getElementById('pl-sans-stock-charges').textContent = formatCurrency(stats.plSansStockCharges || 0);
+        document.getElementById('pl-estim-charges').textContent = formatCurrency(stats.plEstimCharges || 0);
+        
+        // Afficher les détails du calcul PL dans la console du navigateur (F12)
+        if (stats.plCalculationDetails) {
+            console.group('🔍 DÉTAIL CALCUL PL (sans stock + estim. charges)');
+            console.log('💰 Cash Bictorys du mois:', formatCurrency(stats.plCalculationDetails.cashBictorys));
+            console.log('💳 Créances du mois:', formatCurrency(stats.plCalculationDetails.creances));
+            console.log('📦 Stock Point de Vente:', formatCurrency(stats.plCalculationDetails.stockPointVente));
+            console.log('💸 Cash Burn du mois:', formatCurrency(stats.plCalculationDetails.cashBurn));
+            console.log('📊 PL de base =', 
+                formatCurrency(stats.plCalculationDetails.cashBictorys), '+',
+                formatCurrency(stats.plCalculationDetails.creances), '+',
+                formatCurrency(stats.plCalculationDetails.stockPointVente), '-',
+                formatCurrency(stats.plCalculationDetails.cashBurn), '=',
+                formatCurrency(stats.plCalculationDetails.plBase)
+            );
+            console.log('⚙️ Estimation charges fixes mensuelle:', formatCurrency(stats.plCalculationDetails.chargesFixesEstimation));
+            if (stats.plCalculationDetails.prorata.totalJours > 0) {
+                console.log('📅 Date actuelle:', 
+                    `${stats.plCalculationDetails.date.jour}/${stats.plCalculationDetails.date.mois}/${stats.plCalculationDetails.date.annee}`
+                );
+                console.log('📅 Jours ouvrables écoulés (lundi-samedi):', stats.plCalculationDetails.prorata.joursEcoules);
+                console.log('📅 Total jours ouvrables dans le mois:', stats.plCalculationDetails.prorata.totalJours);
+                console.log('📅 Pourcentage du mois écoulé:', stats.plCalculationDetails.prorata.pourcentage + '%');
+                console.log('💸 Calcul prorata:', 
+                    formatCurrency(stats.plCalculationDetails.chargesFixesEstimation), '×',
+                    `${stats.plCalculationDetails.prorata.joursEcoules}/${stats.plCalculationDetails.prorata.totalJours}`, '=',
+                    formatCurrency(stats.plCalculationDetails.chargesProrata)
+                );
+            }
+            console.log('⏰ Charges prorata (jours ouvrables):', formatCurrency(stats.plCalculationDetails.chargesProrata));
+            console.log('🎯 PL FINAL =', 
+                formatCurrency(stats.plCalculationDetails.plBase), '-',
+                formatCurrency(stats.plCalculationDetails.chargesProrata), '=',
+                formatCurrency(stats.plCalculationDetails.plFinal)
+            );
+            if (stats.plCalculationDetails.error) {
+                console.error('❌ Erreur dans le calcul:', stats.plCalculationDetails.error);
+            }
+            console.groupEnd();
+        }
         
         // Mettre à jour les périodes
         const periodText = startDate && endDate ? 
@@ -803,6 +845,7 @@ async function updateStatsCards(startDate, endDate) {
         document.getElementById('total-credited-general').textContent = '0 FCFA';
         document.getElementById('total-depot-balance').textContent = '0 FCFA';
         document.getElementById('total-partner-balance').textContent = '0 FCFA';
+        document.getElementById('pl-sans-stock-charges').textContent = '0 FCFA';
     }
 }
 
@@ -957,6 +1000,9 @@ async function loadExpenses() {
 }
 
 function displayExpenses(expenses) {
+    console.log('🎯 DISPLAY EXPENSES: Début affichage des dépenses');
+    console.log('🎯 DISPLAY EXPENSES: Nombre de dépenses reçues:', expenses.length);
+    
     const tbody = document.getElementById('expenses-tbody');
     tbody.innerHTML = '';
     
@@ -966,6 +1012,11 @@ function displayExpenses(expenses) {
         tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center;">Aucune dépense trouvée</td></tr>`;
         return;
     }
+    
+    // Afficher l'état de sélection de chaque dépense
+    expenses.forEach(expense => {
+        console.log(`🎯 DISPLAY EXPENSES: Dépense ID ${expense.id} - ${expense.designation} - Sélectionnée: ${expense.selected_for_invoice}`);
+    });
     
     expenses.forEach(expense => {
         const row = document.createElement('tr');
@@ -1025,9 +1076,13 @@ function displayExpenses(expenses) {
             </button>`;
         }
         
+        // Checkbox cochée selon l'état selected_for_invoice
+        const isChecked = expense.selected_for_invoice ? 'checked' : '';
+        console.log(`🎯 DISPLAY EXPENSES: Checkbox pour dépense ${expense.id} sera ${isChecked ? 'COCHÉE' : 'NON COCHÉE'}`);
+        
         row.innerHTML = `
             <td>
-                <input type="checkbox" class="expense-checkbox" data-expense-id="${expense.id}">
+                <input type="checkbox" class="expense-checkbox" data-expense-id="${expense.id}" ${isChecked}>
             </td>
             <td>${formatDate(expense.expense_date)}</td>
             <td title="${expense.category_name}">${expense.category_name.length > 25 ? expense.category_name.substring(0, 25) + '...' : expense.category_name}</td>
@@ -1054,13 +1109,28 @@ function displayExpenses(expenses) {
             </td>
         `;
         
-        // Les lignes ne sont plus marquées comme sélectionnées automatiquement
+        // Marquer la ligne comme sélectionnée si la dépense est sélectionnée
+        if (expense.selected_for_invoice) {
+            row.classList.add('selected');
+        }
         
         tbody.appendChild(row);
     });
     
+    // Ajouter les event listeners pour les checkboxes
+    document.querySelectorAll('.expense-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            const expenseId = this.dataset.expenseId;
+            const isSelected = this.checked;
+            console.log(`📋 CHECKBOX CHANGE: Dépense ${expenseId} ${isSelected ? 'cochée' : 'décochée'}`);
+            toggleExpenseSelection(expenseId, isSelected);
+        });
+    });
+    
     // Mettre à jour le compteur de sélection
     updateSelectedCount();
+    
+    console.log('🎯 DISPLAY EXPENSES: Affichage terminé');
 }
 
 // Fonction pour télécharger un justificatif
@@ -6666,7 +6736,7 @@ async function loadMonthlyDashboard(monthYear) {
         await loadMonthlyCashBictorys(monthYear);
         await loadTransfersCard();
         
-        showNotification(`Données chargées pour ${getMonthName(monthYear)}`, 'success');
+        // showNotification(`Données chargées pour ${getMonthName(monthYear)}`, 'success');
     } catch (error) {
         console.error('Erreur lors du chargement mensuel:', error);
         showNotification('Erreur lors du chargement des données mensuelles', 'error');
@@ -9898,6 +9968,7 @@ async function initAdminConfig() {
     // Charger les configurations
     await loadCategoriesConfig();
     await loadStockVivantConfig();
+    await loadFinancialConfig();
     
     // Configurer les événements
     setupConfigEventListeners();
@@ -9905,6 +9976,7 @@ async function initAdminConfig() {
     // Configurer le nettoyage des highlights d'accolades
     setupBraceHighlightCleanup('categories');
     setupBraceHighlightCleanup('stock-vivant');
+    setupBraceHighlightCleanup('financial');
 }
 
 function setupConfigTabs() {
@@ -9926,6 +9998,8 @@ function setupConfigTabs() {
                 document.getElementById('categories-config').classList.add('active');
             } else if (configType === 'stock-vivant') {
                 document.getElementById('stock-vivant-config').classList.add('active');
+            } else if (configType === 'financial') {
+                document.getElementById('financial-config').classList.add('active');
             }
         });
     });
@@ -9983,12 +10057,39 @@ function setupConfigEventListeners() {
     document.getElementById('validate-stock-vivant-json').addEventListener('click', () => validateJson('stock-vivant'));
     document.getElementById('undo-stock-vivant').addEventListener('click', () => undoJsonChange('stock-vivant'));
     document.getElementById('redo-stock-vivant').addEventListener('click', () => redoJsonChange('stock-vivant'));
+
+    // Événements pour la configuration des paramètres financiers
+    document.getElementById('save-financial-config').addEventListener('click', saveFinancialConfig);
+    document.getElementById('reload-financial-config').addEventListener('click', loadFinancialConfig);
+    
+    const financialEditor = document.getElementById('financial-json-editor');
+    financialEditor.addEventListener('input', () => {
+        document.getElementById('save-financial-config').disabled = false;
+        updateLineNumbers('financial');
+        updateCursorPosition('financial');
+        validateJsonRealTime('financial');
+    });
+    
+    financialEditor.addEventListener('scroll', () => syncLineNumbersScroll('financial'));
+    financialEditor.addEventListener('keyup', () => updateCursorPosition('financial'));
+    financialEditor.addEventListener('click', (e) => {
+        updateCursorPosition('financial');
+        handleBraceClick(e, 'financial');
+    });
+
+    // Toolbar paramètres financiers
+    document.getElementById('format-financial-json').addEventListener('click', () => formatJson('financial'));
+    document.getElementById('minify-financial-json').addEventListener('click', () => minifyJson('financial'));
+    document.getElementById('validate-financial-json').addEventListener('click', () => validateJson('financial'));
+    document.getElementById('undo-financial').addEventListener('click', () => undoJsonChange('financial'));
+    document.getElementById('redo-financial').addEventListener('click', () => redoJsonChange('financial'));
 }
 
 // Variables globales pour l'historique des modifications
 const jsonHistory = {
     categories: { undo: [], redo: [] },
-    'stock-vivant': { undo: [], redo: [] }
+    'stock-vivant': { undo: [], redo: [] },
+    'financial': { undo: [], redo: [] }
 };
 
 async function loadCategoriesConfig() {
@@ -10136,6 +10237,79 @@ async function saveStockVivantConfig() {
         }
     } catch (error) {
         console.error('Erreur sauvegarde config stock vivant:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+async function loadFinancialConfig() {
+    try {
+        const response = await fetch('/api/admin/config/financial');
+        
+        if (response.ok) {
+            const config = await response.json();
+            const editor = document.getElementById('financial-json-editor');
+            editor.value = JSON.stringify(config, null, 2);
+            document.getElementById('save-financial-config').disabled = true;
+            
+            // Initialiser les fonctionnalités de l'éditeur
+            updateLineNumbers('financial');
+            updateCursorPosition('financial');
+            validateJsonRealTime('financial');
+            saveToHistory('financial', editor.value);
+            
+            showNotification('Paramètres financiers chargés', 'success');
+        } else {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors du chargement');
+        }
+    } catch (error) {
+        console.error('Erreur chargement paramètres financiers:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
+}
+
+async function saveFinancialConfig() {
+    try {
+        const editor = document.getElementById('financial-json-editor');
+        const configText = editor.value.trim();
+        
+        if (!configText) {
+            showNotification('La configuration ne peut pas être vide', 'error');
+            return;
+        }
+
+        // Valider le JSON
+        let config;
+        try {
+            config = JSON.parse(configText);
+        } catch (parseError) {
+            showNotification('JSON invalide: ' + parseError.message, 'error');
+            updateJsonStatus('financial', 'error', `Erreur: ${parseError.message}`);
+            return;
+        }
+        
+        // Sauvegarder dans l'historique avant la modification
+        saveToHistory('financial', configText);
+
+        // Sauvegarder
+        const response = await fetch('/api/admin/config/financial', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(config)
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            showNotification(result.message, 'success');
+            document.getElementById('save-financial-config').disabled = true;
+        } else {
+            const error = await response.json();
+            throw new Error(error.error || 'Erreur lors de la sauvegarde');
+        }
+    } catch (error) {
+        console.error('Erreur sauvegarde paramètres financiers:', error);
         showNotification(`Erreur: ${error.message}`, 'error');
     }
 }
