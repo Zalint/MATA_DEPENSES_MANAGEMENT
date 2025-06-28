@@ -4716,40 +4716,65 @@ function getDeliveryActionButtons(delivery) {
     const canUserValidate = canValidateDelivery(delivery);
     const userId = currentUser.id;
     const isFirstValidator = delivery.first_validated_by === userId;
+    const isAdmin = currentUser.role === 'admin';
+    
+    let actionButtons = '';
     
     switch (validationStatus) {
         case 'pending':
             // Livraison en attente de première validation
             if (canUserValidate) {
-                return `<button class="btn-validate" onclick="firstValidateDelivery(${delivery.id})">1ère Validation</button>`;
+                actionButtons = `<button class="btn-validate" onclick="firstValidateDelivery(${delivery.id})">1ère Validation</button>`;
+            } else {
+                actionButtons = '-';
             }
-            return '-';
+            break;
             
         case 'first_validated':
             // Livraison en attente de seconde validation
             if (canUserValidate && !isFirstValidator) {
-                return `
+                actionButtons = `
                     <button class="btn-validate" onclick="finalValidateDelivery(${delivery.id})">Approuver</button>
                     <button class="btn-reject" onclick="rejectDelivery(${delivery.id})">Rejeter</button>
                 `;
             } else if (isFirstValidator) {
-                return 'En attente 2ème validation';
+                actionButtons = 'En attente 2ème validation';
+            } else {
+                actionButtons = '-';
             }
-            return '-';
+            break;
             
         case 'fully_validated':
-            return 'Validée';
+            actionButtons = 'Validée';
+            break;
             
         case 'rejected':
             // Livraison rejetée, peut être modifiée et resoumise
             if (delivery.created_by === userId) {
-                return `<button class="btn-edit" onclick="editRejectedDelivery(${delivery.id})">Modifier</button>`;
+                actionButtons = `<button class="btn-edit" onclick="editRejectedDelivery(${delivery.id})">Modifier</button>`;
+            } else {
+                actionButtons = 'Rejetée';
             }
-            return 'Rejetée';
+            break;
             
         default:
-            return '-';
+            actionButtons = '-';
     }
+    
+    // Ajouter le bouton de suppression admin pour toutes les livraisons
+    if (isAdmin) {
+        const deleteButton = `<button class="btn-delete-admin" onclick="deletePartnerDelivery(${delivery.id})" style="margin-left: 5px;" title="Supprimer cette livraison (Admin)">
+            <i class="fas fa-trash"></i> Supprimer
+        </button>`;
+        
+        if (actionButtons === '-') {
+            actionButtons = deleteButton;
+        } else {
+            actionButtons += deleteButton;
+        }
+    }
+    
+    return actionButtons;
 }
 
 // Vérifier si l'utilisateur peut valider une livraison
@@ -4980,6 +5005,59 @@ async function rejectDelivery(deliveryId) {
 async function editRejectedDelivery(deliveryId) {
     // Pour l'instant, on informe l'utilisateur qu'il peut créer une nouvelle livraison
     showNotification('Votre livraison a été rejetée. Vous pouvez créer une nouvelle livraison avec les corrections demandées.', 'info');
+}
+
+// Supprimer une livraison partenaire (Admin uniquement)
+async function deletePartnerDelivery(deliveryId) {
+    // Vérifier que l'utilisateur est admin
+    if (currentUser.role !== 'admin') {
+        showNotification('Seul l\'admin peut supprimer des livraisons', 'error');
+        return;
+    }
+    
+    // Demander confirmation avec avertissement
+    const confirmMessage = `⚠️ ATTENTION - Suppression Admin ⚠️\n\n` +
+                          `Êtes-vous sûr de vouloir supprimer définitivement cette livraison ?\n\n` +
+                          `Cette action :\n` +
+                          `• Supprimera la livraison de façon permanente\n` +
+                          `• Remboursera automatiquement le montant au compte si elle était validée\n` +
+                          `• Ne peut pas être annulée\n\n` +
+                          `Confirmez-vous la suppression ?`;
+    
+    if (!confirm(confirmMessage)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/partner/deliveries/${deliveryId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showNotification(data.message, 'success');
+            
+            // Si la livraison était validée, afficher une notification spéciale
+            if (data.wasValidated) {
+                showNotification('💰 Le montant de cette livraison validée a été automatiquement remboursé au compte partenaire.', 'info');
+            }
+            
+            // Recharger les données
+            const accountId = document.getElementById('delivery-account-id').value;
+            const accountName = document.getElementById('partner-details-title').textContent.split(' - ')[1];
+            await showPartnerDetails(accountId, accountName);
+            await loadPartnerSummary();
+        } else {
+            showNotification(data.error, 'error');
+        }
+    } catch (error) {
+        console.error('Erreur suppression livraison admin:', error);
+        showNotification('Erreur lors de la suppression de la livraison', 'error');
+    }
 }
 
 // Valider une livraison partenaire (DG uniquement)

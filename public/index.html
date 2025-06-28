@@ -867,6 +867,13 @@
 
                     <!-- Détails d'un compte partenaire -->
                     <div id="partner-details" style="display: none;">
+                        <!-- Bouton de retour en haut -->
+                        <div class="partner-back-button">
+                            <button type="button" class="btn-back" onclick="closePartnerDetails()" title="Retour au résumé">
+                                <i class="fas fa-arrow-left"></i> Retour au résumé
+                            </button>
+                        </div>
+                        
                         <h3 id="partner-details-title">Détails du Compte</h3>
                         
                         <!-- Formulaire d'ajout de livraison -->
@@ -934,8 +941,6 @@
                                 </table>
                             </div>
                         </div>
-                        
-                        <button class="btn btn-secondary" onclick="closePartnerDetails()">Retour au Résumé</button>
                     </div>
 
                     <!-- Configuration des directeurs partenaires (Admin uniquement) -->
@@ -1460,6 +1465,126 @@
                                         Utilisez les outils ci-dessus pour formater et valider votre JSON.
                                     </small>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section Suivi Partenaires -->
+                <section id="partner-tracking-section" class="section">
+                    <h2><i class="fas fa-handshake"></i> Suivi Partenaires</h2>
+                    
+                    <!-- Résumé des comptes partenaires -->
+                    <div class="partner-summary">
+                        <div class="table-container">
+                            <table id="partner-summary-table">
+                                <thead>
+                                    <tr>
+                                        <th>Compte</th>
+                                        <th>Montant Total</th>
+                                        <th>Livré</th>
+                                        <th>Restant</th>
+                                        <th>Articles</th>
+                                        <th>Progression</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="partner-summary-tbody">
+                                    <!-- Les données seront chargées ici -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Configuration des directeurs (Admin seulement) -->
+                    <div id="partner-config" style="display: none;">
+                        <h3>Configuration des Directeurs Partenaires</h3>
+                        <div id="partner-accounts-config">
+                            <!-- Configuration sera chargée ici -->
+                        </div>
+                    </div>
+                    
+                    <!-- Section des détails d'un compte partenaire -->
+                    <div id="partner-details" style="display: none;">
+                        <!-- Bouton de retour en haut -->
+                        <div class="partner-back-button">
+                            <button type="button" class="btn-back" onclick="closePartnerDetails()" title="Retour au résumé">
+                                <i class="fas fa-arrow-left"></i> Retour au résumé
+                            </button>
+                        </div>
+                        
+                        <h3 id="partner-details-title">Détails - Compte Partenaire</h3>
+                        
+                        <!-- Avertissement d'autorisation -->
+                        <div id="delivery-authorization-warning" class="warning-message" style="display: none;">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span id="delivery-warning-text">Vous n'êtes pas autorisé à ajouter des livraisons à ce compte.</span>
+                        </div>
+                        
+                        <!-- Formulaire d'ajout de livraison -->
+                        <div class="account-form">
+                            <h4><i class="fas fa-truck"></i> Ajouter une Livraison</h4>
+                            <form id="addDeliveryForm">
+                                <input type="hidden" id="delivery-account-id">
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="delivery-date">Date de Livraison</label>
+                                        <input type="date" id="delivery-date" name="delivery_date" required>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label for="delivery-article-count">Nombre d'Articles</label>
+                                        <input type="number" id="delivery-article-count" name="article_count" min="1" step="1" required placeholder="Ex: 50">
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="delivery-unit-price">Prix Unitaire (FCFA)</label>
+                                        <input type="number" id="delivery-unit-price" name="unit_price" min="0" step="1" placeholder="Ex: 2000">
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label for="delivery-amount">Montant Total (FCFA)</label>
+                                        <input type="number" id="delivery-amount" name="amount" min="1" step="1" required placeholder="Montant total">
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="delivery-description">Description</label>
+                                    <textarea id="delivery-description" name="description" placeholder="Description des articles livrés..." rows="3"></textarea>
+                                </div>
+                                
+                                <div class="form-actions">
+                                    <button type="submit" id="add-delivery-btn" class="btn btn-success">
+                                        <i class="fas fa-plus"></i> Ajouter la Livraison
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                        
+                        <!-- Liste des livraisons -->
+                        <div class="accounts-list">
+                            <h4><i class="fas fa-list"></i> Historique des Livraisons</h4>
+                            <div class="table-container">
+                                <table id="deliveries-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Articles</th>
+                                            <th>Prix Unit. × Qté</th>
+                                            <th>Montant</th>
+                                            <th>Description</th>
+                                            <th>Créé par</th>
+                                            <th>Statut</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="deliveries-tbody">
+                                        <!-- Les livraisons seront chargées ici -->
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>

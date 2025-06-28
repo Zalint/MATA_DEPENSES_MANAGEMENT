@@ -2863,6 +2863,59 @@ app.post('/api/partner/deliveries/:deliveryId/validate', requireAuth, async (req
     }
 });
 
+// Route pour supprimer une livraison partenaire (Admin uniquement)
+app.delete('/api/partner/deliveries/:deliveryId', requireAuth, async (req, res) => {
+    try {
+        const { deliveryId } = req.params;
+        const userRole = req.session.user.role;
+        
+        // Vérifier que l'utilisateur est admin
+        if (userRole !== 'admin') {
+            return res.status(403).json({ error: 'Seul l\'admin peut supprimer des livraisons' });
+        }
+        
+        // Récupérer les informations de la livraison
+        const deliveryResult = await pool.query(
+            'SELECT * FROM partner_deliveries WHERE id = $1',
+            [deliveryId]
+        );
+        
+        if (deliveryResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Livraison non trouvée' });
+        }
+        
+        const delivery = deliveryResult.rows[0];
+        
+        await pool.query('BEGIN');
+        
+        // Si la livraison était validée, rembourser le montant au compte
+        if (delivery.validation_status === 'fully_validated' && delivery.is_validated) {
+            await pool.query(
+                'UPDATE accounts SET current_balance = current_balance + $1, total_spent = total_spent - $1 WHERE id = $2',
+                [delivery.amount, delivery.account_id]
+            );
+            
+            console.log(`Remboursement de ${delivery.amount} FCFA au compte ${delivery.account_id} suite à suppression admin de la livraison ${deliveryId}`);
+        }
+        
+        // Supprimer la livraison
+        await pool.query('DELETE FROM partner_deliveries WHERE id = $1', [deliveryId]);
+        
+        await pool.query('COMMIT');
+        
+        res.json({ 
+            message: 'Livraison supprimée avec succès' + 
+                    (delivery.validation_status === 'fully_validated' ? '. Montant remboursé au compte.' : '.'),
+            wasValidated: delivery.validation_status === 'fully_validated'
+        });
+        
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('Erreur suppression livraison admin:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
 // Route pour obtenir les comptes partenaires
 app.get('/api/partner/accounts', requireAuth, async (req, res) => {
     try {
