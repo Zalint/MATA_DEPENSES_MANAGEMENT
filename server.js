@@ -926,17 +926,24 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         
         try {
             // Récupérer la vraie valeur Cash Bictorys du mois
+            let monthYear;
             if (start_date && end_date) {
                 // Utiliser les dates de filtre pour le mois
-                const monthYear = start_date.substring(0, 7); // Format YYYY-MM
-                const cashBictorysQuery = `
-                    SELECT COALESCE(SUM(amount), 0) as total_value
-                    FROM cash_bictorys 
-                    WHERE month_year = $1
-                `;
-                const cashBictorysResult = await pool.query(cashBictorysQuery, [monthYear]);
-                cashBictorysValue = parseInt(cashBictorysResult.rows[0].total_value) || 0;
+                monthYear = start_date.substring(0, 7); // Format YYYY-MM
+            } else {
+                // Si pas de dates, utiliser le mois en cours
+                const now = new Date();
+                monthYear = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
             }
+            
+            const cashBictorysQuery = `
+                SELECT COALESCE(SUM(amount), 0) as total_value
+                FROM cash_bictorys 
+                WHERE month_year = $1
+            `;
+            const cashBictorysResult = await pool.query(cashBictorysQuery, [monthYear]);
+            cashBictorysValue = parseInt(cashBictorysResult.rows[0].total_value) || 0;
+            console.log(`💰 DEBUG: Cash Bictorys pour ${monthYear}: ${cashBictorysValue} FCFA`);
             
             // Récupérer Créances du Mois - Utilisation d'une valeur fixe basée sur le dashboard
             // Créances du Mois = 25 000 FCFA (comme affiché dans le dashboard)
@@ -5863,7 +5870,7 @@ app.get('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
             return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
         }
 
-        // Générer toutes les dates du mois
+        // Générer toutes les dates du mois pour l'affichage frontend
         const [year, month] = monthYear.split('-').map(Number);
         const daysInMonth = new Date(year, month, 0).getDate();
         const allDates = [];
@@ -5871,19 +5878,19 @@ app.get('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
         for (let day = 1; day <= daysInMonth; day++) {
             allDates.push({
                 date: `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
-                amount: 0 // Valeur par défaut
+                amount: 0 // Valeur par défaut pour l'affichage uniquement
             });
         }
 
-        // Récupérer les données existantes
+        // Récupérer SEULEMENT les données existantes avec montant > 0
         const result = await pool.query(`
             SELECT date, amount
             FROM cash_bictorys 
-            WHERE month_year = $1
+            WHERE month_year = $1 AND amount > 0
             ORDER BY date
         `, [monthYear]);
 
-        // Fusionner les données existantes avec les dates par défaut
+        // Fusionner les données existantes avec les dates par défaut (pour l'affichage)
         const existingData = result.rows.reduce((acc, row) => {
             const dateStr = row.date.toISOString().split('T')[0];
             acc[dateStr] = parseInt(row.amount) || 0;
@@ -5953,16 +5960,25 @@ app.put('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
 
                 const amountValue = parseInt(amount) || 0;
 
-                // Insérer ou mettre à jour
-                await pool.query(`
-                    INSERT INTO cash_bictorys (date, amount, month_year, created_by, updated_by)
-                    VALUES ($1, $2, $3, $4, $4)
-                    ON CONFLICT (date) 
-                    DO UPDATE SET 
-                        amount = $2,
-                        updated_by = $4,
-                        updated_at = CURRENT_TIMESTAMP
-                `, [date, amountValue, monthYear, userId]);
+                // Ne créer une entrée que si le montant est > 0
+                if (amountValue > 0) {
+                    // Insérer ou mettre à jour
+                    await pool.query(`
+                        INSERT INTO cash_bictorys (date, amount, month_year, created_by, updated_by)
+                        VALUES ($1, $2, $3, $4, $4)
+                        ON CONFLICT (date) 
+                        DO UPDATE SET 
+                            amount = $2,
+                            updated_by = $4,
+                            updated_at = CURRENT_TIMESTAMP
+                    `, [date, amountValue, monthYear, userId]);
+                } else {
+                    // Si le montant est 0, supprimer l'entrée existante (si elle existe)
+                    await pool.query(`
+                        DELETE FROM cash_bictorys 
+                        WHERE date = $1
+                    `, [date]);
+                }
             }
 
             await pool.query('COMMIT');
@@ -6042,6 +6058,25 @@ app.get('/api/dashboard/cash-bictorys-latest', requireAuth, async (req, res) => 
 
     } catch (error) {
         console.error('Erreur récupération dernière valeur Cash Bictorys:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour nettoyer les entrées Cash Bictorys avec montant = 0 (Admin seulement)
+app.delete('/api/admin/cash-bictorys/cleanup-zeros', requireAdminAuth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            DELETE FROM cash_bictorys 
+            WHERE amount = 0 OR amount IS NULL
+        `);
+
+        res.json({
+            message: `${result.rowCount} entrées avec montant nul supprimées`,
+            deleted_count: result.rowCount
+        });
+
+    } catch (error) {
+        console.error('Erreur nettoyage Cash Bictorys:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
