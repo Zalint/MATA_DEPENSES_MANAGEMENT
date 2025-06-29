@@ -103,7 +103,7 @@ jspm_packages/
 
 # Gatsby files
 .cache/
-public
+# public - Commented out for Express.js static files
 
 # Storybook build outputs
 .out

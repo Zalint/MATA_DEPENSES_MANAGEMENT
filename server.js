@@ -937,12 +937,19 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             }
             
             const cashBictorysQuery = `
-                SELECT COALESCE(SUM(amount), 0) as total_value
-                FROM cash_bictorys 
-                WHERE month_year = $1
+                SELECT amount
+                FROM cash_bictorys
+                WHERE date = (
+                    SELECT MAX(date)
+                    FROM cash_bictorys
+                    WHERE amount != 0 
+                    AND month_year = $1
+                )
+                AND amount != 0
+                AND month_year = $1
             `;
             const cashBictorysResult = await pool.query(cashBictorysQuery, [monthYear]);
-            cashBictorysValue = parseInt(cashBictorysResult.rows[0].total_value) || 0;
+            cashBictorysValue = cashBictorysResult.rows.length > 0 ? parseInt(cashBictorysResult.rows[0].amount) || 0 : 0;
             console.log(`💰 DEBUG: Cash Bictorys pour ${monthYear}: ${cashBictorysValue} FCFA`);
             
             // Récupérer Créances du Mois - Utilisation d'une valeur fixe basée sur le dashboard
@@ -6009,12 +6016,19 @@ app.get('/api/cash-bictorys/:monthYear/total', requireCashBictorysAuth, async (r
         }
 
         const result = await pool.query(`
-            SELECT COALESCE(SUM(amount), 0) as total
-            FROM cash_bictorys 
-            WHERE month_year = $1
+            SELECT amount
+            FROM cash_bictorys
+            WHERE date = (
+                SELECT MAX(date)
+                FROM cash_bictorys
+                WHERE amount != 0 
+                AND month_year = $1
+            )
+            AND amount != 0
+            AND month_year = $1
         `, [monthYear]);
 
-        const total = parseInt(result.rows[0].total) || 0;
+        const total = result.rows.length > 0 ? parseInt(result.rows[0].amount) || 0 : 0;
 
         res.json({
             monthYear,
