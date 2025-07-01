@@ -145,7 +145,6 @@ async function showApp() {
         document.getElementById('admin-config-menu').style.display = 'block';
         document.getElementById('stock-menu').style.display = 'block';
         document.getElementById('stock-vivant-menu').style.display = 'block';
-        document.getElementById('stock-vivant-permissions-menu').style.display = 'block';
         document.getElementById('user-column').style.display = 'table-cell';
     }
     
@@ -226,16 +225,7 @@ async function showSection(sectionName) {
                 showNotification('Erreur lors du chargement du Stock Vivant', 'error');
             }
             break;
-        case 'stock-vivant-permissions':
-            console.log('🔄 CLIENT: showSection - stock-vivant-permissions appelé');
-            try {
-                await initStockVivantPermissions();
-                console.log('✅ CLIENT: showSection - stock-vivant-permissions terminé avec succès');
-            } catch (error) {
-                console.error('❌ CLIENT: Erreur dans showSection - stock-vivant-permissions:', error);
-                showNotification('Erreur lors du chargement des Permissions Stock Vivant', 'error');
-            }
-            break;
+
         case 'admin-config':
             console.log('🔄 CLIENT: showSection - admin-config appelé');
             try {
@@ -6761,7 +6751,7 @@ function updateMonthDisplay(monthYear) {
 // Charger le dashboard pour un mois spécifique
 async function loadMonthlyDashboard(monthYear) {
     try {
-        showNotification('Chargement des données du mois...', 'info');
+        //showNotification('Chargement des données du mois...', 'info');
         
         // Mettre à jour les filtres de date avec le mois sélectionné
         updateDateFilters(monthYear);
@@ -7901,7 +7891,9 @@ async function grantStockVivantPermission() {
         }
         
         showStockVivantNotification('Permission accordée avec succès', 'success');
-        loadStockVivantDirectors();
+        // Recharger les deux listes après ajout
+        await loadStockVivantDirectors();
+        await loadStockVivantPermissions();
         
     } catch (error) {
         console.error('Erreur octroi permission:', error);
@@ -7925,7 +7917,9 @@ async function revokeStockVivantPermission(userId) {
         }
         
         showStockVivantNotification('Permission révoquée avec succès', 'success');
-        loadStockVivantDirectors();
+        // Recharger les deux listes après suppression
+        await loadStockVivantDirectors();
+        await loadStockVivantPermissions();
         
     } catch (error) {
         console.error('Erreur révocation permission:', error);
@@ -9305,7 +9299,7 @@ async function displaySimpleStockVivantTable() {
         
         // Show data info
         if (existingData.length > 0) {
-            showStockVivantNotification(`Données chargées pour ${formatDate(selectedDate)} (${existingData.length} entrées)`, 'success');
+            //showStockVivantNotification(`Données chargées pour ${formatDate(selectedDate)} (${existingData.length} entrées)`, 'success');
         } else if (selectedDate) {
             showStockVivantNotification(`Nouveau stock pour ${formatDate(selectedDate)}`, 'info');
         } else {
@@ -10013,6 +10007,9 @@ async function initAdminConfig() {
     await loadStockVivantConfig();
     await loadFinancialConfig();
     
+    // Charger les permissions stock vivant
+    await loadStockVivantDirectors();
+    
     // Configurer les événements
     setupConfigEventListeners();
     
@@ -10043,6 +10040,10 @@ function setupConfigTabs() {
                 document.getElementById('stock-vivant-config').classList.add('active');
             } else if (configType === 'financial') {
                 document.getElementById('financial-config').classList.add('active');
+            } else if (configType === 'stock-permissions') {
+                document.getElementById('stock-permissions-config').classList.add('active');
+                // Initialiser les permissions lorsque l'onglet est activé
+                initStockVivantPermissions();
             }
         });
     });
@@ -10151,7 +10152,7 @@ async function loadCategoriesConfig() {
             validateJsonRealTime('categories');
             saveToHistory('categories', editor.value);
             
-            showNotification('Configuration des catégories chargée', 'success');
+           // showNotification('Configuration des catégories chargée', 'success');
         } else {
             const error = await response.json();
             throw new Error(error.error || 'Erreur lors du chargement');
@@ -10227,7 +10228,7 @@ async function loadStockVivantConfig() {
             validateJsonRealTime('stock-vivant');
             saveToHistory('stock-vivant', editor.value);
             
-            showNotification('Configuration du stock vivant chargée', 'success');
+            //showNotification('Configuration du stock vivant chargée', 'success');
         } else {
             const error = await response.json();
             throw new Error(error.error || 'Erreur lors du chargement');
@@ -10300,7 +10301,7 @@ async function loadFinancialConfig() {
             validateJsonRealTime('financial');
             saveToHistory('financial', editor.value);
             
-            showNotification('Paramètres financiers chargés', 'success');
+            //showNotification('Paramètres financiers chargés', 'success');
         } else {
             const error = await response.json();
             throw new Error(error.error || 'Erreur lors du chargement');

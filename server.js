@@ -5031,7 +5031,7 @@ app.get('/api/stock-vivant/permissions', requireSuperAdmin, async (req, res) => 
             FROM stock_vivant_permissions svp
             JOIN users u ON svp.user_id = u.id
             LEFT JOIN users ug ON svp.granted_by = ug.id
-            WHERE u.role = 'directeur'
+            WHERE u.role = 'directeur' AND svp.is_active = true
             ORDER BY u.full_name
         `);
         

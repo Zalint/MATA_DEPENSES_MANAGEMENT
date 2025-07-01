@@ -126,11 +126,7 @@
                             <i class="fas fa-seedling"></i> Stock Vivant
                         </a>
                     </li>
-                    <li id="stock-vivant-permissions-menu" style="display: none;">
-                        <a href="#" data-section="stock-vivant-permissions" class="nav-link">
-                            <i class="fas fa-seedling"></i> Permissions Stock Vivant
-                        </a>
-                    </li>
+
                 </ul>
             </aside>
 
@@ -516,37 +512,7 @@
                     </div>
                 </section>
 
-                <!-- Stock Vivant Permissions (Admin only) -->
-                <section id="stock-vivant-permissions-section" class="section">
-                    <h2><i class="fas fa-seedling"></i> Permissions Stock Vivant</h2>
-                    <p class="section-description">Gérer les permissions d'accès au stock vivant pour les directeurs</p>
-                    
-                    <div class="permissions-management">
-                        <div class="grant-permission-card">
-                            <h3><i class="fas fa-user-plus"></i> Accorder une Permission</h3>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label for="director-select">Sélectionner un directeur</label>
-                                    <select id="director-select" class="form-select">
-                                        <option value="">Chargement des directeurs...</option>
-                                    </select>
-                                </div>
-                                <div class="form-group">
-                                    <button id="grant-permission-btn" type="button" class="btn btn-success">
-                                        <i class="fas fa-check"></i> Accorder l'accès
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="current-permissions-card">
-                            <h3><i class="fas fa-users"></i> Permissions Actuelles</h3>
-                            <div id="permissions-list" class="permissions-list">
-                                <p>Chargement des permissions...</p>
-                            </div>
-                        </div>
-                    </div>
-                </section>
+
 
                 <!-- Ajouter une dépense -->
                 <section id="add-expense-section" class="section">
@@ -1730,7 +1696,10 @@
                                 <i class="fas fa-seedling"></i> Configuration Stock Vivant
                             </button>
                             <button type="button" class="tab-button" data-config="financial">
-                                <i></i> Paramètres Financiers
+                                 Paramètres Financiers
+                            </button>
+                            <button type="button" class="tab-button" data-config="stock-permissions">
+                                <i class="fas fa-user-check"></i> Permissions Stock Vivant
                             </button>
                         </div>
 
@@ -1865,7 +1834,7 @@
                         <!-- Configuration des Paramètres Financiers -->
                         <div id="financial-config" class="config-panel">
                             <div class="config-header">
-                                <h3><i></i> Paramètres Financiers</h3>
+                                <h3> Paramètres Financiers</h3>
                                 <div class="config-actions">
                                     <button type="button" id="save-financial-config" class="btn btn-success" disabled>
                                         <i class="fas fa-save"></i> Sauvegarder
@@ -1894,34 +1863,71 @@
                                             </button>
                                         </div>
                                         <div class="toolbar-group">
-                                            <button type="button" class="btn btn-sm btn-tool" id="undo-financial" title="Annuler">
-                                                <i class="fas fa-undo"></i>
+                                            <button type="button" class="btn btn-sm btn-tool" id="undo-financial" title="Annuler (Ctrl+Z)">
+                                                <i class="fas fa-undo"></i> Annuler
                                             </button>
-                                            <button type="button" class="btn btn-sm btn-tool" id="redo-financial" title="Refaire">
-                                                <i class="fas fa-redo"></i>
+                                            <button type="button" class="btn btn-sm btn-tool" id="redo-financial" title="Refaire (Ctrl+Y)">
+                                                <i class="fas fa-redo"></i> Refaire
                                             </button>
                                         </div>
-                                        <div class="toolbar-info">
-                                            <span class="line-info" id="financial-line-info">Ligne 1, Col 1</span>
+                                        <div class="toolbar-group">
+                                            <span class="validation-status" id="financial-validation-status">
+                                                <i class="fas fa-circle" style="color: #6b7280;"></i> Prêt
+                                            </span>
+                                            <span class="cursor-position" id="financial-cursor-position">Ligne 1, Col 1</span>
+                                            <span class="json-stats" id="financial-json-stats">0 objets, 0 tableaux</span>
                                         </div>
-                                    </div>
-
-                                    <div class="json-editor-container">
-                                        <div class="json-line-numbers" id="financial-line-numbers">1</div>
-                                        <textarea id="financial-json-editor" class="json-editor" rows="25" placeholder="Chargement de la configuration..."></textarea>
                                     </div>
                                     
-                                    <div class="json-status" id="financial-json-status">
-                                        <span class="status-indicator status-valid">
-                                            <i class="fas fa-check-circle"></i> JSON valide
-                                        </span>
+                                    <div class="json-editor-container">
+                                        <div class="line-numbers" id="financial-line-numbers">1</div>
+                                        <textarea 
+                                            id="financial-json-editor" 
+                                            class="json-editor" 
+                                            placeholder="Chargement de la configuration..."
+                                            spellcheck="false"
+                                        ></textarea>
                                     </div>
                                     
                                     <small class="form-help">
                                         <i class="fas fa-info-circle"></i> 
-                                        Cette configuration contient les paramètres financiers comme l'estimation des charges fixes.
+                                        Cette configuration définit les paramètres financiers du système.
                                         Utilisez les outils ci-dessus pour formater et valider votre JSON.
                                     </small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Permissions Stock Vivant -->
+                        <div id="stock-permissions-config" class="config-panel">
+                            <div class="config-header">
+                                <h3><i class="fas fa-user-check"></i> Permissions Stock Vivant</h3>
+                                <p class="section-description">Gérer les permissions d'accès au stock vivant pour les directeurs</p>
+                            </div>
+                            
+                            <div class="permissions-management">
+                                <div class="grant-permission-card">
+                                    <h4><i class="fas fa-user-plus"></i> Accorder une Permission</h4>
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="director-select">Sélectionner un directeur</label>
+                                            <select id="director-select" class="form-select">
+                                                <option value="">Chargement des directeurs...</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group">
+                                            <button id="grant-permission-btn" type="button" class="btn btn-success">
+                                                <i class="fas fa-check"></i> Accorder l'accès
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="current-permissions-card">
+                                    <h4><i class="fas fa-users"></i> Permissions Actuelles</h4>
+                                    <div id="permissions-list" class="permissions-list">
+                                        <p>Chargement des permissions...</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
