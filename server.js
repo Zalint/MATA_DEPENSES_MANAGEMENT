@@ -975,8 +975,62 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             plSansStockCharges = 0;
         }
         
-        // 8. Calcul de la nouvelle carte PL avec estimation des charges fixes
-        // PL (sans stock + estim. charges) = Cash Bictorys + Créances + Stock PV - Cash Burn - Estim charge prorata
+        // 8. Récupérer l'écart de stock vivant mensuel
+        let stockVivantVariation = 0;
+        try {
+            // Utiliser la même logique que dans la route /api/stock-vivant/monthly-variation
+            const currentDate = new Date();
+            const currentYear = currentDate.getFullYear();
+            const currentMonth = currentDate.getMonth() + 1;
+            
+            let previousYear = currentYear;
+            let previousMonth = currentMonth - 1;
+            if (previousMonth === 0) {
+                previousMonth = 12;
+                previousYear = currentYear - 1;
+            }
+            
+            // Stock du mois actuel
+            const currentStockQuery = `
+                SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                FROM stock_vivant
+                WHERE date_stock = (
+                    SELECT MAX(date_stock) 
+                    FROM stock_vivant 
+                    WHERE date_stock >= $1::date 
+                    AND date_stock < ($1::date + INTERVAL '1 month')
+                )
+            `;
+            const currentStockResult = await pool.query(currentStockQuery, [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`]);
+            
+            // Stock du mois précédent
+            const previousStockQuery = `
+                SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                FROM stock_vivant
+                WHERE date_stock = (
+                    SELECT MAX(date_stock) 
+                    FROM stock_vivant 
+                    WHERE date_stock >= $1::date 
+                    AND date_stock < ($1::date + INTERVAL '1 month')
+                )
+            `;
+            const previousStockResult = await pool.query(previousStockQuery, [`${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`]);
+            
+            const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
+            const previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
+            
+            const referenceStock = previousStock > 0 ? previousStock : currentStock;
+            stockVivantVariation = currentStock - referenceStock;
+            
+            console.log(`📊 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (${currentStock} - ${referenceStock})`);
+            
+        } catch (error) {
+            console.error('Erreur calcul écart stock vivant pour PL:', error);
+            stockVivantVariation = 0;
+        }
+
+        // 9. Calcul de la nouvelle carte PL avec estimation des charges fixes
+        // PL (sans stock + estim. charges) = Cash Bictorys + Créances + Stock PV + Écart Stock Vivant - Cash Burn - Estim charge prorata
         let plEstimCharges = 0;
         let chargesFixesEstimation = 0;
         let chargesProrata = 0;
@@ -1042,8 +1096,8 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 console.log(`💸 Calcul prorata: ${chargesFixesEstimation} × ${joursOuvrablesEcoules}/${totalJoursOuvrables} = ${Math.round(chargesProrata)} FCFA`);
             }
             
-            // Calculer le PL avec estimation des charges
-            plEstimCharges = plSansStockCharges - chargesProrata;
+            // Calculer le PL avec estimation des charges ET écart stock vivant
+            plEstimCharges = plSansStockCharges + stockVivantVariation - chargesProrata;
             
             console.log('🔍=== DÉTAIL CALCUL PL (sans stock + estim. charges) ===');
             console.log(`💰 Cash Bictorys du mois: ${cashBictorysValue} FCFA`);
@@ -1051,9 +1105,10 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             console.log(`📦 Stock Point de Vente: ${stockPointVenteValue} FCFA`);
             console.log(`💸 Cash Burn du mois: ${totalSpent} FCFA`);
             console.log(`📊 PL de base = ${cashBictorysValue} + ${creancesMoisValue} + ${stockPointVenteValue} - ${totalSpent} = ${plSansStockCharges} FCFA`);
+            console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA`);
             console.log(`⚙️ Estimation charges fixes mensuelle: ${chargesFixesEstimation} FCFA`);
             console.log(`⏰ Charges prorata (jours ouvrables): ${Math.round(chargesProrata)} FCFA`);
-            console.log(`🎯 PL FINAL = ${plSansStockCharges} - ${Math.round(chargesProrata)} = ${Math.round(plEstimCharges)} FCFA`);
+            console.log(`🎯 PL FINAL = ${plSansStockCharges} + ${stockVivantVariation} - ${Math.round(chargesProrata)} = ${Math.round(plEstimCharges)} FCFA`);
             console.log('🔍===============================================');
             
             // Préparer les détails pour le frontend
@@ -1061,6 +1116,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 cashBictorys: cashBictorysValue,
                 creances: creancesMoisValue,
                 stockPointVente: stockPointVenteValue,
+                stockVivantVariation: stockVivantVariation,
                 cashBurn: totalSpent,
                 plBase: plSansStockCharges,
                 chargesFixesEstimation: chargesFixesEstimation,
@@ -1087,6 +1143,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 cashBictorys: cashBictorysValue,
                 creances: creancesMoisValue,
                 stockPointVente: stockPointVenteValue,
+                stockVivantVariation: stockVivantVariation,
                 cashBurn: totalSpent,
                 plBase: plSansStockCharges,
                 chargesFixesEstimation: 0,
@@ -5162,6 +5219,83 @@ app.get('/api/stock-vivant/total', requireAuth, async (req, res) => {
     } catch (error) {
         console.error('Erreur récupération total stock vivant:', error);
         res.status(500).json({ error: 'Erreur lors de la récupération du total stock vivant' });
+    }
+});
+
+// Route pour récupérer l'écart de stock vivant mensuel
+app.get('/api/stock-vivant/monthly-variation', requireAuth, async (req, res) => {
+    try {
+        // Obtenir la date actuelle et le mois précédent
+        const currentDate = new Date();
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth() + 1; // JavaScript months are 0-indexed
+        
+        // Calculer le mois précédent
+        let previousYear = currentYear;
+        let previousMonth = currentMonth - 1;
+        if (previousMonth === 0) {
+            previousMonth = 12;
+            previousYear = currentYear - 1;
+        }
+        
+        // Récupérer le dernier stock du mois actuel
+        const currentStockQuery = `
+            SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+            FROM stock_vivant
+            WHERE date_stock = (
+                SELECT MAX(date_stock) 
+                FROM stock_vivant 
+                WHERE date_stock >= $1::date 
+                AND date_stock < ($1::date + INTERVAL '1 month')
+            )
+        `;
+        const currentStockResult = await pool.query(currentStockQuery, [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`]);
+        
+        // Récupérer le dernier stock du mois précédent
+        const previousStockQuery = `
+            SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+            FROM stock_vivant
+            WHERE date_stock = (
+                SELECT MAX(date_stock) 
+                FROM stock_vivant 
+                WHERE date_stock >= $1::date 
+                AND date_stock < ($1::date + INTERVAL '1 month')
+            )
+        `;
+        const previousStockResult = await pool.query(previousStockQuery, [`${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`]);
+        
+        const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
+        const previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
+        
+        // Si pas de données pour le mois précédent, utiliser le stock du mois actuel
+        const referenceStock = previousStock > 0 ? previousStock : currentStock;
+        const variation = currentStock - referenceStock;
+        
+        // Générer l'information de période
+        const months = [
+            'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+            'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+        ];
+        
+        let periodInfo;
+        if (previousStock > 0) {
+            periodInfo = `${months[currentMonth - 1]} vs ${months[previousMonth - 1]}`;
+        } else {
+            periodInfo = `${months[currentMonth - 1]} (pas de données mois précédent)`;
+        }
+        
+        res.json({
+            variation,
+            currentStock,
+            previousStock: referenceStock,
+            periodInfo,
+            currentMonth: `${currentYear}-${currentMonth.toString().padStart(2, '0')}`,
+            previousMonth: `${previousYear}-${previousMonth.toString().padStart(2, '0')}`
+        });
+        
+    } catch (error) {
+        console.error('Erreur calcul écart stock vivant mensuel:', error);
+        res.status(500).json({ error: 'Erreur lors du calcul de l\'écart mensuel' });
     }
 });
 

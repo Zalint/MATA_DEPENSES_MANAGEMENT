@@ -706,6 +706,7 @@ async function loadDashboard() {
         await loadDashboardData();
         await loadStockSummary();
         await loadStockVivantTotal(); // Ajouter le chargement du total stock vivant
+        await loadStockVivantVariation(); // Ajouter le chargement de l'écart mensuel
         await loadTotalCreances(); // Charger le total des créances
         await loadCreancesMois(); // Charger les créances du mois
         await loadTransfersCard(); // Ajouter le chargement des transferts
@@ -790,6 +791,7 @@ async function updateStatsCards(startDate, endDate) {
                 formatCurrency(stats.plCalculationDetails.cashBurn), '=',
                 formatCurrency(stats.plCalculationDetails.plBase)
             );
+            console.log('🌱 Écart Stock Vivant Mensuel:', formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0));
             console.log('⚙️ Estimation charges fixes mensuelle:', formatCurrency(stats.plCalculationDetails.chargesFixesEstimation));
             if (stats.plCalculationDetails.prorata.totalJours > 0) {
                 console.log('📅 Date actuelle:', 
@@ -806,7 +808,8 @@ async function updateStatsCards(startDate, endDate) {
             }
             console.log('⏰ Charges prorata (jours ouvrables):', formatCurrency(stats.plCalculationDetails.chargesProrata));
             console.log('🎯 PL FINAL =', 
-                formatCurrency(stats.plCalculationDetails.plBase), '-',
+                formatCurrency(stats.plCalculationDetails.plBase), '+',
+                formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0), '-',
                 formatCurrency(stats.plCalculationDetails.chargesProrata), '=',
                 formatCurrency(stats.plCalculationDetails.plFinal)
             );
@@ -6635,6 +6638,7 @@ async function loadDashboardData() {
         
         // Charger les données du stock vivant
         await loadStockVivantTotal();
+        await loadStockVivantVariation();
         
     } catch (error) {
         console.error('Erreur chargement dashboard:', error);
@@ -6767,6 +6771,7 @@ async function loadMonthlyDashboard(monthYear) {
         await loadMonthlyCreances(monthYear);
         await loadMonthlyCreancesMois(monthYear);
         await loadMonthlyCashBictorys(monthYear);
+        await loadStockVivantVariation(); // Ajouter pour le mensuel
         await loadTransfersCard();
         
         // showNotification(`Données chargées pour ${getMonthName(monthYear)}`, 'success');
@@ -8841,6 +8846,49 @@ async function loadCreancesMois() {
         
         if (periodElement) {
             periodElement.textContent = 'Mois en cours';
+        }
+    }
+}
+
+// Fonction pour charger l'écart de stock vivant mensuel
+async function loadStockVivantVariation() {
+    try {
+        const response = await fetch('/api/stock-vivant/monthly-variation');
+        if (!response.ok) {
+            throw new Error('Erreur lors de la récupération de l\'écart stock vivant');
+        }
+        const data = await response.json();
+        
+        // Mettre à jour l'affichage
+        const variationElement = document.getElementById('stock-vivant-variation');
+        const periodElement = document.getElementById('stock-variation-period');
+        
+        if (variationElement && periodElement) {
+            // Formater la valeur avec couleur selon si c'est positif/négatif
+            variationElement.textContent = formatCurrency(data.variation);
+            
+            // Ajouter une classe CSS selon le signe
+            variationElement.className = 'stat-value';
+            if (data.variation > 0) {
+                variationElement.classList.add('variation-positive');
+            } else if (data.variation < 0) {
+                variationElement.classList.add('variation-negative');
+            } else {
+                variationElement.classList.add('variation-neutral');
+            }
+            
+            // Mettre à jour la période d'information
+            periodElement.textContent = data.periodInfo || 'Variation mois actuel vs précédent';
+        }
+    } catch (error) {
+        console.error('Erreur chargement écart stock vivant:', error);
+        const variationElement = document.getElementById('stock-vivant-variation');
+        const periodElement = document.getElementById('stock-variation-period');
+        
+        if (variationElement && periodElement) {
+            variationElement.textContent = 'Erreur';
+            variationElement.className = 'stat-value variation-error';
+            periodElement.textContent = 'Données indisponibles';
         }
     }
 }

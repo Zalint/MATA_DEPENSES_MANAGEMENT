@@ -100,7 +100,7 @@
                     </li>
                     <li id="creance-menu" style="display: none;">
                         <a href="#" data-section="creance" class="nav-link">
-                            <i class="fas fa-file-invoice-dollar"></i> Créance
+                            <i class="fas fa-money-check-alt"></i> Créance
                         </a>
                     </li>
                     <li id="cash-bictorys-menu" style="display: none;">
@@ -208,7 +208,7 @@
 
                         <div class="stat-card">
                             <div class="stat-icon">
-                                <i class="fas fa-file-invoice-dollar"></i>
+                                <i class="fas fa-money-check-alt"></i>
                             </div>
                             <div class="stat-content">
                                 <h3>Total Créances</h3>
@@ -258,6 +258,18 @@
                             </div>
                         </div>
 
+                        <!-- Nouvelle carte Écart Stock Vivant Mensuel -->
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-exchange-alt"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Écart de stock vivant mensuel</h3>
+                                <p class="stat-value" id="stock-vivant-variation">0 FCFA</p>
+                                <small class="stat-period" id="stock-variation-period">Variation mois actuel vs précédent</small>
+                            </div>
+                        </div>
+
                         <!-- Nouvelle carte PL (sans stock + charges) -->
                         <div class="stat-card">
                             <div class="stat-icon">
@@ -276,10 +288,10 @@
                                 <i class="fas fa-calculator"></i>
                             </div>
                             <div class="stat-content">
-                                <h3>PL (sans stock + avec estim. charges)</h3>
+                                <h3>PL (avec ecart stock mensuel et une estim. charges)</h3>
                                 <p class="stat-value" id="pl-estim-charges">0 FCFA</p>
                                 <small class="stat-period">PL avec estimation charges fixes au prorata</small>
-                                <small class="stat-period">Cash Bictorys + Créances + Stock PV - Cash Burn -LIN (Estim. charges fixes)</small>
+                                <small class="stat-period">Cash Bictorys + Créances + Stock PV + Écart Stock Vivant Mensuel - Cash Burn - Estim. Charges Mensuelles Fixes</small>
                             </div>
                         </div>
                     </div>
@@ -960,7 +972,7 @@
 
                 <!-- Section Gestion Créances -->
                 <section id="creance-section" class="section">
-                    <h2><i class="fas fa-file-invoice-dollar"></i> Gestion des Créances</h2>
+                    <h2><i class="fas fa-money-check-alt"></i> Gestion des Créances</h2>
                     <p class="section-description">Suivi des créances clients par compte</p>
 
                     <!-- Sélection du compte créance -->
