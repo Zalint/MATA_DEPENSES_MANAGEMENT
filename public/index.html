@@ -9,6 +9,7 @@
     <title>MataBanq</title>
     <link rel="stylesheet" href="styles.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
     <!-- Page de connexion -->
@@ -93,6 +94,11 @@
                             <i class="fas fa-cogs"></i> Config
                         </a>
                     </li>
+                    <li id="visualisation-menu" style="display: none;">
+                        <a href="#" data-section="visualisation" class="nav-link">
+                            <i class="fas fa-chart-line"></i> Visualisation
+                        </a>
+                    </li>
                     <li>
                         <a href="#" data-section="partner-tracking" class="nav-link">
                             <i class="fas fa-handshake"></i> Suivi Partenaires
@@ -149,6 +155,24 @@
                         </button>
                         <div class="month-info">
                             <span id="current-month-display"></span>
+                        </div>
+                    </div>
+
+                    <!-- Sauvegarde des données du tableau de bord -->
+                    <div class="dashboard-save-section" id="dashboard-save-section" style="display: none;">
+                        <div class="save-controls">
+                            <div class="form-group">
+                                <label for="snapshot-date">
+                                    <i class="fas fa-save"></i> Sauvegarder les données pour le
+                                </label>
+                                <input type="date" id="snapshot-date" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <input type="text" id="snapshot-notes" class="form-control" placeholder="Notes (optionnel)">
+                            </div>
+                            <button id="save-dashboard-snapshot" class="btn btn-success">
+                                <i class="fas fa-download"></i> Sauvegarder Snapshot
+                            </button>
                         </div>
                     </div>
                     
@@ -903,7 +927,6 @@
                     
                     <!-- Résumé des comptes partenaires -->
                     <div class="partner-summary">
-                        <h3>Résumé des Livraisons</h3>
                         <div class="table-container">
                             <table id="partner-summary-table">
                                 <thead>
@@ -918,12 +941,21 @@
                                     </tr>
                                 </thead>
                                 <tbody id="partner-summary-tbody">
+                                    <!-- Les données seront chargées ici -->
                                 </tbody>
                             </table>
                         </div>
                     </div>
-
-                    <!-- Détails d'un compte partenaire -->
+                    
+                    <!-- Configuration des directeurs (Admin seulement) -->
+                    <div id="partner-config" style="display: none;">
+                        <h3>Configuration des Directeurs Partenaires</h3>
+                        <div id="partner-accounts-config">
+                            <!-- Configuration sera chargée ici -->
+                        </div>
+                    </div>
+                    
+                    <!-- Section des détails d'un compte partenaire -->
                     <div id="partner-details" style="display: none;">
                         <!-- Bouton de retour en haut -->
                         <div class="partner-back-button">
@@ -932,20 +964,67 @@
                             </button>
                         </div>
                         
-                        <h3 id="partner-details-title">Détails du Compte</h3>
+                        <h3 id="partner-details-title">Détails - Compte Partenaire</h3>
                         
-                        <!-- Formulaire d'ajout de livraison supprimé (doublon) -->
-
+                        <!-- Avertissement d'autorisation -->
+                        <div id="delivery-authorization-warning" class="warning-message" style="display: none;">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <span id="delivery-warning-text">Vous n'êtes pas autorisé à ajouter des livraisons à ce compte.</span>
+                        </div>
+                        
+                        <!-- Formulaire d'ajout de livraison -->
+                        <div class="account-form">
+                            <h4><i class="fas fa-truck"></i> Ajouter une Livraison</h4>
+                            <form id="addDeliveryForm">
+                                <input type="hidden" id="delivery-account-id">
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="delivery-date">Date de Livraison</label>
+                                        <input type="date" id="delivery-date" name="delivery_date" required>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label for="delivery-article-count">Nombre d'Articles</label>
+                                        <input type="number" id="delivery-article-count" name="article_count" min="1" step="1" required placeholder="Ex: 50">
+                                    </div>
+                                </div>
+                                
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="delivery-unit-price">Prix Unitaire (FCFA)</label>
+                                        <input type="number" id="delivery-unit-price" name="unit_price" min="0" step="1" placeholder="Ex: 2000">
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label for="delivery-amount">Montant Total (FCFA)</label>
+                                        <input type="number" id="delivery-amount" name="amount" min="1" step="1" required placeholder="Montant total">
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="delivery-description">Description</label>
+                                    <textarea id="delivery-description" name="description" placeholder="Description des articles livrés..." rows="3"></textarea>
+                                </div>
+                                
+                                <div class="form-actions">
+                                    <button type="submit" id="add-delivery-btn" class="btn btn-success">
+                                        <i class="fas fa-plus"></i> Ajouter la Livraison
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                        
                         <!-- Liste des livraisons -->
-                        <div class="deliveries-list">
-                            <h4>Historique des Livraisons</h4>
+                        <div class="accounts-list">
+                            <h4><i class="fas fa-list"></i> Historique des Livraisons</h4>
                             <div class="table-container">
                                 <table id="deliveries-table">
                                     <thead>
                                         <tr>
                                             <th>Date</th>
                                             <th>Articles</th>
-                                            <th>Prix Unitaire</th>
+                                            <th>Prix Unit. × Qté</th>
                                             <th>Montant</th>
                                             <th>Description</th>
                                             <th>Créé par</th>
@@ -954,18 +1033,10 @@
                                         </tr>
                                     </thead>
                                     <tbody id="deliveries-tbody">
+                                        <!-- Les livraisons seront chargées ici -->
                                     </tbody>
                                 </table>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- Configuration des directeurs partenaires (Admin uniquement) -->
-                    <div class="partner-config" id="partner-config" style="display: none;">
-                        <h3>Configuration des Directeurs Partenaires</h3>
-                        
-                        <div id="partner-accounts-config">
-                            <!-- Les comptes partenaires seront chargés ici -->
                         </div>
                     </div>
                 </section>
@@ -1946,121 +2017,177 @@
                     </div>
                 </section>
 
-                <!-- Section Suivi Partenaires -->
-                <section id="partner-tracking-section" class="section">
-                    <h2><i class="fas fa-handshake"></i> Suivi Partenaires</h2>
-                    
-                    <!-- Résumé des comptes partenaires -->
-                    <div class="partner-summary">
-                        <div class="table-container">
-                            <table id="partner-summary-table">
-                                <thead>
-                                    <tr>
-                                        <th>Compte</th>
-                                        <th>Montant Total</th>
-                                        <th>Livré</th>
-                                        <th>Restant</th>
-                                        <th>Articles</th>
-                                        <th>Progression</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="partner-summary-tbody">
-                                    <!-- Les données seront chargées ici -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                    
-                    <!-- Configuration des directeurs (Admin seulement) -->
-                    <div id="partner-config" style="display: none;">
-                        <h3>Configuration des Directeurs Partenaires</h3>
-                        <div id="partner-accounts-config">
-                            <!-- Configuration sera chargée ici -->
-                        </div>
-                    </div>
-                    
-                    <!-- Section des détails d'un compte partenaire -->
-                    <div id="partner-details" style="display: none;">
-                        <!-- Bouton de retour en haut -->
-                        <div class="partner-back-button">
-                            <button type="button" class="btn-back" onclick="closePartnerDetails()" title="Retour au résumé">
-                                <i class="fas fa-arrow-left"></i> Retour au résumé
+                <!-- Section Visualisation -->
+                <section id="visualisation-section" class="section">
+                    <h2><i class="fas fa-chart-line"></i> Visualisation des Données</h2>
+                    <p class="section-description">Analyse et visualisation des indicateurs financiers clés</p>
+
+                    <div class="visualisation-tabs">
+                        <div class="tab-buttons">
+                            <button type="button" class="tab-button active" data-viz="pl">
+                                <i class="fas fa-chart-line"></i> PL avec Écart Stock
+                            </button>
+                            <button type="button" class="tab-button" data-viz="stock-vivant">
+                                <i class="fas fa-seedling"></i> Total Général Stock Vivant
+                            </button>
+                            <button type="button" class="tab-button" data-viz="stock-pv">
+                                <i class="fas fa-boxes"></i> Stock Point de Vente
+                            </button>
+                            <button type="button" class="tab-button" data-viz="solde">
+                                <i class="fas fa-wallet"></i> Solde
                             </button>
                         </div>
-                        
-                        <h3 id="partner-details-title">Détails - Compte Partenaire</h3>
-                        
-                        <!-- Avertissement d'autorisation -->
-                        <div id="delivery-authorization-warning" class="warning-message" style="display: none;">
-                            <i class="fas fa-exclamation-triangle"></i>
-                            <span id="delivery-warning-text">Vous n'êtes pas autorisé à ajouter des livraisons à ce compte.</span>
-                        </div>
-                        
-                        <!-- Formulaire d'ajout de livraison -->
-                        <div class="account-form">
-                            <h4><i class="fas fa-truck"></i> Ajouter une Livraison</h4>
-                            <form id="addDeliveryForm">
-                                <input type="hidden" id="delivery-account-id">
-                                
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label for="delivery-date">Date de Livraison</label>
-                                        <input type="date" id="delivery-date" name="delivery_date" required>
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="delivery-article-count">Nombre d'Articles</label>
-                                        <input type="number" id="delivery-article-count" name="article_count" min="1" step="1" required placeholder="Ex: 50">
-                                    </div>
-                                </div>
-                                
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label for="delivery-unit-price">Prix Unitaire (FCFA)</label>
-                                        <input type="number" id="delivery-unit-price" name="unit_price" min="0" step="1" placeholder="Ex: 2000">
-                                    </div>
-                                    
-                                    <div class="form-group">
-                                        <label for="delivery-amount">Montant Total (FCFA)</label>
-                                        <input type="number" id="delivery-amount" name="amount" min="1" step="1" required placeholder="Montant total">
-                                    </div>
-                                </div>
-                                
+
+                        <!-- Contrôles communs -->
+                        <div class="visualisation-controls">
+                            <div class="control-row">
                                 <div class="form-group">
-                                    <label for="delivery-description">Description</label>
-                                    <textarea id="delivery-description" name="description" placeholder="Description des articles livrés..." rows="3"></textarea>
+                                    <label for="viz-period-type">Période d'affichage</label>
+                                    <select id="viz-period-type" class="form-control">
+                                        <option value="daily">Par jour</option>
+                                        <option value="weekly">Par semaine</option>
+                                    </select>
                                 </div>
-                                
-                                <div class="form-actions">
-                                    <button type="submit" id="add-delivery-btn" class="btn btn-success">
-                                        <i class="fas fa-plus"></i> Ajouter la Livraison
+                                <div class="form-group">
+                                    <label for="viz-date-range">Plage de dates</label>
+                                    <div class="date-range-inputs">
+                                        <input type="date" id="viz-start-date" class="form-control">
+                                        <span>à</span>
+                                        <input type="date" id="viz-end-date" class="form-control">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <button id="viz-refresh" class="btn btn-primary">
+                                        <i class="fas fa-sync"></i> Actualiser
                                     </button>
                                 </div>
-                            </form>
+                            </div>
                         </div>
-                        
-                        <!-- Liste des livraisons -->
-                        <div class="accounts-list">
-                            <h4><i class="fas fa-list"></i> Historique des Livraisons</h4>
-                            <div class="table-container">
-                                <table id="deliveries-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Articles</th>
-                                            <th>Prix Unit. × Qté</th>
-                                            <th>Montant</th>
-                                            <th>Description</th>
-                                            <th>Créé par</th>
-                                            <th>Statut</th>
-                                            <th>Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="deliveries-tbody">
-                                        <!-- Les livraisons seront chargées ici -->
-                                    </tbody>
-                                </table>
+
+                        <!-- PL avec Écart Stock -->
+                        <div id="pl-viz" class="viz-panel active">
+                            <div class="viz-header">
+                                <h3><i class="fas fa-chart-line"></i> PL (avec écart stock mensuel et estim. charges)</h3>
+                            </div>
+                            
+                            <div class="chart-container">
+                                <canvas id="pl-chart"></canvas>
+                            </div>
+                            
+                            <div class="data-table-container">
+                                <h4><i class="fas fa-table"></i> Données détaillées</h4>
+                                <div class="table-responsive">
+                                    <table id="pl-data-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Cash Bictorys</th>
+                                                <th>Créances</th>
+                                                <th>Stock PV (FCFA)</th>
+                                                <th>Écart Stock Vivant</th>
+                                                <th>Cash Burn</th>
+                                                <th>Charges Estimées</th>
+                                                <th>PL Final</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="pl-data-tbody">
+                                            <!-- Données générées dynamiquement -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Total Général Stock Vivant -->
+                        <div id="stock-vivant-viz" class="viz-panel">
+                            <div class="viz-header">
+                                <h3><i class="fas fa-seedling"></i> Total Général Stock Vivant</h3>
+                                <p class="viz-description">Évolution du stock vivant (ignore les jours sans données)</p>
+                            </div>
+                            
+                            <div class="chart-container">
+                                <canvas id="stock-vivant-chart"></canvas>
+                            </div>
+                            
+                            <div class="data-table-container">
+                                <h4><i class="fas fa-table"></i> Données détaillées</h4>
+                                <div class="table-responsive">
+                                    <table id="stock-vivant-data-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Total Stock Vivant</th>
+                                                <th>Variation</th>
+                                                <th>Nombre d'entrées</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="stock-vivant-data-tbody">
+                                            <!-- Données générées dynamiquement -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Stock Point de Vente -->
+                        <div id="stock-pv-viz" class="viz-panel">
+                            <div class="viz-header">
+                                <h3><i class="fas fa-boxes"></i> Stock Point de Vente</h3>
+                                <p class="viz-description">Évolution du stock point de vente</p>
+                            </div>
+                            
+                            <div class="chart-container">
+                                <canvas id="stock-pv-chart"></canvas>
+                            </div>
+                            
+                            <div class="data-table-container">
+                                <h4><i class="fas fa-table"></i> Données détaillées</h4>
+                                <div class="table-responsive">
+                                    <table id="stock-pv-data-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Stock Point de Vente</th>
+                                                <th>Variation</th>
+                                                <th>Points de vente</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="stock-pv-data-tbody">
+                                            <!-- Données générées dynamiquement -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Solde -->
+                        <div id="solde-viz" class="viz-panel">
+                            <div class="viz-header">
+                                <h3><i class="fas fa-wallet"></i> Solde</h3>
+                                <p class="viz-description">Évolution du solde général</p>
+                            </div>
+                            
+                            <div class="chart-container">
+                                <canvas id="solde-chart"></canvas>
+                            </div>
+                            
+                            <div class="data-table-container">
+                                <h4><i class="fas fa-table"></i> Données détaillées</h4>
+                                <div class="table-responsive">
+                                    <table id="solde-data-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Solde Total</th>
+                                                <th>Variation</th>
+                                                <th>Comptes Actifs</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="solde-data-tbody">
+                                            <!-- Données générées dynamiquement -->
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
                     </div>

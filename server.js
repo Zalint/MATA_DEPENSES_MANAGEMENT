@@ -990,39 +990,55 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 previousYear = currentYear - 1;
             }
             
-            // Stock du mois actuel
-            const currentStockQuery = `
-                SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+            // Vérifier s'il y a des données pour le mois en cours
+            const hasCurrentMonthDataQuery = `
+                SELECT COUNT(*) as count
                 FROM stock_vivant
-                WHERE date_stock = (
-                    SELECT MAX(date_stock) 
-                    FROM stock_vivant 
-                    WHERE date_stock >= $1::date 
-                    AND date_stock < ($1::date + INTERVAL '1 month')
-                )
+                WHERE date_stock >= $1::date 
+                AND date_stock < ($1::date + INTERVAL '1 month')
             `;
-            const currentStockResult = await pool.query(currentStockQuery, [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`]);
+            const hasCurrentMonthDataResult = await pool.query(hasCurrentMonthDataQuery, [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`]);
+            const hasCurrentMonthData = parseInt(hasCurrentMonthDataResult.rows[0]?.count || 0) > 0;
             
-            // Stock du mois précédent
-            const previousStockQuery = `
-                SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
-                FROM stock_vivant
-                WHERE date_stock = (
-                    SELECT MAX(date_stock) 
-                    FROM stock_vivant 
-                    WHERE date_stock >= $1::date 
-                    AND date_stock < ($1::date + INTERVAL '1 month')
-                )
-            `;
-            const previousStockResult = await pool.query(previousStockQuery, [`${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`]);
-            
-            const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
-            const previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
-            
-            const referenceStock = previousStock > 0 ? previousStock : currentStock;
-            stockVivantVariation = currentStock - referenceStock;
-            
-            console.log(`📊 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (${currentStock} - ${referenceStock})`);
+            // Si pas de données pour le mois en cours, écart = 0
+            if (!hasCurrentMonthData) {
+                stockVivantVariation = 0;
+                console.log(`📊 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (pas de données pour le mois en cours)`);
+            } else {
+                // Stock du mois actuel
+                const currentStockQuery = `
+                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                    FROM stock_vivant
+                    WHERE date_stock = (
+                        SELECT MAX(date_stock) 
+                        FROM stock_vivant 
+                        WHERE date_stock >= $1::date 
+                        AND date_stock < ($1::date + INTERVAL '1 month')
+                    )
+                `;
+                const currentStockResult = await pool.query(currentStockQuery, [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`]);
+                
+                // Stock du mois précédent
+                const previousStockQuery = `
+                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                    FROM stock_vivant
+                    WHERE date_stock = (
+                        SELECT MAX(date_stock) 
+                        FROM stock_vivant 
+                        WHERE date_stock >= $1::date 
+                        AND date_stock < ($1::date + INTERVAL '1 month')
+                    )
+                `;
+                const previousStockResult = await pool.query(previousStockQuery, [`${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`]);
+                
+                const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
+                const previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
+                
+                const referenceStock = previousStock > 0 ? previousStock : currentStock;
+                stockVivantVariation = currentStock - referenceStock;
+                
+                console.log(`📊 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (${currentStock} - ${referenceStock})`);
+            }
             
         } catch (error) {
             console.error('Erreur calcul écart stock vivant pour PL:', error);
@@ -2906,6 +2922,36 @@ app.get('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => {
     }
 });
 
+// Route pour obtenir une livraison spécifique
+app.get('/api/partner/deliveries/:deliveryId', requireAuth, async (req, res) => {
+    try {
+        const { deliveryId } = req.params;
+        
+        const result = await pool.query(`
+            SELECT pd.*, 
+                   u.full_name as created_by_name, 
+                   uv.full_name as validated_by_name,
+                   ufv.full_name as first_validated_by_name,
+                   ur.full_name as rejected_by_name
+            FROM partner_deliveries pd
+            JOIN users u ON pd.created_by = u.id
+            LEFT JOIN users uv ON pd.validated_by = uv.id
+            LEFT JOIN users ufv ON pd.first_validated_by = ufv.id
+            LEFT JOIN users ur ON pd.rejected_by = ur.id
+            WHERE pd.id = $1
+        `, [deliveryId]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Livraison non trouvée' });
+        }
+        
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Erreur récupération livraison:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
 // Route pour ajouter une livraison partenaire
 app.post('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => {
     try {
@@ -3044,7 +3090,7 @@ app.post('/api/partner/deliveries/:deliveryId/final-validate', requireAuth, asyn
         // Vérifier les autorisations
         let canValidate = false;
         
-        if (userRole === 'directeur_general') {
+        if (userRole === 'directeur_general' || userRole === 'pca' || userRole === 'admin') {
             canValidate = true;
         } else if (userRole === 'directeur') {
             const directorResult = await pool.query(
@@ -3121,7 +3167,7 @@ app.post('/api/partner/deliveries/:deliveryId/reject', requireAuth, async (req, 
         // Vérifier les autorisations
         let canReject = false;
         
-        if (userRole === 'directeur_general') {
+        if (userRole === 'directeur_general' || userRole === 'pca' || userRole === 'admin') {
             canReject = true;
         } else if (userRole === 'directeur') {
             const directorResult = await pool.query(
@@ -6492,6 +6538,538 @@ app.get('/api/dashboard/monthly-cash-bictorys', requireAuth, async (req, res) =>
 
     } catch (error) {
         console.error('Erreur récupération Cash Bictorys mensuel:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// ===== ENDPOINTS DASHBOARD SNAPSHOTS =====
+
+// Créer la table dashboard_snapshots au démarrage
+async function createDashboardSnapshotsTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS dashboard_snapshots (
+                id SERIAL PRIMARY KEY,
+                snapshot_date DATE NOT NULL,
+                
+                -- Données financières
+                total_spent_amount DECIMAL(15,2) DEFAULT 0,
+                total_remaining_amount DECIMAL(15,2) DEFAULT 0,
+                total_credited_with_expenses DECIMAL(15,2) DEFAULT 0,
+                total_credited_general DECIMAL(15,2) DEFAULT 0,
+                
+                -- Cash et créances
+                cash_bictorys_amount DECIMAL(15,2) DEFAULT 0,
+                creances_total DECIMAL(15,2) DEFAULT 0,
+                creances_mois DECIMAL(15,2) DEFAULT 0,
+                
+                -- Stock
+                stock_point_vente DECIMAL(15,2) DEFAULT 0,
+                stock_vivant_total DECIMAL(15,2) DEFAULT 0,
+                stock_vivant_variation DECIMAL(15,2) DEFAULT 0,
+                
+                -- Cash Burn
+                daily_burn DECIMAL(15,2) DEFAULT 0,
+                weekly_burn DECIMAL(15,2) DEFAULT 0,
+                monthly_burn DECIMAL(15,2) DEFAULT 0,
+                
+                -- PL et soldes
+                solde_depot DECIMAL(15,2) DEFAULT 0,
+                solde_partner DECIMAL(15,2) DEFAULT 0,
+                solde_general DECIMAL(15,2) DEFAULT 0,
+                
+                -- Métadonnées
+                created_by VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notes TEXT,
+                
+                -- Index sur la date pour les requêtes de visualisation
+                UNIQUE(snapshot_date)
+            )
+        `);
+        
+        await pool.query(`
+            CREATE INDEX IF NOT EXISTS idx_dashboard_snapshots_date ON dashboard_snapshots(snapshot_date)
+        `);
+        
+        console.log('✅ Table dashboard_snapshots créée/vérifiée');
+        
+    } catch (error) {
+        console.error('❌ Erreur création table dashboard_snapshots:', error);
+    }
+}
+
+// Route pour sauvegarder un snapshot du tableau de bord
+app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
+    try {
+        const {
+            snapshot_date,
+            total_spent_amount,
+            total_remaining_amount,
+            total_credited_with_expenses,
+            total_credited_general,
+            cash_bictorys_amount,
+            creances_total,
+            creances_mois,
+            stock_point_vente,
+            stock_vivant_total,
+            stock_vivant_variation,
+            daily_burn,
+            weekly_burn,
+            monthly_burn,
+            solde_depot,
+            solde_partner,
+            solde_general,
+            notes
+        } = req.body;
+        
+        if (!snapshot_date) {
+            return res.status(400).json({ error: 'Date du snapshot requise' });
+        }
+        
+        const username = req.session.user.username;
+        
+        // Vérifier si un snapshot existe déjà pour cette date
+        const existingCheck = await pool.query(
+            'SELECT id, created_by, created_at FROM dashboard_snapshots WHERE snapshot_date = $1',
+            [snapshot_date]
+        );
+        
+        const isUpdate = existingCheck.rows.length > 0;
+        const existingSnapshot = isUpdate ? existingCheck.rows[0] : null;
+        
+        if (isUpdate) {
+            console.log(`⚠️  ÉCRASEMENT: Snapshot existant trouvé pour ${snapshot_date}`);
+            console.log(`   Créé par: ${existingSnapshot.created_by}`);
+            console.log(`   Créé le: ${existingSnapshot.created_at}`);
+        }
+        
+        // Préparer les valeurs pour le logging
+        const sqlValues = [
+            snapshot_date, total_spent_amount || 0, total_remaining_amount || 0,
+            total_credited_with_expenses || 0, total_credited_general || 0,
+            cash_bictorys_amount || 0, creances_total || 0, creances_mois || 0,
+            stock_point_vente || 0, stock_vivant_total || 0, stock_vivant_variation || 0,
+            daily_burn || 0, weekly_burn || 0, monthly_burn || 0,
+            solde_depot || 0, solde_partner || 0, solde_general || 0,
+            username, notes || ''
+        ];
+        
+        const sqlQuery = `
+            INSERT INTO dashboard_snapshots (
+                snapshot_date, total_spent_amount, total_remaining_amount,
+                total_credited_with_expenses, total_credited_general,
+                cash_bictorys_amount, creances_total, creances_mois,
+                stock_point_vente, stock_vivant_total, stock_vivant_variation,
+                daily_burn, weekly_burn, monthly_burn,
+                solde_depot, solde_partner, solde_general,
+                created_by, notes
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+            )
+            ON CONFLICT (snapshot_date) 
+            DO UPDATE SET
+                total_spent_amount = EXCLUDED.total_spent_amount,
+                total_remaining_amount = EXCLUDED.total_remaining_amount,
+                total_credited_with_expenses = EXCLUDED.total_credited_with_expenses,
+                total_credited_general = EXCLUDED.total_credited_general,
+                cash_bictorys_amount = EXCLUDED.cash_bictorys_amount,
+                creances_total = EXCLUDED.creances_total,
+                creances_mois = EXCLUDED.creances_mois,
+                stock_point_vente = EXCLUDED.stock_point_vente,
+                stock_vivant_total = EXCLUDED.stock_vivant_total,
+                stock_vivant_variation = EXCLUDED.stock_vivant_variation,
+                daily_burn = EXCLUDED.daily_burn,
+                weekly_burn = EXCLUDED.weekly_burn,
+                monthly_burn = EXCLUDED.monthly_burn,
+                solde_depot = EXCLUDED.solde_depot,
+                solde_partner = EXCLUDED.solde_partner,
+                solde_general = EXCLUDED.solde_general,
+                created_by = EXCLUDED.created_by,
+                notes = EXCLUDED.notes,
+                created_at = CURRENT_TIMESTAMP
+            RETURNING id, snapshot_date
+        `;
+        
+        // LOGS SQL DÉTAILLÉS
+        console.log('\n🛠️  === LOGS SQL SNAPSHOT DASHBOARD ===');
+        console.log('📅 Date:', new Date().toISOString());
+        console.log('👤 Utilisateur:', username);
+        console.log('📊 Date snapshot:', snapshot_date);
+        console.log('\n📝 REQUÊTE SQL:');
+        console.log(sqlQuery);
+        console.log('\n📋 PARAMÈTRES:');
+        console.log('$1 (snapshot_date):', sqlValues[0]);
+        console.log('$2 (total_spent_amount):', sqlValues[1]);
+        console.log('$3 (total_remaining_amount):', sqlValues[2]);
+        console.log('$4 (total_credited_with_expenses):', sqlValues[3]);
+        console.log('$5 (total_credited_general):', sqlValues[4]);
+        console.log('$6 (cash_bictorys_amount):', sqlValues[5]);
+        console.log('$7 (creances_total):', sqlValues[6]);
+        console.log('$8 (creances_mois):', sqlValues[7]);
+        console.log('$9 (stock_point_vente):', sqlValues[8]);
+        console.log('$10 (stock_vivant_total):', sqlValues[9]);
+        console.log('$11 (stock_vivant_variation):', sqlValues[10]);
+        console.log('$12 (daily_burn):', sqlValues[11]);
+        console.log('$13 (weekly_burn):', sqlValues[12]);
+        console.log('$14 (monthly_burn):', sqlValues[13]);
+        console.log('$15 (solde_depot):', sqlValues[14]);
+        console.log('$16 (solde_partner):', sqlValues[15]);
+        console.log('$17 (solde_general):', sqlValues[16]);
+        console.log('$18 (created_by):', sqlValues[17]);
+        console.log('$19 (notes):', sqlValues[18]);
+        console.log('\n⏳ Exécution de la requête...');
+        
+        // Insérer ou mettre à jour le snapshot (UPSERT)
+        const result = await pool.query(sqlQuery, sqlValues);
+        
+        // LOGS RÉSULTAT SQL
+        console.log('\n✅ RÉSULTAT SQL:');
+        console.log('📊 Rows affected:', result.rowCount);
+        console.log('📋 Returned data:', result.rows);
+        console.log('🔄 Operation type:', result.rowCount > 0 ? (result.command === 'INSERT' ? 'INSERT' : 'UPDATE') : 'UNKNOWN');
+        console.log('🆔 Snapshot ID:', result.rows[0]?.id);
+        console.log('📅 Snapshot date confirmée:', result.rows[0]?.snapshot_date);
+        console.log('=== FIN LOGS SQL SNAPSHOT ===\n');
+        
+        console.log(`✅ Snapshot sauvegardé pour ${snapshot_date} par ${username}`);
+        
+        // Préparer le message selon le type d'opération
+        let message, messageType;
+        if (isUpdate) {
+            message = `Snapshot du ${snapshot_date} mis à jour (écrasement de l'ancien)`;
+            messageType = 'overwrite';
+        } else {
+            message = `Nouveau snapshot créé pour le ${snapshot_date}`;
+            messageType = 'create';
+        }
+        
+        res.json({
+            success: true,
+            message: message,
+            messageType: messageType,
+            snapshot: result.rows[0],
+            wasUpdate: isUpdate,
+            previousSnapshot: existingSnapshot ? {
+                created_by: existingSnapshot.created_by,
+                created_at: existingSnapshot.created_at
+            } : null
+        });
+        
+    } catch (error) {
+        console.error('❌ Erreur sauvegarde snapshot:', error);
+        res.status(500).json({ error: 'Erreur lors de la sauvegarde du snapshot' });
+    }
+});
+
+// Route pour vérifier l'existence d'un snapshot par date
+app.get('/api/dashboard/snapshots/:date', requireAdminAuth, async (req, res) => {
+    try {
+        const { date } = req.params;
+        
+        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({ error: 'Format de date invalide. Utiliser YYYY-MM-DD' });
+        }
+        
+        const result = await pool.query(
+            'SELECT id, created_by, created_at, notes FROM dashboard_snapshots WHERE snapshot_date = $1',
+            [date]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Aucun snapshot trouvé pour cette date' });
+        }
+        
+        res.json(result.rows[0]);
+        
+    } catch (error) {
+        console.error('❌ Erreur vérification snapshot:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// ===== ENDPOINTS VISUALISATION (avec vraies données) =====
+
+// Route pour obtenir les données PL (Profit & Loss) depuis les snapshots sauvegardés
+app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
+    try {
+        const { start_date, end_date, period_type = 'daily' } = req.query;
+        
+        if (!start_date || !end_date) {
+            return res.status(400).json({ error: 'Les dates de début et fin sont requises' });
+        }
+
+        let query, groupBy;
+        
+        if (period_type === 'weekly') {
+            // Grouper par semaine (lundi de chaque semaine)
+            query = `
+                SELECT 
+                    DATE_TRUNC('week', snapshot_date)::date as period,
+                    AVG(cash_bictorys_amount) as cash_bictorys,
+                    AVG(creances_total) as creances,
+                    AVG(stock_point_vente) as stock_pv,
+                    AVG(stock_vivant_variation) as ecart_stock_vivant,
+                    AVG(daily_burn * 7) as cash_burn,
+                    195000 as charges_estimees,
+                    AVG(cash_bictorys_amount + creances_total + stock_point_vente + stock_vivant_variation - (daily_burn * 7) - 195000) as pl_final
+                FROM dashboard_snapshots
+                WHERE snapshot_date >= $1 AND snapshot_date <= $2
+                GROUP BY DATE_TRUNC('week', snapshot_date)
+                ORDER BY period
+            `;
+        } else {
+            // Données journalières
+            query = `
+                SELECT 
+                    snapshot_date as period,
+                    cash_bictorys_amount as cash_bictorys,
+                    creances_total as creances,
+                    stock_point_vente as stock_pv,
+                    stock_vivant_variation as ecart_stock_vivant,
+                    daily_burn as cash_burn,
+                    195000 as charges_estimees,
+                    (cash_bictorys_amount + creances_total + stock_point_vente + stock_vivant_variation - daily_burn - 195000) as pl_final
+                FROM dashboard_snapshots
+                WHERE snapshot_date >= $1 AND snapshot_date <= $2
+                ORDER BY snapshot_date
+            `;
+        }
+
+        const result = await pool.query(query, [start_date, end_date]);
+        
+        const plData = result.rows.map(row => ({
+            date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
+            cash_bictorys: parseFloat(row.cash_bictorys) || 0,
+            creances: parseFloat(row.creances) || 0,
+            stock_pv: parseFloat(row.stock_pv) || 0,
+            ecart_stock_vivant: parseFloat(row.ecart_stock_vivant) || 0,
+            cash_burn: parseFloat(row.cash_burn) || 0,
+            charges_estimees: parseFloat(row.charges_estimees) || 195000,
+            pl_final: parseFloat(row.pl_final) || 0
+        }));
+
+        console.log(`✅ Données PL récupérées: ${plData.length} points de ${start_date} à ${end_date}`);
+
+        res.json({
+            period_type,
+            start_date,
+            end_date,
+            data: plData
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération données PL:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir les données Stock Vivant (vraies données)
+app.get('/api/visualisation/stock-vivant-data', requireAdminAuth, async (req, res) => {
+    try {
+        const { start_date, end_date, period_type = 'daily' } = req.query;
+        
+        if (!start_date || !end_date) {
+            return res.status(400).json({ error: 'Les dates de début et fin sont requises' });
+        }
+
+        let groupByClause, selectClause;
+        if (period_type === 'weekly') {
+            // Grouper par semaine (lundi de chaque semaine)
+            selectClause = "date_trunc('week', date_stock)::date as period";
+            groupByClause = "date_trunc('week', date_stock)";
+        } else {
+            // Grouper par jour
+            selectClause = "date_stock as period";
+            groupByClause = "date_stock";
+        }
+
+        const result = await pool.query(`
+            SELECT 
+                ${selectClause},
+                COALESCE(SUM(total), 0) as total_stock_vivant,
+                COUNT(*) as nombre_entrees,
+                COALESCE(SUM(quantite), 0) as quantite_totale
+            FROM stock_vivant
+            WHERE date_stock >= $1 AND date_stock <= $2
+            GROUP BY ${groupByClause}
+            ORDER BY period
+        `, [start_date, end_date]);
+
+        // Calculer les variations
+        const stockVivantData = result.rows.map((row, index) => {
+            const current = parseInt(row.total_stock_vivant);
+            const previous = index > 0 ? parseInt(result.rows[index - 1].total_stock_vivant) : 0;
+            const variation = current - previous;
+            
+            return {
+                date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
+                total_stock_vivant: current,
+                variation: variation,
+                nombre_entrees: parseInt(row.nombre_entrees),
+                quantite_totale: parseInt(row.quantite_totale)
+            };
+        });
+
+        res.json({
+            period_type,
+            start_date,
+            end_date,
+            data: stockVivantData
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération données Stock Vivant:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir les données Stock Point de Vente (table stock_mata)
+app.get('/api/visualisation/stock-pv-data', requireAdminAuth, async (req, res) => {
+    try {
+        const { start_date, end_date, period_type = 'daily' } = req.query;
+        
+        if (!start_date || !end_date) {
+            return res.status(400).json({ error: 'Les dates de début et fin sont requises' });
+        }
+
+        let groupByClause, selectClause;
+        if (period_type === 'weekly') {
+            // Grouper par semaine (lundi de chaque semaine)
+            selectClause = "date_trunc('week', date)::date as period";
+            groupByClause = "date_trunc('week', date)";
+        } else {
+            // Grouper par jour
+            selectClause = "date as period";
+            groupByClause = "date";
+        }
+
+        const result = await pool.query(`
+            SELECT 
+                ${selectClause},
+                COALESCE(SUM(stock_matin + stock_soir), 0) as stock_total,
+                COUNT(DISTINCT point_de_vente) as points_vente,
+                COUNT(*) as nombre_entrees
+            FROM stock_mata
+            WHERE date >= $1 AND date <= $2
+            GROUP BY ${groupByClause}
+            ORDER BY period
+        `, [start_date, end_date]);
+
+        // Calculer les variations
+        const stockPvData = result.rows.map((row, index) => {
+            const current = Math.round(parseFloat(row.stock_total) || 0);
+            const previous = index > 0 ? Math.round(parseFloat(result.rows[index - 1].stock_total) || 0) : 0;
+            const variation = current - previous;
+            
+            return {
+                date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
+                stock_point_vente: current,
+                variation: variation,
+                points_vente: parseInt(row.points_vente),
+                nombre_entrees: parseInt(row.nombre_entrees)
+            };
+        });
+
+        res.json({
+            period_type,
+            start_date,
+            end_date,
+            data: stockPvData
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération données Stock PV:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir les données de Solde
+app.get('/api/visualisation/solde-data', requireAdminAuth, async (req, res) => {
+    try {
+        const { start_date, end_date, period_type = 'daily' } = req.query;
+        
+        if (!start_date || !end_date) {
+            return res.status(400).json({ error: 'Les dates de début et fin sont requises' });
+        }
+
+        // Génération des périodes selon le type
+        let periods = [];
+        const startDate = new Date(start_date);
+        const endDate = new Date(end_date);
+        
+        if (period_type === 'daily') {
+            for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+                periods.push(d.toISOString().split('T')[0]);
+            }
+        } else if (period_type === 'weekly') {
+            let current = new Date(startDate);
+            current.setDate(current.getDate() - current.getDay() + 1); // Ajuster au lundi
+            
+            while (current <= endDate) {
+                periods.push(current.toISOString().split('T')[0]);
+                current.setDate(current.getDate() + 7);
+            }
+        }
+
+        const soldeData = [];
+        
+        for (const period of periods) {
+            let periodEnd;
+            
+            if (period_type === 'daily') {
+                periodEnd = period;
+            } else {
+                // Semaine : dimanche
+                const monday = new Date(period);
+                const sunday = new Date(monday);
+                sunday.setDate(monday.getDate() + 6);
+                periodEnd = sunday.toISOString().split('T')[0];
+            }
+
+            // Calculer le solde total à la fin de la période
+            // Solde = Total crédité - Total dépensé jusqu'à cette date
+            const soldeResult = await pool.query(`
+                SELECT 
+                    COALESCE(SUM(a.total_credited), 0) - COALESCE(SUM(expenses_total.total_spent), 0) as solde_total,
+                    COUNT(DISTINCT a.id) as comptes_actifs
+                FROM accounts a
+                LEFT JOIN (
+                    SELECT account_id, SUM(total) as total_spent
+                    FROM expenses
+                    WHERE expense_date <= $1
+                    GROUP BY account_id
+                ) expenses_total ON a.id = expenses_total.account_id
+                WHERE a.is_active = true
+            `, [periodEnd + ' 23:59:59']);
+
+            const current = parseInt(soldeResult.rows[0].solde_total) || 0;
+            const comptesActifs = parseInt(soldeResult.rows[0].comptes_actifs) || 0;
+            
+            // Calculer la variation par rapport à la période précédente
+            let variation = 0;
+            if (soldeData.length > 0) {
+                const previous = soldeData[soldeData.length - 1].solde_total;
+                variation = current - previous;
+            }
+
+            soldeData.push({
+                date: period,
+                solde_total: current,
+                variation: variation,
+                comptes_actifs: comptesActifs
+            });
+        }
+
+        res.json({
+            period_type,
+            start_date,
+            end_date,
+            data: soldeData
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération données Solde:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });

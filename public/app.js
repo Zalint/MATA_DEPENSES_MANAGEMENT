@@ -7,6 +7,31 @@ let stockVivantConfig = null;
 // Décote par défaut (20%)
 const DEFAULT_DISCOUNT = 0.20;
 
+// Helper to get current user data, with caching
+let _currentUser = null;
+async function getCurrentUser() {
+    // If we have a cached user, return it
+    if (_currentUser && _currentUser.id) {
+        return _currentUser;
+    }
+    try {
+        // Otherwise, fetch from the server
+        const response = await fetch('/api/user');
+        if (!response.ok) {
+            console.error('Could not fetch user. User may not be logged in.');
+            // Clear any stale user data
+            _currentUser = null;
+            return null;
+        }
+        _currentUser = await response.json();
+        return _currentUser;
+    } catch (error) {
+        console.error('Error fetching current user:', error);
+        _currentUser = null;
+        return null;
+    }
+}
+
 // Configuration dynamique du serveur
 function getServerConfig() {
     const hostname = window.location.hostname;
@@ -143,9 +168,17 @@ async function showApp() {
         document.getElementById('admin-menu').style.display = 'block';
         document.getElementById('admin-users-menu').style.display = 'block';
         document.getElementById('admin-config-menu').style.display = 'block';
+        document.getElementById('visualisation-menu').style.display = 'block';
         document.getElementById('stock-menu').style.display = 'block';
         document.getElementById('stock-vivant-menu').style.display = 'block';
         document.getElementById('user-column').style.display = 'table-cell';
+        
+        // Afficher la section de sauvegarde du tableau de bord
+        const saveSection = document.getElementById('dashboard-save-section');
+        if (saveSection) {
+            saveSection.style.display = 'block';
+            initDashboardSaveSection();
+        }
     }
     
     // Afficher le menu créance pour les utilisateurs autorisés
@@ -255,6 +288,17 @@ async function showSection(sectionName) {
             } catch (error) {
                 console.error('❌ CLIENT: Erreur dans showSection - cash-bictorys:', error);
                 showNotification('Erreur lors du chargement de Cash Bictorys', 'error');
+            }
+            break;
+            
+        case 'visualisation':
+            console.log('🔄 CLIENT: showSection - visualisation appelé');
+            try {
+                await initVisualisationModule();
+                console.log('✅ CLIENT: showSection - visualisation terminé avec succès');
+            } catch (error) {
+                console.error('❌ CLIENT: Erreur dans showSection - visualisation:', error);
+                showNotification('Erreur lors du chargement de la Visualisation', 'error');
             }
             break;
     }
@@ -4907,210 +4951,174 @@ function displayPartnerSummary(partnerSummary) {
     });
 }
 
-// Afficher les détails d'un compte partenaire
+// =================================================================
+// START OF PARTNER DETAILS CODE BLOCK - COPY EVERYTHING BELOW
+// =================================================================
+
+// Main function to display the details of a partner account
 async function showPartnerDetails(accountId, accountName) {
+    console.log(`[Partner] Showing details for account ID: ${accountId}, Name: ${accountName}`);
     try {
-        // Vérifier les permissions pour ajouter des livraisons
-        const permResponse = await fetch(`/api/partner/${accountId}/can-expense`);
-        const permResult = await permResponse.json();
-        
-        // Charger les directeurs assignés au compte
-        const directorsResponse = await fetch(`/api/partner/${accountId}/directors`);
-        const directorsResult = await directorsResponse.json();
-        window.currentAccountDirectors = directorsResult.assigned_director_ids || [];
-        console.log('Directeurs chargés pour le compte', accountId, ':', directorsResult);
-        
-        // Charger les livraisons
-        const response = await fetch(`/api/partner/${accountId}/deliveries`);
-        const deliveries = await response.json();
-        
-        // Afficher la section détails
-        document.querySelector('.partner-summary').style.display = 'none';
-        document.getElementById('partner-details').style.display = 'block';
+        const partnerSummarySection = document.querySelector('.partner-summary');
+        const partnerDetailsSection = document.getElementById('partner-details');
+
+        // Hide summary view and show the details view
+        if (partnerSummarySection) partnerSummarySection.style.display = 'none';
+        if (partnerDetailsSection) partnerDetailsSection.style.display = 'block';
+
+        // Set the title and hidden input value
         document.getElementById('partner-details-title').textContent = `Détails - ${accountName}`;
-        
-        // Configurer le formulaire
         document.getElementById('delivery-account-id').value = accountId;
-        const warningDiv = document.getElementById('delivery-authorization-warning');
-        const warningText = document.getElementById('delivery-warning-text');
-        const addBtn = document.getElementById('add-delivery-btn');
+
+        // Fetch all necessary data in parallel for efficiency
+        const [_, deliveries, directors] = await Promise.all([
+            loadPartnerConfiguration(accountId), // Checks permissions and shows/hides form
+            fetch(`/api/partner/${accountId}/deliveries`).then(res => res.json()),
+            fetch(`/api/partner/${accountId}/directors`).then(res => res.json())
+        ]);
         
-        if (permResult.canExpense) {
-            warningDiv.style.display = 'none';
-            addBtn.disabled = false;
-        } else {
-            warningDiv.style.display = 'block';
-            warningText.textContent = permResult.reason;
-            addBtn.disabled = true;
-        }
+        console.log(`[Partner] Directors loaded for account ${accountId}:`, directors);
         
-        // Afficher les livraisons
-        displayDeliveries(deliveries);
+        // Render the list of deliveries with all the data
+        await displayDeliveries(accountId, deliveries, directors.assigned_director_ids);
         
     } catch (error) {
-        console.error('Erreur chargement détails partenaire:', error);
-        showNotification('Erreur lors du chargement des détails', 'error');
-    }
-}
-
-// Afficher la liste des livraisons
-// Générer les boutons d'action selon le statut de la livraison
-function getDeliveryActionButtons(delivery) {
-    const validationStatus = delivery.validation_status || 'pending';
-    const canUserValidate = canValidateDelivery(delivery);
-    const userId = currentUser.id;
-    const isFirstValidator = delivery.first_validated_by === userId;
-    const isAdmin = currentUser.role === 'admin';
-    
-    let actionButtons = '';
-    
-    switch (validationStatus) {
-        case 'pending':
-            // Livraison en attente de première validation
-            if (canUserValidate) {
-                actionButtons = `<button class="btn-validate" onclick="firstValidateDelivery(${delivery.id})">1ère Validation</button>`;
-            } else {
-                actionButtons = '-';
-            }
-            break;
-            
-        case 'first_validated':
-            // Livraison en attente de seconde validation
-            if (canUserValidate && !isFirstValidator) {
-                actionButtons = `
-                    <button class="btn-validate" onclick="finalValidateDelivery(${delivery.id})">Approuver</button>
-                    <button class="btn-reject" onclick="rejectDelivery(${delivery.id})">Rejeter</button>
-                `;
-            } else if (isFirstValidator) {
-                actionButtons = 'En attente 2ème validation';
-            } else {
-                actionButtons = '-';
-            }
-            break;
-            
-        case 'fully_validated':
-            actionButtons = 'Validée';
-            break;
-            
-        case 'rejected':
-            // Livraison rejetée, peut être modifiée et resoumise
-            if (delivery.created_by === userId) {
-                actionButtons = `<button class="btn-edit" onclick="editRejectedDelivery(${delivery.id})">Modifier</button>`;
-            } else {
-                actionButtons = 'Rejetée';
-            }
-            break;
-            
-        default:
-            actionButtons = '-';
-    }
-    
-    // Ajouter le bouton de suppression admin pour toutes les livraisons
-    if (isAdmin) {
-        const deleteButton = `<button class="btn-delete-admin" onclick="deletePartnerDelivery(${delivery.id})" style="margin-left: 5px;" title="Supprimer cette livraison (Admin)">
-            <i class="fas fa-trash"></i> Supprimer
-        </button>`;
-        
-        if (actionButtons === '-') {
-            actionButtons = deleteButton;
-        } else {
-            actionButtons += deleteButton;
+        console.error(`[Partner] CRITICAL: Error loading partner details:`, error);
+        const detailsSection = document.getElementById('partner-details');
+        if (detailsSection) {
+            detailsSection.innerHTML = `<p class="error-message">Impossible de charger les détails pour ce partenaire. Vérifiez la console.</p>`;
         }
     }
-    
-    return actionButtons;
 }
 
-// Vérifier si l'utilisateur peut valider une livraison
-function canValidateDelivery(delivery) {
-    console.log('Vérification validation pour:', currentUser.username, 'ID:', currentUser.id);
-    console.log('Directeurs assignés au compte:', window.currentAccountDirectors);
-    console.log('Rôle utilisateur:', currentUser.role);
-    
-    // Le DG et Admin peuvent toujours valider
-    if (currentUser.role === 'directeur_general' || currentUser.role === 'admin') {
-        console.log('Utilisateur est DG/Admin, peut valider');
-        return true;
+// Renders the list of deliveries for the selected partner
+async function displayDeliveries(accountId, deliveries, assignedDirectors) {
+    const deliveriesTbody = document.getElementById('deliveries-tbody');
+    if (!deliveriesTbody) {
+        console.error('[Partner] ERROR: deliveries-tbody element not found!');
+        return;
     }
-    
-    // Les directeurs assignés peuvent valider si ils ne l'ont pas déjà fait
-    // On vérifie dans la variable globale stockée lors du chargement des détails
-    if (window.currentAccountDirectors && window.currentAccountDirectors.includes(currentUser.id)) {
-        console.log('Utilisateur est dans les directeurs assignés, peut valider');
-        return true;
-    }
-    
-    console.log('Utilisateur ne peut pas valider');
-    return false;
-}
 
-function displayDeliveries(deliveries) {
-    const tbody = document.getElementById('deliveries-tbody');
-    tbody.innerHTML = '';
-    
-    if (deliveries.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Aucune livraison trouvée</td></tr>';
+    // CRITICAL FIX: Ensure currentUser is loaded before attempting to check permissions
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+        console.error('[Partner] CRITICAL: Could not get current user. Aborting render.');
+        deliveriesTbody.innerHTML = '<tr><td colspan="8" class="error-message">Erreur: Utilisateur non chargé.</td></tr>';
         return;
     }
     
-    deliveries.forEach(delivery => {
-        const validationStatus = delivery.validation_status || 'pending';
-        let statusClass, statusText, statusDetails = '';
-        
-        switch (validationStatus) {
-            case 'pending':
-                statusClass = 'pending';
-                statusText = 'En attente';
-                break;
-            case 'first_validated':
-                statusClass = 'first-validated';
-                statusText = 'Première validation';
-                statusDetails = delivery.first_validated_by_name ? `<br><small>Par: ${delivery.first_validated_by_name}</small>` : '';
-                break;
-            case 'fully_validated':
-                statusClass = 'validated';
-                statusText = 'Validée définitivement';
-                statusDetails = delivery.validated_by_name ? `<br><small>Par: ${delivery.validated_by_name}</small>` : '';
-                break;
-            case 'rejected':
-                statusClass = 'rejected';
-                statusText = 'Rejetée';
-                statusDetails = delivery.rejected_by_name ? `<br><small>Par: ${delivery.rejected_by_name}</small>` : '';
-                if (delivery.rejection_comment) {
-                    statusDetails += `<br><small>Motif: ${delivery.rejection_comment}</small>`;
-                }
-                break;
-        }
-        
-        const actionButtons = getDeliveryActionButtons(delivery);
-        
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${formatDate(delivery.delivery_date)}</td>
-            <td>${delivery.article_count}</td>
-            <td>${delivery.unit_price ? formatCurrency(delivery.unit_price) + ' × ' + delivery.article_count : '-'}</td>
-            <td>${formatCurrency(delivery.amount)}</td>
-            <td>${delivery.description}</td>
-            <td>${delivery.created_by_name}</td>
-            <td>
-                <span class="delivery-status ${statusClass}">${statusText}</span>
-                ${statusDetails}
-            </td>
-            <td>${actionButtons}</td>
-        `;
-        tbody.appendChild(row);
-    });
+    deliveriesTbody.innerHTML = ''; // Clear previous content
+
+    if (!deliveries || deliveries.length === 0) {
+        deliveriesTbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Aucune livraison pour ce compte.</td></tr>';
+    } else {
+        deliveries.forEach(delivery => {
+            const row = deliveriesTbody.insertRow();
+            row.className = `status-${delivery.validation_status}`;
+            
+            // Pass currentUser to the function that generates action buttons
+            const actionButtons = getDeliveryActionButtons(delivery, accountId, assignedDirectors, currentUser);
+            
+            row.innerHTML = `
+                <td>${new Date(delivery.delivery_date).toLocaleDateString()}</td>
+                <td>${delivery.article_count}</td>
+                <td>${formatCurrency(delivery.unit_price)}</td>
+                <td>${formatCurrency(delivery.amount)}</td>
+                <td>${delivery.description || ''}</td>
+                <td>${delivery.created_by_name || 'N/A'}</td>
+                <td>${getDeliveryStatusText(delivery)}</td>
+                <td>${actionButtons}</td>
+            `;
+        });
+    }
 }
 
-// Fermer les détails partenaire
-function closePartnerDetails() {
-    document.getElementById('partner-details').style.display = 'none';
-    document.querySelector('.partner-summary').style.display = 'block';
-    
-    // Réinitialiser le formulaire
-    document.getElementById('addDeliveryForm').reset();
-    document.getElementById('delivery-date').value = new Date().toISOString().split('T')[0];
+// Generates the correct validation/rejection buttons based on user permissions
+function getDeliveryActionButtons(delivery, accountId, assignedDirectors, currentUser) { 
+    let buttons = '';
+    // Pass the already-loaded currentUser to the permission checkers
+    const canValidate = canValidateDelivery(delivery, currentUser, assignedDirectors);
+    const canReject = canRejectDelivery(delivery, currentUser, assignedDirectors);
+
+    if (canValidate) {
+        buttons += `<button class="validate-delivery-btn" data-delivery-id="${delivery.id}" data-account-id="${accountId}">Valider</button>`;
+    }
+    if (canReject) {
+        buttons += `<button class="reject-delivery-btn" data-delivery-id="${delivery.id}" data-account-id="${accountId}">Rejeter</button>`;
+    }
+    return buttons;
 }
+
+// Checks if the current user can validate a delivery
+function canValidateDelivery(delivery, currentUser, assignedDirectors) {
+    if (!currentUser) return false;
+    // DG, PCA, and Admin can always validate
+    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        return true;
+    }
+    // Directors have specific rules
+    if (currentUser.role === 'directeur') {
+        const isAssigned = assignedDirectors.includes(currentUser.id);
+        if (!isAssigned) {
+            return false;
+        }
+        // Can perform the first validation
+        if (delivery.validation_status === 'pending') {
+            return true;
+        }
+        // Can perform the second validation if they weren't the first validator
+        if (delivery.validation_status === 'first_validated' && delivery.first_validated_by !== currentUser.id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Checks if the current user can reject a delivery
+function canRejectDelivery(delivery, currentUser, assignedDirectors) {
+    if (!currentUser) return false;
+    // DG, PCA, and Admin can always reject
+    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        return true;
+    }
+    // Assigned directors can reject deliveries that are not fully validated
+    if (currentUser.role === 'directeur') {
+        const isAssigned = assignedDirectors.includes(currentUser.id);
+        return isAssigned && delivery.validation_status !== 'fully_validated';
+    }
+    return false;
+}
+
+
+// Returns a formatted HTML string for the delivery status
+function getDeliveryStatusText(delivery) {
+    const status = delivery.validation_status || 'pending';
+    switch (status) {
+        case 'pending':
+            return '<span class="status-badge status-pending">En attente</span>';
+        case 'first_validated':
+            return `<span class="status-badge status-first-validated">Première validation</span><br><small>Par: ${delivery.first_validated_by_name || 'N/A'}</small>`;
+        case 'fully_validated':
+            return `<span class="status-badge status-fully-validated">Validée</span><br><small>Par: ${delivery.validated_by_name || 'N/A'}</small>`;
+        case 'rejected':
+            return `<span class="status-badge status-rejected">Rejetée</span><br><small>Par: ${delivery.rejected_by_name || 'N/A'}</small>`;
+        default:
+            return `<span class="status-badge">Inconnu</span>`;
+    }
+}
+
+// Hides the details view and shows the summary view
+function closePartnerDetails() {
+    const detailsSection = document.getElementById('partner-details');
+    const summarySection = document.querySelector('.partner-summary');
+    if (detailsSection) detailsSection.style.display = 'none';
+    if (summarySection) summarySection.style.display = 'block';
+    loadPartnerSummary(); // Refresh the summary view
+}
+
+// =================================================================
+// END OF PARTNER DETAILS CODE BLOCK
+// =================================================================
 
 // Ajouter une livraison partenaire
 async function addPartnerDelivery(accountId, formData) {
@@ -7283,7 +7291,7 @@ function setupStockEventListeners() {
     } else if (uploadForm) {
         console.log('⚠️ CLIENT: Event listener déjà attaché au formulaire d\'upload');
     } else {
-        console.log('❌ CLIENT: Formulaire d\'upload non trouvé!');
+        console.error('❌ CLIENT: Formulaire d\'upload non trouvé!');
     }
 
     // Boutons de contrôle
@@ -8457,15 +8465,16 @@ function populateStockVivantCategoryFilter() {
 
 // Fonction simple pour afficher le tableau de stock vivant
 function displaySimpleStockVivant() {
+    console.log(`[Stock Vivant] Loading simple stock vivant table...`);
     if (!stockVivantConfig || !stockVivantConfig.categories) {
-        console.error('Configuration Stock Vivant invalide ou manquante.');
+        console.error('[Stock Vivant] Invalid or missing Stock Vivant configuration.');
         showStockVivantNotification('Erreur: Configuration du stock non disponible.', 'error');
         return;
     }
     
     const container = document.getElementById('stock-vivant-simple-table');
     if (!container) {
-        console.error('Conteneur #stock-vivant-simple-table non trouvé.');
+        console.error('[Stock Vivant] Container #stock-vivant-simple-table not found.');
         return;
     }
     
@@ -11765,5 +11774,721 @@ async function handleSaveCashBictorys() {
     } catch (error) {
         console.error('Erreur sauvegarde Cash Bictorys:', error);
         showNotification(error.message, 'error');
+    }
+}
+
+// ===== MODULE DE VISUALISATION =====
+
+// Variables globales pour la visualisation
+let currentVisualisationTab = 'pl';
+let visualisationCharts = {};
+let currentVisualisationData = {};
+
+// Initialiser le module de visualisation
+async function initVisualisationModule() {
+    console.log('🔄 CLIENT: Initialisation du module de visualisation');
+    
+    try {
+        // Configurer les dates par défaut (derniers 30 jours)
+        setupVisualisationDateControls();
+        
+        // Configurer les événements des onglets
+        setupVisualisationTabs();
+        
+        // Configurer les événements des contrôles
+        setupVisualisationControls();
+        
+        // Charger les données par défaut
+        await loadVisualisationData();
+        
+        // Créer les graphiques après le chargement des données
+        createVisualisationCharts();
+        
+        console.log('✅ CLIENT: Module de visualisation initialisé avec succès');
+        
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur initialisation visualisation:', error);
+        showNotification('Erreur lors de l\'initialisation de la visualisation', 'error');
+    }
+}
+
+// Créer les graphiques de visualisation
+function createVisualisationCharts() {
+    console.log('📊 CLIENT: Création des graphiques de visualisation');
+    
+    // Graphique PL
+    createPLChart();
+    
+    // Graphique Stock Vivant
+    createStockVivantChart();
+    
+    // Graphique Stock PV
+    createStockPVChart();
+    
+    // Graphique Solde
+    createSoldeChart();
+}
+
+// Créer le graphique PL
+function createPLChart() {
+    const ctx = document.getElementById('pl-chart').getContext('2d');
+    
+    // Détruire le graphique existant s'il y en a un
+    if (visualisationCharts.plChart) {
+        visualisationCharts.plChart.destroy();
+    }
+    
+    const rawData = currentVisualisationData.pl;
+    const data = rawData && rawData.data ? rawData.data : [];
+    
+    visualisationCharts.plChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(item => item.date),
+            datasets: [{
+                label: 'PL Final',
+                data: data.map(item => item.pl_final),
+                borderColor: 'rgb(75, 192, 192)',
+                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                tension: 0.4,
+                fill: true
+            }, {
+                label: 'Cash Bictorys',
+                data: data.map(item => item.cash_bictorys),
+                borderColor: 'rgb(255, 99, 132)',
+                backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                tension: 0.4
+            }, {
+                label: 'Créances',
+                data: data.map(item => item.creances),
+                borderColor: 'rgb(54, 162, 235)',
+                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                tension: 0.4
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Évolution du PL (Profit & Loss)'
+                },
+                legend: {
+                    position: 'top'
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        callback: function(value) {
+                            return new Intl.NumberFormat('fr-FR', {
+                                style: 'currency',
+                                currency: 'XOF',
+                                minimumFractionDigits: 0
+                            }).format(value);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Créer le graphique Stock Vivant
+function createStockVivantChart() {
+    const ctx = document.getElementById('stock-vivant-chart').getContext('2d');
+    
+    if (visualisationCharts.stockVivantChart) {
+        visualisationCharts.stockVivantChart.destroy();
+    }
+    
+    const rawData = currentVisualisationData.stockVivant;
+    const data = rawData && rawData.data ? rawData.data : [];
+    
+    visualisationCharts.stockVivantChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: data.map(item => item.date),
+            datasets: [{
+                label: 'Stock Vivant Total',
+                data: data.map(item => item.total_stock_vivant),
+                backgroundColor: 'rgba(34, 197, 94, 0.8)',
+                borderColor: 'rgba(34, 197, 94, 1)',
+                borderWidth: 1
+            }, {
+                label: 'Variation',
+                data: data.map(item => item.variation),
+                type: 'line',
+                borderColor: 'rgb(239, 68, 68)',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                tension: 0.4,
+                yAxisID: 'y1'
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Évolution du Stock Vivant'
+                }
+            },
+            scales: {
+                y: {
+                    type: 'linear',
+                    display: true,
+                    position: 'left',
+                    ticks: {
+                        callback: function(value) {
+                            return new Intl.NumberFormat('fr-FR').format(value) + ' FCFA';
+                        }
+                    }
+                },
+                y1: {
+                    type: 'linear',
+                    display: true,
+                    position: 'right',
+                    grid: {
+                        drawOnChartArea: false
+                    },
+                    ticks: {
+                        callback: function(value) {
+                            return (value >= 0 ? '+' : '') + new Intl.NumberFormat('fr-FR').format(value);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Créer le graphique Stock PV
+function createStockPVChart() {
+    const ctx = document.getElementById('stock-pv-chart').getContext('2d');
+    
+    if (visualisationCharts.stockPVChart) {
+        visualisationCharts.stockPVChart.destroy();
+    }
+    
+    const rawData = currentVisualisationData.stockPV;
+    const data = rawData && rawData.data ? rawData.data : [];
+    
+    visualisationCharts.stockPVChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(item => item.date),
+            datasets: [{
+                label: 'Stock Point de Vente',
+                data: data.map(item => item.stock_point_vente),
+                borderColor: 'rgb(147, 51, 234)',
+                backgroundColor: 'rgba(147, 51, 234, 0.1)',
+                tension: 0.4,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Évolution du Stock Point de Vente'
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        callback: function(value) {
+                            return new Intl.NumberFormat('fr-FR').format(value) + ' FCFA';
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Créer le graphique Solde
+function createSoldeChart() {
+    const ctx = document.getElementById('solde-chart').getContext('2d');
+    
+    if (visualisationCharts.soldeChart) {
+        visualisationCharts.soldeChart.destroy();
+    }
+    
+    const rawData = currentVisualisationData.solde;
+    const data = rawData && rawData.data ? rawData.data : [];
+    
+    visualisationCharts.soldeChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: data.map(item => item.date),
+            datasets: [{
+                label: 'Solde Total',
+                data: data.map(item => item.solde_total),
+                borderColor: 'rgb(59, 130, 246)',
+                backgroundColor: 'rgba(59, 130, 246, 0.3)',
+                tension: 0.4,
+                fill: true
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                title: {
+                    display: true,
+                    text: 'Évolution du Solde Général'
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        callback: function(value) {
+                            return new Intl.NumberFormat('fr-FR').format(value) + ' FCFA';
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+// Configurer les dates par défaut
+function setupVisualisationDateControls() {
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+    
+    const startDateInput = document.getElementById('viz-start-date');
+    const endDateInput = document.getElementById('viz-end-date');
+    
+    if (startDateInput) {
+        startDateInput.value = thirtyDaysAgo.toISOString().split('T')[0];
+    }
+    
+    if (endDateInput) {
+        endDateInput.value = today.toISOString().split('T')[0];
+    }
+}
+
+// Configurer les événements des onglets
+function setupVisualisationTabs() {
+    const tabButtons = document.querySelectorAll('.visualisation-tabs .tab-button');
+    
+    tabButtons.forEach(button => {
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            const tabId = button.getAttribute('data-viz');
+            switchVisualisationTab(tabId);
+        });
+    });
+}
+
+// Configurer les événements des contrôles
+function setupVisualisationControls() {
+    const refreshButton = document.getElementById('viz-refresh');
+    const periodSelect = document.getElementById('viz-period-type');
+    
+    if (refreshButton) {
+        refreshButton.addEventListener('click', loadVisualisationData);
+    }
+    
+    if (periodSelect) {
+        periodSelect.addEventListener('change', loadVisualisationData);
+    }
+}
+
+// Changer d'onglet de visualisation
+function switchVisualisationTab(tabId) {
+    console.log('🔄 CLIENT: Changement vers l\'onglet:', tabId);
+    
+    // Mettre à jour les boutons d'onglets
+    document.querySelectorAll('.visualisation-tabs .tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    document.querySelector(`[data-viz="${tabId}"]`).classList.add('active');
+    
+    // Masquer tous les panneaux
+    document.querySelectorAll('.viz-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    
+    // Afficher le panneau sélectionné
+    const targetPanel = document.getElementById(`${tabId}-viz`);
+    if (targetPanel) {
+        targetPanel.classList.add('active');
+    }
+    
+    // Mettre à jour l'onglet actuel
+    currentVisualisationTab = tabId;
+    
+    // Redessiner le graphique si les données sont déjà chargées
+    const dataKey = getVisualisationDataKey(tabId);
+    if (currentVisualisationData[dataKey]) {
+        renderVisualisationChart(tabId, currentVisualisationData[dataKey]);
+    }
+}
+
+// Convertir l'ID de l'onglet en clé de données
+function getVisualisationDataKey(tabId) {
+    const keyMap = {
+        'pl': 'pl',
+        'stock-vivant': 'stockVivant',
+        'stock-pv': 'stockPV',
+        'solde': 'solde'
+    };
+    return keyMap[tabId] || tabId;
+}
+
+// Charger les données de visualisation
+async function loadVisualisationData() {
+    console.log('🔄 CLIENT: Chargement des données de visualisation');
+    
+    const startDate = document.getElementById('viz-start-date').value;
+    const endDate = document.getElementById('viz-end-date').value;
+    const periodType = document.getElementById('viz-period-type').value;
+    
+    if (!startDate || !endDate) {
+        showNotification('Veuillez sélectionner les dates de début et fin', 'error');
+        return;
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+        showNotification('La date de début doit être antérieure à la date de fin', 'error');
+        return;
+    }
+    
+    try {
+        // Afficher un indicateur de chargement
+        showVisualisationLoading(true);
+        
+        // Charger les données pour chaque onglet
+        await Promise.all([
+            loadPLData(startDate, endDate, periodType),
+            loadStockVivantVisualisationData(startDate, endDate, periodType),
+            loadStockPVData(startDate, endDate, periodType),
+            loadSoldeData(startDate, endDate, periodType)
+        ]);
+        
+        // Créer les graphiques avec les nouvelles données
+        createVisualisationCharts();
+        
+        // Afficher les données de l'onglet actuel
+        const dataKey = getVisualisationDataKey(currentVisualisationTab);
+        if (currentVisualisationData[dataKey]) {
+            updateVisualisationTable(currentVisualisationTab, currentVisualisationData[dataKey]);
+        }
+        
+        showNotification('Données de visualisation mises à jour', 'success');
+        
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement données visualisation:', error);
+        showNotification('Erreur lors du chargement des données', 'error');
+    } finally {
+        showVisualisationLoading(false);
+    }
+}
+
+// ===== MODULE DE SAUVEGARDE DU TABLEAU DE BORD =====
+
+// Initialiser la section de sauvegarde du tableau de bord
+function initDashboardSaveSection() {
+    console.log('🔄 CLIENT: Initialisation de la section de sauvegarde du tableau de bord');
+    
+    // Définir la date par défaut (aujourd'hui)
+    const today = new Date().toISOString().split('T')[0];
+    const snapshotDateInput = document.getElementById('snapshot-date');
+    if (snapshotDateInput) {
+        snapshotDateInput.value = today;
+    }
+    
+    // Ajouter l'événement de sauvegarde
+    const saveButton = document.getElementById('save-dashboard-snapshot');
+    if (saveButton) {
+        saveButton.addEventListener('click', saveDashboardSnapshot);
+    }
+    
+    console.log('✅ CLIENT: Section de sauvegarde initialisée');
+}
+
+// Sauvegarder un snapshot du tableau de bord
+async function saveDashboardSnapshot() {
+    console.log(`[Partner] Loading configuration for account ID: ${accountId}`);
+    const addDeliveryForm = document.getElementById('addDeliveryForm');
+    const deliveryAuthWarning = document.getElementById('delivery-authorization-warning');
+    
+    if (!addDeliveryForm || !deliveryAuthWarning) {
+        console.error('[Partner] ERROR: Form elements (addDeliveryForm or delivery-authorization-warning) not found in the DOM.');
+        return;
+    }
+
+    try {
+        console.log('[Partner] Checking expense authorization...');
+        const response = await fetch(`/api/partner/${accountId}/can-expense`);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[Partner] Authorization check failed with status ${response.status}:`, errorText);
+            throw new Error(`Authorization check failed: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('[Partner] Authorization response received:', data);
+        
+        if (data.canExpense) {
+            console.log('[Partner] SUCCESS: User is authorized. Displaying delivery form.');
+            addDeliveryForm.style.display = 'block';
+            deliveryAuthWarning.style.display = 'none';
+        } else {
+            console.warn(`[Partner] FAILED: User is not authorized. Reason: "${data.reason}". Hiding form.`);
+            addDeliveryForm.style.display = 'none';
+            deliveryAuthWarning.style.display = 'block';
+            deliveryAuthWarning.textContent = data.reason || 'Vous n\'êtes pas autorisé à ajouter une livraison pour ce compte.';
+        }
+    } catch (error) {
+        console.error('[Partner] CRITICAL: An exception occurred while checking authorization:', error);
+        addDeliveryForm.style.display = 'none';
+        deliveryAuthWarning.style.display = 'block';
+        deliveryAuthWarning.textContent = 'Erreur critique lors de la vérification des autorisations.';
+    }
+}
+
+// ... existing code ...
+
+async function addPartnerDelivery(accountId, formData) {
+    console.log(`[Partner] Submitting new delivery for account ${accountId}`, formData);
+    try {
+        const response = await fetch(`/api/partner/${accountId}/deliveries`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('[Partner] Failed to add delivery:', errorData);
+            throw new Error(errorData.error || 'Erreur inconnue');
+        }
+
+        const newDelivery = await response.json();
+        console.log('[Partner] Successfully added delivery:', newDelivery);
+        
+        // Réinitialiser le formulaire
+        document.getElementById('addDeliveryForm').reset();
+        document.getElementById('delivery-date').value = new Date().toISOString().split('T')[0];
+        
+        // Recharger les données des partenaires
+        loadPartnerDeliveries(accountId);
+        loadPartnerSummary();
+
+    } catch (error) {
+        console.error(`[Partner] CRITICAL: Exception while adding delivery for account ${accountId}:`, error);
+        alert(`Erreur lors de l'ajout de la livraison: ${error.message}`);
+    }
+}
+
+async function loadPartnerDeliveries(accountId) {
+    const assignedDirectors = await getAssignedDirectors(accountId);
+    const deliveriesList = document.getElementById('partner-deliveries-list');
+    const loadingMessage = document.getElementById('partner-deliveries-loading');
+    
+    console.log(`[Partner] Loading deliveries for account ${accountId}...`);
+
+    loadingMessage.style.display = 'block';
+    deliveriesList.innerHTML = '';
+
+    try {
+        const response = await fetch(`/api/partner/${accountId}/deliveries`);
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`[Partner] Failed to load deliveries with status ${response.status}:`, errorText);
+            throw new Error('Impossible de charger les livraisons');
+        }
+        
+        const deliveries = await response.json();
+        console.log(`[Partner] Found ${deliveries.length} deliveries.`);
+
+        loadingMessage.style.display = 'none';
+
+        if (deliveries.length === 0) {
+            deliveriesList.innerHTML = '<li>Aucune livraison pour ce compte.</li>';
+            console.log('[Partner] No deliveries found, displaying message.');
+        } else {
+            const currentUser = await getCurrentUser();
+            console.log('[Partner] Current user for validation checks:', currentUser);
+            
+            deliveries.forEach(delivery => {
+                const item = document.createElement('li');
+                item.className = `delivery-item status-${delivery.validation_status}`;
+                item.dataset.deliveryId = delivery.id;
+
+                const canValidate = canValidateDelivery(delivery, currentUser, assignedDirectors);
+                const canReject = canRejectDelivery(delivery, currentUser, assignedDirectors);
+
+                item.innerHTML = `
+                    <div class="delivery-info">
+                        <strong>${new Date(delivery.delivery_date).toLocaleDateString()}</strong> - ${delivery.description}
+                        <br>
+                        <span>${delivery.article_count} articles, ${formatCurrency(delivery.amount)}</span>
+                        <br>
+                        <small>Statut: ${getDeliveryStatusText(delivery)}</small>
+                    </div>
+                    <div class="delivery-actions">
+                        ${canValidate ? `<button class="validate-delivery-btn" data-delivery-id="${delivery.id}" data-account-id="${accountId}">Valider</button>` : ''}
+                        ${canReject ? `<button class="reject-delivery-btn" data-delivery-id="${delivery.id}" data-account-id="${accountId}">Rejeter</button>` : ''}
+                    </div>
+                `;
+                deliveriesList.appendChild(item);
+            });
+        }
+    } catch (error) {
+        loadingMessage.style.display = 'none';
+        deliveriesList.innerHTML = '<li>Erreur de chargement des livraisons.</li>';
+        console.error(`[Partner] CRITICAL: Exception while loading deliveries for account ${accountId}:`, error);
+    }
+}
+
+function canValidateDelivery(delivery, currentUser, assignedDirectors) {
+    console.log(`[Partner] Checking validation permission for delivery ID ${delivery.id} by user:`, currentUser.username);
+    // Le DG, PCA et Admin peuvent toujours valider
+    if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
+        console.log('[Partner] User is DG/PCA/Admin, can validate.');
+        return true;
+    }
+
+    if (currentUser.role === 'directeur') {
+        const isAssigned = assignedDirectors.includes(currentUser.id);
+        console.log(`[Partner] User is a director. Is assigned? ${isAssigned}`);
+        
+        if (!isAssigned) {
+            console.log('[Partner] Director is not assigned to this account.');
+            return false;
+        }
+
+        switch(delivery.validation_status) {
+            case 'pending':
+                console.log('[Partner] Status is pending. Director can perform first validation.');
+                return true;
+            case 'first_validated':
+                const canSecondValidate = delivery.first_validated_by !== currentUser.id;
+                console.log(`[Partner] Status is 'first_validated'. First validator ID: ${delivery.first_validated_by}, Current user ID: ${currentUser.id}. Can second-validate? ${canSecondValidate}`);
+                return canSecondValidate;
+            default:
+                console.log(`[Partner] Status is '${delivery.validation_status}'. Director cannot validate further.`);
+                return false;
+        }
+    }
+    
+    console.log('[Partner] User role does not permit validation.');
+    return false;
+}
+
+function canRejectDelivery(delivery, currentUser, assignedDirectors) {
+    console.log(`[Partner] Checking rejection permission for delivery ID ${delivery.id} by user:`, currentUser.username);
+    // DG, PCA et Admin peuvent rejeter
+    if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
+        console.log('[Partner] User is DG/PCA/Admin, can reject.');
+        return true;
+    }
+
+    if (currentUser.role === 'directeur') {
+        const isAssigned = assignedDirectors.includes(currentUser.id);
+        console.log(`[Partner] User is a director. Is assigned? ${isAssigned}`);
+        return isAssigned;
+    }
+    
+    console.log('[Partner] User role does not permit rejection.');
+    return false;
+}
+
+// ===== EVENT DELEGATION FOR DELIVERY VALIDATION BUTTONS =====
+// Add event listeners for dynamically generated delivery validation buttons
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('[Partner] Setting up delivery button event listeners');
+    
+    // Event delegation for validate delivery buttons
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('validate-delivery-btn')) {
+            e.preventDefault();
+            console.log('[Partner] Validate button clicked');
+            
+            const deliveryId = e.target.getAttribute('data-delivery-id');
+            const accountId = e.target.getAttribute('data-account-id');
+            
+            if (!deliveryId) {
+                console.error('[Partner] No delivery ID found on validate button');
+                showNotification('Erreur: ID de livraison manquant', 'error');
+                return;
+            }
+            
+            console.log(`[Partner] Attempting to validate delivery ${deliveryId}`);
+            handleDeliveryValidation(deliveryId, accountId);
+        }
+    });
+    
+    // Event delegation for reject delivery buttons
+    document.addEventListener('click', function(e) {
+        if (e.target.classList.contains('reject-delivery-btn')) {
+            e.preventDefault();
+            console.log('[Partner] Reject button clicked');
+            
+            const deliveryId = e.target.getAttribute('data-delivery-id');
+            const accountId = e.target.getAttribute('data-account-id');
+            
+            if (!deliveryId) {
+                console.error('[Partner] No delivery ID found on reject button');
+                showNotification('Erreur: ID de livraison manquant', 'error');
+                return;
+            }
+            
+            console.log(`[Partner] Attempting to reject delivery ${deliveryId}`);
+            rejectDelivery(deliveryId);
+        }
+    });
+});
+
+// Handle delivery validation logic (first or final validation)
+async function handleDeliveryValidation(deliveryId, accountId) {
+    try {
+        console.log(`[Partner] Determining validation type for delivery ${deliveryId}`);
+        
+        // Get delivery details to determine if this is first or final validation
+        const response = await fetch(`/api/partner/deliveries/${deliveryId}`);
+        if (!response.ok) {
+            throw new Error('Impossible de récupérer les détails de la livraison');
+        }
+        
+        const delivery = await response.json();
+        console.log(`[Partner] Delivery status: ${delivery.validation_status}`);
+        
+        if (delivery.validation_status === 'pending') {
+            console.log('[Partner] Performing first validation');
+            await firstValidateDelivery(deliveryId);
+        } else if (delivery.validation_status === 'first_validated') {
+            console.log('[Partner] Performing final validation');
+            await finalValidateDelivery(deliveryId);
+        } else {
+            console.warn(`[Partner] Unexpected validation status: ${delivery.validation_status}`);
+            showNotification('Cette livraison ne peut pas être validée dans son état actuel', 'error');
+        }
+        
+    } catch (error) {
+        console.error('[Partner] Error in validation handling:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
     }
 }
