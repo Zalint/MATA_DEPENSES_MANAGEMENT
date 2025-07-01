@@ -2534,16 +2534,23 @@ app.delete('/api/accounts/:accountId/delete', requireAdminAuth, async (req, res)
 app.put('/api/accounts/:accountId/update', requireAdminAuth, async (req, res) => {
     try {
         const { accountId } = req.params;
-        const { user_id, account_name, description, account_type, category_type, creditors } = req.body;
+        const { user_id, account_name, description, account_type, category_type, creditors, credit_permission_user_id } = req.body;
+        
+        console.log(`[API] Updating account ${accountId} with data:`, {
+            user_id, account_name, account_type, category_type, 
+            creditors: creditors ? creditors.length : 'undefined',
+            credit_permission_user_id
+        });
         
         await pool.query('BEGIN');
         
         // Mettre à jour les informations de base du compte
+        // user_id peut être null pour certains types de comptes (partenaire, statut, Ajustement, depot)
         const updateResult = await pool.query(
             `UPDATE accounts 
-             SET user_id = $1, account_name = $2, account_type = $3, category_type = $4
+             SET user_id = $1, account_name = $2, account_type = $3, category_type = $4, updated_at = CURRENT_TIMESTAMP
              WHERE id = $5 RETURNING *`,
-            [user_id, account_name, account_type, category_type, accountId]
+            [user_id || null, account_name, account_type, category_type || null, accountId]
         );
         
         if (updateResult.rows.length === 0) {
@@ -2551,30 +2558,64 @@ app.put('/api/accounts/:accountId/update', requireAdminAuth, async (req, res) =>
             return res.status(404).json({ error: 'Compte non trouvé' });
         }
         
-        // Gérer les créditeurs pour les comptes créance
-        if (account_type === 'creance' && creditors) {
+        const updatedBy = req.session.user.id;
+        
+        // Gérer les permissions de crédit pour les comptes classiques
+        if (account_type === 'classique') {
+            // Supprimer les anciennes permissions de crédit
+            await pool.query('DELETE FROM account_credit_permissions WHERE account_id = $1', [accountId]);
+            
+            // Ajouter la nouvelle permission si spécifiée
+            if (credit_permission_user_id && credit_permission_user_id !== '') {
+                await pool.query(
+                    'INSERT INTO account_credit_permissions (account_id, user_id, granted_by) VALUES ($1, $2, $3)',
+                    [accountId, parseInt(credit_permission_user_id), updatedBy]
+                );
+                console.log(`[API] Added credit permission for account ${accountId} to user ${credit_permission_user_id}`);
+            } else {
+                console.log(`[API] No credit permission specified for classic account ${accountId}`);
+            }
+        }
+        
+        // Gérer les créditeurs pour les comptes créance (optionnel)
+        if (account_type === 'creance') {
             // Supprimer les anciens créditeurs
             await pool.query('DELETE FROM account_creditors WHERE account_id = $1', [accountId]);
             
-            // Ajouter les nouveaux créditeurs
-            for (const creditor of creditors) {
-                await pool.query(
-                    'INSERT INTO account_creditors (account_id, user_id, creditor_type) VALUES ($1, $2, $3)',
-                    [accountId, creditor.user_id, creditor.type]
-                );
+            // Ajouter les nouveaux créditeurs seulement s'ils sont fournis
+            if (creditors && Array.isArray(creditors) && creditors.length > 0) {
+                for (const creditor of creditors) {
+                    if (creditor.user_id && creditor.type) {
+                        await pool.query(
+                            'INSERT INTO account_creditors (account_id, user_id, creditor_type) VALUES ($1, $2, $3)',
+                            [accountId, creditor.user_id, creditor.type]
+                        );
+                    }
+                }
+                console.log(`[API] Added ${creditors.length} creditors for account ${accountId}`);
+            } else {
+                console.log(`[API] No creditors provided for creance account ${accountId}, keeping it empty`);
             }
         } else if (account_type !== 'creance') {
             // Supprimer les créditeurs si le type n'est plus créance
             await pool.query('DELETE FROM account_creditors WHERE account_id = $1', [accountId]);
+            console.log(`[API] Removed creditors for non-creance account ${accountId}`);
         }
         
         await pool.query('COMMIT');
         
+        console.log(`[API] Successfully updated account ${accountId}`);
         res.json({ message: 'Compte modifié avec succès', account: updateResult.rows[0] });
     } catch (error) {
         await pool.query('ROLLBACK');
         console.error('Erreur modification compte:', error);
-        res.status(500).json({ error: 'Erreur serveur' });
+        console.error('Stack trace:', error.stack);
+        console.error('SQL State:', error.code);
+        console.error('Detail:', error.detail);
+        res.status(500).json({ 
+            error: 'Erreur serveur lors de la modification du compte',
+            detail: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 

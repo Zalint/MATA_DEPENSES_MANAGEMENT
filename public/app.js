@@ -2395,16 +2395,42 @@ async function editAccount(accountId) {
             
             document.getElementById('createDescription').value = account.description || '';
             console.log(`[editAccount] Set description.`);
+            
+            // En mode modification : griser le montant initial et afficher le solde courant
+            const initialAmountField = document.getElementById('initialAmount');
+            const initialAmountGroup = initialAmountField?.closest('.form-group');
+            const initialAmountLabel = initialAmountGroup?.querySelector('label');
+            
+            if (initialAmountField) {
+                initialAmountField.value = account.current_balance || 0;
+                initialAmountField.disabled = true;
+                initialAmountField.style.backgroundColor = '#f8f9fa';
+                initialAmountField.style.color = '#6c757d';
+                console.log(`[editAccount] Set current balance: ${account.current_balance}`);
+            }
+            
+            if (initialAmountLabel) {
+                initialAmountLabel.textContent = 'Solde Actuel (lecture seule)';
+            }
 
         }, 100); // Reduced timeout
         
-        // Changer le texte du bouton et ajouter un attribut pour identifier la modification
+        // Changer le texte du bouton et le titre du formulaire pour indiquer la modification
         const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
         const cancelButton = document.getElementById('cancelAccountEdit');
+        const formTitle = document.querySelector('#createAccountForm h3');
+        
         submitButton.textContent = 'Modifier le Compte';
         submitButton.dataset.editingId = accountId;
         cancelButton.style.display = 'inline-block';
-        console.log('[editAccount] Changed button to "Modifier le Compte" and set editingId.');
+        
+        // Changer le titre pour indiquer qu'on est en mode modification
+        if (formTitle) {
+            formTitle.textContent = '[Modification] Créer/Assigner un Compte';
+            formTitle.style.color = '#d97706'; // Couleur orange pour indiquer la modification
+        }
+        
+        console.log('[editAccount] Changed button to "Modifier le Compte", updated title with [Modification], and set editingId.');
 
         
         // Faire défiler vers le formulaire
@@ -2699,17 +2725,40 @@ function resetAccountForm() {
     document.getElementById('createAccountForm').reset();
     const submitButton = document.querySelector('#createAccountForm button[type="submit"]');
     const cancelButton = document.getElementById('cancelAccountEdit');
+    const formTitle = document.querySelector('#createAccountForm h3');
+    
     submitButton.textContent = 'Créer le Compte';
     delete submitButton.dataset.editingId;
     cancelButton.style.display = 'none';
+    
+    // Remettre le titre original
+    if (formTitle) {
+        formTitle.textContent = 'Créer/Assigner un Compte';
+        formTitle.style.color = ''; // Remettre la couleur par défaut
+    }
     
     // Masquer les sections spécifiques
     document.getElementById('categoryTypeGroup').style.display = 'none';
     document.getElementById('permissionsSection').style.display = 'none';
     document.getElementById('userSelectGroup').style.display = 'block';
     
+    // Rétablir le champ montant initial en mode création
+    const initialAmountField = document.getElementById('initialAmount');
+    const initialAmountGroup = initialAmountField?.closest('.form-group');
+    const initialAmountLabel = initialAmountGroup?.querySelector('label');
+    
+    if (initialAmountField) {
+        initialAmountField.disabled = false;
+        initialAmountField.style.backgroundColor = '';
+        initialAmountField.style.color = '';
+        initialAmountField.value = '0';
+    }
+    
+    if (initialAmountLabel) {
+        initialAmountLabel.textContent = 'Montant Initial (optionnel)';
+    }
+    
     // Rétablir la visibilité du montant initial
-    const initialAmountGroup = document.getElementById('initialAmount')?.closest('.form-group');
     if (initialAmountGroup) initialAmountGroup.style.display = 'block';
 }
 
@@ -2919,12 +2968,11 @@ document.addEventListener('DOMContentLoaded', function() {
             credit_permission_user_id: document.getElementById('creditPermissionDirectorSelect').value || null
         };
         
-        // Pour les comptes classiques, ajouter le type de catégorie
+        // Pour les comptes classiques, ajouter le type de catégorie (optionnel)
         if (accountType === 'classique') {
             const categoryType = document.getElementById('categoryTypeSelect').value;
-            if (categoryType) {
-                formData.category_type = categoryType;
-            }
+            // Le type de catégorie est optionnel, on l'ajoute même s'il est vide
+            formData.category_type = categoryType || null;
         }
         
         if (isEditing) {
