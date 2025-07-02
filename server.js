@@ -111,13 +111,13 @@ const requireAdminAuth = (req, res, next) => {
     
     console.log('🔍 DEBUG: API Key extracted:', apiKey ? 'YES' : 'NO');
     if (apiKey) {
-        console.log('🔍 DEBUG: API Key value:', apiKey);
+        console.log('🔍 DEBUG: API Key value:', apiKey.substring(0, 8) + '...');
     }
     
     if (apiKey) {
         // Authentification par clé API
         const validApiKey = process.env.API_KEY || '4f8d9a2b6c7e8f1a3b5c9d0e2f4g6h7i';
-        console.log('🔍 DEBUG: Valid API Key:', validApiKey);
+        console.log('🔍 DEBUG: Valid API Key:', validApiKey.substring(0, 8) + '...');
         console.log('🔍 DEBUG: API Keys match:', apiKey === validApiKey);
         
         if (apiKey === validApiKey) {
@@ -952,9 +952,25 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             cashBictorysValue = cashBictorysResult.rows.length > 0 ? parseInt(cashBictorysResult.rows[0].amount) || 0 : 0;
             console.log(`💰 DEBUG: Cash Bictorys pour ${monthYear}: ${cashBictorysValue} FCFA`);
             
-            // Récupérer Créances du Mois - Utilisation d'une valeur fixe basée sur le dashboard
-            // Créances du Mois = 25 000 FCFA (comme affiché dans le dashboard)
-            creancesMoisValue = 25000;
+            // Récupérer Créances du Mois RÉELLES via l'API
+            try {
+                const creancesResponse = await fetch(`http://localhost:${PORT}/api/dashboard/creances-mois?month=${monthYear}`, {
+                    headers: {
+                        'Cookie': `connect.sid=${req.sessionID}` // Transmettre la session
+                    }
+                });
+                if (creancesResponse.ok) {
+                    const creancesData = await creancesResponse.json();
+                    creancesMoisValue = creancesData.creances_mois || 0;
+                    console.log(`💰 Créances du mois récupérées: ${creancesMoisValue} FCFA`);
+                } else {
+                    console.warn('Erreur récupération créances API, utilisation valeur 0');
+                    creancesMoisValue = 0;
+                }
+            } catch (error) {
+                console.error('Erreur appel API créances:', error);
+                creancesMoisValue = 0;
+            }
             
             // Récupérer Stock Point de Vente (dernière valeur disponible)
             const stockQuery = `
@@ -5877,11 +5893,12 @@ app.get('/api/dashboard/total-creances', requireAuth, async (req, res) => {
     }
 });
 
-// Route pour obtenir les créances du mois en cours (Total Avances seulement)
+// Route pour obtenir les créances du mois (accepte paramètre month optionnel)
 app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
     try {
         const userRole = req.session.user.role;
         const userId = req.session.user.id;
+        const { month } = req.query; // Format optionnel YYYY-MM
 
         let accountFilter = '';
         let params = [];
@@ -5892,16 +5909,28 @@ app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
             params = [userId];
         }
 
-        // Calculer le début et la fin du mois en cours
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        // Calculer les dates selon le mois demandé ou le mois en cours
+        let startOfMonth, endOfMonth;
+        
+        if (month && /^\d{4}-\d{2}$/.test(month)) {
+            // Mois spécifique fourni
+            const [year, monthNum] = month.split('-').map(Number);
+            startOfMonth = new Date(year, monthNum - 1, 1);
+            endOfMonth = new Date(year, monthNum, 0, 23, 59, 59);
+        } else {
+            // Mois en cours par défaut
+            const now = new Date();
+            startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        }
 
         const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
         const endOfMonthStr = endOfMonth.toISOString().split('T')[0] + ' 23:59:59';
 
         // Paramètres pour la requête
         const queryParams = userRole === 'directeur' ? [userId, startOfMonthStr, endOfMonthStr] : [startOfMonthStr, endOfMonthStr];
+
+        console.log(`🎯 Calcul créances pour période: ${startOfMonthStr} à ${endOfMonthStr.split(' ')[0]}`);
 
         const result = await pool.query(`
             SELECT 
@@ -5923,6 +5952,8 @@ app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
         `, queryParams);
 
         const totalAvancesMois = parseInt(result.rows[0].total_avances_mois) || 0;
+
+        console.log(`💰 Créances du mois calculées: ${totalAvancesMois} FCFA`);
 
         res.json({ 
             creances_mois: totalAvancesMois,
@@ -6802,34 +6833,33 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
         let query, groupBy;
         
         if (period_type === 'weekly') {
-            // Grouper par semaine (lundi de chaque semaine)
+            // Grouper par semaine (lundi de chaque semaine) avec calcul correct
             query = `
                 SELECT 
                     DATE_TRUNC('week', snapshot_date)::date as period,
                     AVG(cash_bictorys_amount) as cash_bictorys,
-                    AVG(creances_total) as creances,
+                    AVG(creances_mois) as creances,
                     AVG(stock_point_vente) as stock_pv,
                     AVG(stock_vivant_variation) as ecart_stock_vivant,
-                    AVG(daily_burn * 7) as cash_burn,
-                    195000 as charges_estimees,
-                    AVG(cash_bictorys_amount + creances_total + stock_point_vente + stock_vivant_variation - (daily_burn * 7) - 195000) as pl_final
+                    AVG(weekly_burn) as cash_burn_weekly,
+                    AVG(monthly_burn) as cash_burn_monthly
                 FROM dashboard_snapshots
                 WHERE snapshot_date >= $1 AND snapshot_date <= $2
                 GROUP BY DATE_TRUNC('week', snapshot_date)
                 ORDER BY period
             `;
         } else {
-            // Données journalières
+            // Données journalières avec calcul du prorata correct
             query = `
                 SELECT 
                     snapshot_date as period,
                     cash_bictorys_amount as cash_bictorys,
-                    creances_total as creances,
+                    creances_mois as creances,
                     stock_point_vente as stock_pv,
                     stock_vivant_variation as ecart_stock_vivant,
-                    daily_burn as cash_burn,
-                    195000 as charges_estimees,
-                    (cash_bictorys_amount + creances_total + stock_point_vente + stock_vivant_variation - daily_burn - 195000) as pl_final
+                    monthly_burn as cash_burn,
+                    monthly_burn as cash_burn_monthly,
+                    weekly_burn as cash_burn_weekly
                 FROM dashboard_snapshots
                 WHERE snapshot_date >= $1 AND snapshot_date <= $2
                 ORDER BY snapshot_date
@@ -6838,16 +6868,82 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
 
         const result = await pool.query(query, [start_date, end_date]);
         
-        const plData = result.rows.map(row => ({
-            date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
-            cash_bictorys: parseFloat(row.cash_bictorys) || 0,
-            creances: parseFloat(row.creances) || 0,
-            stock_pv: parseFloat(row.stock_pv) || 0,
-            ecart_stock_vivant: parseFloat(row.ecart_stock_vivant) || 0,
-            cash_burn: parseFloat(row.cash_burn) || 0,
-            charges_estimees: parseFloat(row.charges_estimees) || 195000,
-            pl_final: parseFloat(row.pl_final) || 0
-        }));
+        // Lire l'estimation des charges fixes depuis le fichier JSON
+        let chargesFixesEstimation = 5850000; // Valeur par défaut
+        try {
+            const configPath = path.join(__dirname, 'financial_settings.json');
+            if (fs.existsSync(configPath)) {
+                const configData = fs.readFileSync(configPath, 'utf8');
+                const financialConfig = JSON.parse(configData);
+                chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 5850000;
+            }
+        } catch (configError) {
+            console.error('Erreur lecture config financière pour visualisation PL:', configError);
+        }
+        
+        const plData = result.rows.map(row => {
+            const snapshotDate = new Date(row.period);
+            const cashBictorys = parseFloat(row.cash_bictorys) || 0;
+            const creances = parseFloat(row.creances) || 0;
+            const stockPv = parseFloat(row.stock_pv) || 0;
+            const ecartStockVivant = parseFloat(row.ecart_stock_vivant) || 0;
+            
+            // Utiliser le cash burn approprié selon le type de période
+            let cashBurn = 0;
+            if (period_type === 'weekly') {
+                cashBurn = parseFloat(row.cash_burn_weekly) || 0;
+            } else {
+                // Pour les données journalières, toujours utiliser monthly_burn
+                cashBurn = parseFloat(row.cash_burn_monthly) || 0;
+            }
+            
+            // Calculer le prorata des charges fixes basé sur la date du snapshot
+            let chargesProrata = 0;
+            if (chargesFixesEstimation > 0) {
+                const currentDay = snapshotDate.getDate();
+                const currentMonth = snapshotDate.getMonth() + 1;
+                const currentYear = snapshotDate.getFullYear();
+                
+                // Calculer le nombre de jours ouvrables écoulés dans le mois (lundi à samedi)
+                let joursOuvrablesEcoules = 0;
+                for (let day = 1; day <= currentDay; day++) {
+                    const date = new Date(currentYear, currentMonth - 1, day);
+                    const dayOfWeek = date.getDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
+                    if (dayOfWeek !== 0) { // Exclure les dimanches
+                        joursOuvrablesEcoules++;
+                    }
+                }
+                
+                // Calculer le nombre total de jours ouvrables dans le mois
+                const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+                let totalJoursOuvrables = 0;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(currentYear, currentMonth - 1, day);
+                    const dayOfWeek = date.getDay();
+                    if (dayOfWeek !== 0) { // Exclure les dimanches
+                        totalJoursOuvrables++;
+                    }
+                }
+                
+                // Calculer le prorata
+                chargesProrata = (chargesFixesEstimation * joursOuvrablesEcoules) / totalJoursOuvrables;
+            }
+            
+            // Calcul du PL final avec la formule correcte
+            const plBase = cashBictorys + creances + stockPv - cashBurn;
+            const plFinal = plBase + ecartStockVivant - chargesProrata;
+            
+            return {
+                date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
+                cash_bictorys: cashBictorys,
+                creances: creances,
+                stock_pv: stockPv,
+                ecart_stock_vivant: ecartStockVivant,
+                cash_burn: cashBurn,
+                charges_estimees: Math.round(chargesProrata),
+                pl_final: Math.round(plFinal)
+            };
+        });
 
         console.log(`✅ Données PL récupérées: ${plData.length} points de ${start_date} à ${end_date}`);
 
@@ -7028,20 +7124,15 @@ app.get('/api/visualisation/solde-data', requireAdminAuth, async (req, res) => {
             }
 
             // Calculer le solde total à la fin de la période
-            // Solde = Total crédité - Total dépensé jusqu'à cette date
+            // Utiliser la même logique que l'API stats-cards (filtrage par account_type)
             const soldeResult = await pool.query(`
                 SELECT 
-                    COALESCE(SUM(a.total_credited), 0) - COALESCE(SUM(expenses_total.total_spent), 0) as solde_total,
-                    COUNT(DISTINCT a.id) as comptes_actifs
+                    COALESCE(SUM(a.current_balance), 0) as solde_total,
+                    COUNT(a.id) as comptes_actifs
                 FROM accounts a
-                LEFT JOIN (
-                    SELECT account_id, SUM(total) as total_spent
-                    FROM expenses
-                    WHERE expense_date <= $1
-                    GROUP BY account_id
-                ) expenses_total ON a.id = expenses_total.account_id
-                WHERE a.is_active = true
-            `, [periodEnd + ' 23:59:59']);
+                WHERE a.is_active = true 
+                AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
+            `);
 
             const current = parseInt(soldeResult.rows[0].solde_total) || 0;
             const comptesActifs = parseInt(soldeResult.rows[0].comptes_actifs) || 0;

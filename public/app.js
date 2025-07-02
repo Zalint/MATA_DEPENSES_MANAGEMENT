@@ -5052,7 +5052,13 @@ function getDeliveryActionButtons(delivery, accountId, assignedDirectors, curren
 // Checks if the current user can validate a delivery
 function canValidateDelivery(delivery, currentUser, assignedDirectors) {
     if (!currentUser) return false;
-    // DG, PCA, and Admin can always validate
+    
+    // No actions allowed on fully validated or rejected deliveries
+    if (delivery.validation_status === 'fully_validated' || delivery.validation_status === 'rejected') {
+        return false;
+    }
+    
+    // DG, PCA, and Admin can always validate (except for fully validated/rejected)
     if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         return true;
     }
@@ -5077,14 +5083,20 @@ function canValidateDelivery(delivery, currentUser, assignedDirectors) {
 // Checks if the current user can reject a delivery
 function canRejectDelivery(delivery, currentUser, assignedDirectors) {
     if (!currentUser) return false;
-    // DG, PCA, and Admin can always reject
+    
+    // No actions allowed on fully validated or rejected deliveries
+    if (delivery.validation_status === 'fully_validated' || delivery.validation_status === 'rejected') {
+        return false;
+    }
+    
+    // DG, PCA, and Admin can reject (except for fully validated/rejected)
     if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         return true;
     }
-    // Assigned directors can reject deliveries that are not fully validated
+    // Assigned directors can reject deliveries that are not fully validated or rejected
     if (currentUser.role === 'directeur') {
         const isAssigned = assignedDirectors.includes(currentUser.id);
-        return isAssigned && delivery.validation_status !== 'fully_validated';
+        return isAssigned;
     }
     return false;
 }
@@ -5114,6 +5126,21 @@ function closePartnerDetails() {
     if (detailsSection) detailsSection.style.display = 'none';
     if (summarySection) summarySection.style.display = 'block';
     loadPartnerSummary(); // Refresh the summary view
+}
+
+// Get assigned directors for a partner account
+async function getAssignedDirectors(accountId) {
+    try {
+        const response = await fetch(`/api/partner/${accountId}/directors`);
+        if (!response.ok) {
+            throw new Error('Failed to fetch assigned directors');
+        }
+        const directors = await response.json();
+        return directors.assigned_director_ids || [];
+    } catch (error) {
+        console.error('[Partner] Error getting assigned directors:', error);
+        return [];
+    }
 }
 
 // =================================================================
@@ -11784,12 +11811,34 @@ let currentVisualisationTab = 'pl';
 let visualisationCharts = {};
 let currentVisualisationData = {};
 
+// Fonction pour afficher/masquer l'indicateur de chargement de la visualisation
+function showVisualisationLoading(show) {
+    const loadingElements = document.querySelectorAll('.viz-loading');
+    const contentElements = document.querySelectorAll('.viz-content');
+    
+    if (show) {
+        loadingElements.forEach(el => {
+            if (el) el.style.display = 'block';
+        });
+        contentElements.forEach(el => {
+            if (el) el.style.opacity = '0.5';
+        });
+    } else {
+        loadingElements.forEach(el => {
+            if (el) el.style.display = 'none';
+        });
+        contentElements.forEach(el => {
+            if (el) el.style.opacity = '1';
+        });
+    }
+}
+
 // Initialiser le module de visualisation
 async function initVisualisationModule() {
     console.log('🔄 CLIENT: Initialisation du module de visualisation');
     
     try {
-        // Configurer les dates par défaut (derniers 30 jours)
+        // Configurer les dates par défaut (derniers 90 jours pour avoir plus de données)
         setupVisualisationDateControls();
         
         // Configurer les événements des onglets
@@ -12070,19 +12119,21 @@ function createSoldeChart() {
 // Configurer les dates par défaut
 function setupVisualisationDateControls() {
     const today = new Date();
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(today.getDate() - 30);
+    const ninetyDaysAgo = new Date(today);
+    ninetyDaysAgo.setDate(today.getDate() - 90);
     
     const startDateInput = document.getElementById('viz-start-date');
     const endDateInput = document.getElementById('viz-end-date');
     
     if (startDateInput) {
-        startDateInput.value = thirtyDaysAgo.toISOString().split('T')[0];
+        startDateInput.value = ninetyDaysAgo.toISOString().split('T')[0];
     }
     
     if (endDateInput) {
         endDateInput.value = today.toISOString().split('T')[0];
     }
+    
+    console.log(`📅 CLIENT: Dates par défaut configurées: ${ninetyDaysAgo.toISOString().split('T')[0]} à ${today.toISOString().split('T')[0]}`);
 }
 
 // Configurer les événements des onglets
@@ -12204,6 +12255,287 @@ async function loadVisualisationData() {
     }
 }
 
+// ===== FONCTIONS DE CHARGEMENT DE DONNÉES POUR VISUALISATION =====
+
+// Charger les données PL pour la visualisation
+async function loadPLData(startDate, endDate, periodType) {
+    try {
+        console.log('📊 CLIENT: Chargement données PL pour visualisation');
+        const response = await fetch(`/api/visualisation/pl-data?start_date=${startDate}&end_date=${endDate}&period_type=${periodType}`);
+        if (!response.ok) throw new Error('Erreur chargement données PL');
+        
+        const result = await response.json();
+        
+        // Les données arrivent déjà formatées depuis l'API
+        currentVisualisationData.pl = {
+            data: result.data || [],
+            summary: result.summary || {}
+        };
+        
+        console.log('✅ CLIENT: Données PL chargées', currentVisualisationData.pl);
+        console.log(`📈 CLIENT: ${result.data?.length || 0} points de données PL trouvés`);
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement données PL:', error);
+        currentVisualisationData.pl = { data: [], summary: {} };
+    }
+}
+
+// Charger les données Stock Vivant pour la visualisation
+async function loadStockVivantVisualisationData(startDate, endDate, periodType) {
+    try {
+        console.log('📊 CLIENT: Chargement données Stock Vivant pour visualisation');
+        const response = await fetch(`/api/visualisation/stock-vivant-data?start_date=${startDate}&end_date=${endDate}&period_type=${periodType}`);
+        
+        if (!response.ok) {
+            throw new Error('Erreur chargement données Stock Vivant');
+        }
+        
+        const result = await response.json();
+        
+        currentVisualisationData.stockVivant = {
+            data: result.data || [],
+            summary: result.summary || {}
+        };
+        
+        console.log('✅ CLIENT: Données Stock Vivant chargées', currentVisualisationData.stockVivant);
+        console.log(`📈 CLIENT: ${result.data?.length || 0} points de données Stock Vivant trouvés`);
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement données Stock Vivant:', error);
+        currentVisualisationData.stockVivant = { data: [], summary: {} };
+    }
+}
+
+// Charger les données Stock PV pour la visualisation
+async function loadStockPVData(startDate, endDate, periodType) {
+    try {
+        console.log('📊 CLIENT: Chargement données Stock PV pour visualisation');
+        const response = await fetch(`/api/visualisation/stock-pv-data?start_date=${startDate}&end_date=${endDate}&period_type=${periodType}`);
+        if (!response.ok) throw new Error('Erreur chargement données Stock PV');
+        
+        const result = await response.json();
+        
+        currentVisualisationData.stockPV = {
+            data: result.data || [],
+            summary: result.summary || {}
+        };
+        
+        console.log('✅ CLIENT: Données Stock PV chargées', currentVisualisationData.stockPV);
+        console.log(`📈 CLIENT: ${result.data?.length || 0} points de données Stock PV trouvés`);
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement données Stock PV:', error);
+        currentVisualisationData.stockPV = { data: [], summary: {} };
+    }
+}
+
+// Charger les données de solde pour la visualisation
+async function loadSoldeData(startDate, endDate, periodType) {
+    try {
+        console.log('📊 CLIENT: Chargement données Solde pour visualisation');
+        const response = await fetch(`/api/visualisation/solde-data?start_date=${startDate}&end_date=${endDate}&period_type=${periodType}`);
+        if (!response.ok) throw new Error('Erreur chargement données Solde');
+        
+        const result = await response.json();
+        
+        currentVisualisationData.solde = {
+            data: result.data || [],
+            summary: result.summary || {}
+        };
+        
+        console.log('✅ CLIENT: Données Solde chargées', currentVisualisationData.solde);
+        console.log(`📈 CLIENT: ${result.data?.length || 0} points de données Solde trouvés`);
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement données Solde:', error);
+        currentVisualisationData.solde = { data: [], summary: {} };
+    }
+}
+
+// Fonction utilitaire pour obtenir la clé des données selon l'onglet
+function getVisualisationDataKey(tab) {
+    const keyMap = {
+        'pl': 'pl',
+        'stock-vivant': 'stockVivant',
+        'stock-pv': 'stockPV',
+        'solde': 'solde'
+    };
+    return keyMap[tab] || 'pl';
+}
+
+// Fonction utilitaire pour mettre à jour le tableau de visualisation
+function updateVisualisationTable(tab, data) {
+    console.log(`📊 CLIENT: Mise à jour tableau pour onglet ${tab}`, data);
+    
+    if (!data || !data.data || !Array.isArray(data.data)) {
+        console.warn(`⚠️ CLIENT: Données invalides pour l'onglet ${tab}`, data);
+        return;
+    }
+    
+    // Identifier le bon tableau selon l'onglet
+    let tbodyId;
+    switch (tab) {
+        case 'pl':
+            tbodyId = 'pl-data-tbody';
+            break;
+        case 'stock-vivant':
+            tbodyId = 'stock-vivant-data-tbody';
+            break;
+        case 'stock-pv':
+            tbodyId = 'stock-pv-data-tbody';
+            break;
+        case 'solde':
+            tbodyId = 'solde-data-tbody';
+            break;
+        default:
+            console.warn(`⚠️ CLIENT: Onglet inconnu: ${tab}`);
+            return;
+    }
+    
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) {
+        console.error(`❌ CLIENT: Élément ${tbodyId} non trouvé`);
+        return;
+    }
+    
+    // Vider le tableau
+    tbody.innerHTML = '';
+    
+    // Remplir avec les nouvelles données
+    data.data.forEach(row => {
+        const tr = document.createElement('tr');
+        
+        switch (tab) {
+            case 'pl':
+                tr.innerHTML = `
+                    <td>${row.date}</td>
+                    <td>${formatCurrency(row.cash_bictorys)}</td>
+                    <td>${formatCurrency(row.creances)}</td>
+                    <td>${formatCurrency(row.stock_pv)}</td>
+                    <td>${formatCurrency(row.ecart_stock_vivant)}</td>
+                    <td>${formatCurrency(row.cash_burn)}</td>
+                    <td>${formatCurrency(row.charges_estimees)}</td>
+                    <td><strong>${formatCurrency(row.pl_final)}</strong></td>
+                `;
+                break;
+                
+            case 'stock-vivant':
+                tr.innerHTML = `
+                    <td>${row.date}</td>
+                    <td>${formatCurrency(row.total_stock_vivant)}</td>
+                    <td class="${row.variation >= 0 ? 'text-success' : 'text-danger'}">
+                        ${row.variation >= 0 ? '+' : ''}${formatCurrency(row.variation)}
+                    </td>
+                    <td>${row.nombre_entrees || 0}</td>
+                `;
+                break;
+                
+            case 'stock-pv':
+                tr.innerHTML = `
+                    <td>${row.date}</td>
+                    <td>${formatCurrency(row.stock_point_vente)}</td>
+                    <td class="${row.variation >= 0 ? 'text-success' : 'text-danger'}">
+                        ${row.variation >= 0 ? '+' : ''}${formatCurrency(row.variation)}
+                    </td>
+                    <td>${row.points_vente || 0}</td>
+                `;
+                break;
+                
+            case 'solde':
+                tr.innerHTML = `
+                    <td>${row.date}</td>
+                    <td>${formatCurrency(row.solde_total)}</td>
+                    <td class="${row.variation >= 0 ? 'text-success' : 'text-danger'}">
+                        ${row.variation >= 0 ? '+' : ''}${formatCurrency(row.variation)}
+                    </td>
+                    <td>${row.comptes_actifs || 0}</td>
+                `;
+                break;
+        }
+        
+        tbody.appendChild(tr);
+    });
+    
+    console.log(`✅ CLIENT: Tableau ${tbodyId} mis à jour avec ${data.data.length} lignes`);
+}
+
+// ===== FONCTIONS SETUP POUR LE MODULE VISUALISATION =====
+
+// Configurer les contrôles de date pour la visualisation
+function setupVisualisationDateControls() {
+    console.log('📅 CLIENT: Configuration des contrôles de date visualisation');
+    
+    // Définir les dates par défaut (derniers 90 jours pour avoir plus de données)
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(endDate.getDate() - 90);
+    
+    const startDateInput = document.getElementById('viz-start-date');
+    const endDateInput = document.getElementById('viz-end-date');
+    
+    if (startDateInput) startDateInput.value = startDate.toISOString().split('T')[0];
+    if (endDateInput) endDateInput.value = endDate.toISOString().split('T')[0];
+    
+    console.log(`📅 CLIENT: Dates par défaut configurées: ${startDate.toISOString().split('T')[0]} à ${endDate.toISOString().split('T')[0]}`);
+}
+
+// Configurer les onglets de visualisation
+function setupVisualisationTabs() {
+    console.log('📑 CLIENT: Configuration des onglets visualisation');
+    
+    const tabButtons = document.querySelectorAll('.tab-button');
+    tabButtons.forEach(button => {
+        button.addEventListener('click', function() {
+            const tabId = this.getAttribute('data-viz');
+            switchVisualisationTab(tabId);
+        });
+    });
+}
+
+// Configurer les contrôles de visualisation
+function setupVisualisationControls() {
+    console.log('🎛️ CLIENT: Configuration des contrôles visualisation');
+    
+    const refreshButton = document.getElementById('viz-refresh');
+    if (refreshButton) {
+        refreshButton.addEventListener('click', loadVisualisationData);
+    }
+    
+    const periodSelect = document.getElementById('viz-period-type');
+    if (periodSelect) {
+        periodSelect.addEventListener('change', function() {
+            console.log('📊 CLIENT: Période changée:', this.value);
+            loadVisualisationData(); // Recharger automatiquement les données
+        });
+    }
+}
+
+// Changer d'onglet de visualisation
+function switchVisualisationTab(tabId) {
+    console.log(`📑 CLIENT: Changement vers onglet ${tabId}`);
+    
+    // Mettre à jour l'onglet actuel
+    currentVisualisationTab = tabId;
+    
+    // Mettre à jour l'interface
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabPanels = document.querySelectorAll('.viz-panel');
+    
+    // Mettre à jour les boutons
+    tabButtons.forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-viz') === tabId);
+    });
+    
+    // Mettre à jour les panneaux
+    tabPanels.forEach(panel => {
+        const panelId = `${tabId}-viz`;
+        panel.classList.toggle('active', panel.id === panelId);
+    });
+    
+    // Mettre à jour les données affichées
+    const dataKey = getVisualisationDataKey(tabId);
+    if (currentVisualisationData[dataKey]) {
+        updateVisualisationTable(tabId, currentVisualisationData[dataKey]);
+    }
+}
+
 // ===== MODULE DE SAUVEGARDE DU TABLEAU DE BORD =====
 
 // Initialiser la section de sauvegarde du tableau de bord
@@ -12228,43 +12560,117 @@ function initDashboardSaveSection() {
 
 // Sauvegarder un snapshot du tableau de bord
 async function saveDashboardSnapshot() {
-    console.log(`[Partner] Loading configuration for account ID: ${accountId}`);
-    const addDeliveryForm = document.getElementById('addDeliveryForm');
-    const deliveryAuthWarning = document.getElementById('delivery-authorization-warning');
+    console.log('💾 CLIENT: Début sauvegarde snapshot tableau de bord');
     
-    if (!addDeliveryForm || !deliveryAuthWarning) {
-        console.error('[Partner] ERROR: Form elements (addDeliveryForm or delivery-authorization-warning) not found in the DOM.');
+    const snapshotDateInput = document.getElementById('snapshot-date');
+    const snapshotNotesInput = document.getElementById('snapshot-notes');
+    
+    if (!snapshotDateInput) {
+        console.error('❌ CLIENT: Élément snapshot-date non trouvé');
+        alert('Erreur: champ date non trouvé');
         return;
     }
-
+    
+    const snapshotDate = snapshotDateInput.value;
+    const notes = snapshotNotesInput ? snapshotNotesInput.value : '';
+    
+    if (!snapshotDate) {
+        alert('Veuillez sélectionner une date pour le snapshot');
+        return;
+    }
+    
     try {
-        console.log('[Partner] Checking expense authorization...');
-        const response = await fetch(`/api/partner/${accountId}/can-expense`);
+        // Fonction utilitaire pour parser les valeurs formatées en français
+        function parseFormattedNumber(text) {
+            if (!text) return 0;
+            
+            // Supprimer les devises et unités communes
+            let cleanText = text.toString()
+                .replace(/FCFA?/gi, '')  // Supprimer FCFA/CFA
+                .replace(/F\s*CFA/gi, '') // Supprimer "F CFA"
+                .replace(/€/g, '')       // Supprimer euro
+                .replace(/\$/g, '')      // Supprimer dollar
+                .trim();
+            
+            // Si le texte contient une virgule, c'est probablement le séparateur décimal français
+            if (cleanText.includes(',')) {
+                // Format français : "1 831 463,77"
+                const parts = cleanText.split(',');
+                if (parts.length === 2) {
+                    // Partie entière : supprimer tous les espaces
+                    const integerPart = parts[0].replace(/\s/g, '');
+                    // Partie décimale : garder seulement les chiffres
+                    const decimalPart = parts[1].replace(/[^\d]/g, '');
+                    const result = parseFloat(`${integerPart}.${decimalPart}`);
+                    console.log(`📊 Parse "${text}" -> "${integerPart}.${decimalPart}" -> ${result}`);
+                    return isNaN(result) ? 0 : result;
+                }
+            }
+            
+            // Sinon, supprimer tous les caractères non-numériques sauf point et tiret
+            const fallback = parseFloat(cleanText.replace(/[^\d.-]/g, '') || '0');
+            console.log(`📊 Parse fallback "${text}" -> ${fallback}`);
+            return isNaN(fallback) ? 0 : fallback;
+        }
+        
+        // Collecter toutes les valeurs actuelles du tableau de bord
+        const snapshotData = {
+            snapshot_date: snapshotDate,
+            notes: notes,
+            // Valeurs des cartes de statistiques
+            total_spent_amount: parseFormattedNumber(document.getElementById('total-spent-amount')?.textContent),
+            total_remaining_amount: parseFormattedNumber(document.getElementById('total-remaining-amount')?.textContent),
+            cash_bictorys_amount: parseFormattedNumber(document.getElementById('cash-bictorys-latest')?.textContent),
+            creances_total: parseFormattedNumber(document.getElementById('total-creances')?.textContent),
+            creances_mois: parseFormattedNumber(document.getElementById('creances-mois')?.textContent),
+            stock_point_vente: parseFormattedNumber(document.getElementById('stock-total')?.textContent),
+            stock_vivant_total: parseFormattedNumber(document.getElementById('stock-vivant-total')?.textContent),
+            stock_vivant_variation: parseFormattedNumber(document.getElementById('stock-vivant-variation')?.textContent),
+            daily_burn: 0, // À implémenter si nécessaire
+            weekly_burn: parseFormattedNumber(document.getElementById('weekly-burn')?.textContent),
+            monthly_burn: parseFormattedNumber(document.getElementById('monthly-burn')?.textContent),
+            solde_general: parseFormattedNumber(document.getElementById('solde-amount')?.textContent),
+            solde_depot: parseFormattedNumber(document.getElementById('total-depot-balance')?.textContent),
+            solde_partner: parseFormattedNumber(document.getElementById('total-partner-balance')?.textContent),
+            total_credited_with_expenses: 0, // À implémenter si nécessaire
+            total_credited_general: 0 // À implémenter si nécessaire
+        };
+        
+        console.log('📊 CLIENT: Données snapshot collectées:', snapshotData);
+        
+        const response = await fetch('/api/dashboard/save-snapshot', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(snapshotData)
+        });
         
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`[Partner] Authorization check failed with status ${response.status}:`, errorText);
-            throw new Error(`Authorization check failed: ${response.statusText}`);
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Erreur lors de la sauvegarde');
         }
         
-        const data = await response.json();
-        console.log('[Partner] Authorization response received:', data);
+        const result = await response.json();
+        console.log('✅ CLIENT: Snapshot sauvegardé avec succès:', result);
         
-        if (data.canExpense) {
-            console.log('[Partner] SUCCESS: User is authorized. Displaying delivery form.');
-            addDeliveryForm.style.display = 'block';
-            deliveryAuthWarning.style.display = 'none';
-        } else {
-            console.warn(`[Partner] FAILED: User is not authorized. Reason: "${data.reason}". Hiding form.`);
-            addDeliveryForm.style.display = 'none';
-            deliveryAuthWarning.style.display = 'block';
-            deliveryAuthWarning.textContent = data.reason || 'Vous n\'êtes pas autorisé à ajouter une livraison pour ce compte.';
+        // Afficher un message de succès
+        let alertMessage = result.message;
+        if (result.wasUpdate && result.previousSnapshot) {
+            alertMessage += `\n\nAncien snapshot créé par: ${result.previousSnapshot.created_by}`;
+            alertMessage += `\nAncien snapshot créé le: ${new Date(result.previousSnapshot.created_at).toLocaleString()}`;
         }
+        
+        alert(alertMessage);
+        
+        // Optionnel: réinitialiser les notes
+        if (snapshotNotesInput) {
+            snapshotNotesInput.value = '';
+        }
+        
     } catch (error) {
-        console.error('[Partner] CRITICAL: An exception occurred while checking authorization:', error);
-        addDeliveryForm.style.display = 'none';
-        deliveryAuthWarning.style.display = 'block';
-        deliveryAuthWarning.textContent = 'Erreur critique lors de la vérification des autorisations.';
+        console.error('❌ CLIENT: Erreur sauvegarde snapshot:', error);
+        alert(`Erreur lors de la sauvegarde du snapshot: ${error.message}`);
     }
 }
 
@@ -12365,7 +12771,14 @@ async function loadPartnerDeliveries(accountId) {
 
 function canValidateDelivery(delivery, currentUser, assignedDirectors) {
     console.log(`[Partner] Checking validation permission for delivery ID ${delivery.id} by user:`, currentUser.username);
-    // Le DG, PCA et Admin peuvent toujours valider
+    
+    // No actions allowed on fully validated or rejected deliveries
+    if (delivery.validation_status === 'fully_validated' || delivery.validation_status === 'rejected') {
+        console.log(`[Partner] Delivery is ${delivery.validation_status} - no actions allowed`);
+        return false;
+    }
+    
+    // Le DG, PCA et Admin peuvent toujours valider (sauf si déjà validé/rejeté)
     if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
         console.log('[Partner] User is DG/PCA/Admin, can validate.');
         return true;
@@ -12400,7 +12813,14 @@ function canValidateDelivery(delivery, currentUser, assignedDirectors) {
 
 function canRejectDelivery(delivery, currentUser, assignedDirectors) {
     console.log(`[Partner] Checking rejection permission for delivery ID ${delivery.id} by user:`, currentUser.username);
-    // DG, PCA et Admin peuvent rejeter
+    
+    // No actions allowed on fully validated or rejected deliveries
+    if (delivery.validation_status === 'fully_validated' || delivery.validation_status === 'rejected') {
+        console.log(`[Partner] Delivery is ${delivery.validation_status} - no actions allowed`);
+        return false;
+    }
+    
+    // DG, PCA et Admin peuvent rejeter (sauf si déjà validé/rejeté)
     if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
         console.log('[Partner] User is DG/PCA/Admin, can reject.');
         return true;
@@ -12492,3 +12912,65 @@ async function handleDeliveryValidation(deliveryId, accountId) {
         showNotification(`Erreur: ${error.message}`, 'error');
     }
 }
+
+// ===== AUTO-CALCULATION FOR DELIVERY AMOUNT =====
+// Add auto-calculation functionality for delivery form
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('[Delivery] Setting up auto-calculation for delivery amount');
+    
+    const articleCountInput = document.getElementById('delivery-article-count');
+    const unitPriceInput = document.getElementById('delivery-unit-price');
+    const amountInput = document.getElementById('delivery-amount');
+    
+    // Flag to track if amount was manually edited after auto-calculation
+    let isAmountManuallyEdited = false;
+    
+    // Function to calculate and update the total amount
+    function calculateTotalAmount() {
+        const articleCount = parseInt(articleCountInput.value) || 0;
+        const unitPrice = parseInt(unitPriceInput.value) || 0;
+        
+        // Only auto-calculate if amount hasn't been manually edited
+        if (!isAmountManuallyEdited && articleCount > 0 && unitPrice > 0) {
+            const totalAmount = articleCount * unitPrice;
+            amountInput.value = totalAmount;
+            console.log(`[Delivery] Auto-calculated amount: ${articleCount} × ${unitPrice} = ${totalAmount} FCFA`);
+        }
+    }
+    
+    // Event listeners for auto-calculation
+    if (articleCountInput && unitPriceInput && amountInput) {
+        // Auto-calculate when article count changes
+        articleCountInput.addEventListener('input', function() {
+            console.log('[Delivery] Article count changed:', this.value);
+            isAmountManuallyEdited = false; // Reset manual edit flag
+            calculateTotalAmount();
+        });
+        
+        // Auto-calculate when unit price changes
+        unitPriceInput.addEventListener('input', function() {
+            console.log('[Delivery] Unit price changed:', this.value);
+            isAmountManuallyEdited = false; // Reset manual edit flag
+            calculateTotalAmount();
+        });
+        
+        // Track manual edits to amount field
+        amountInput.addEventListener('input', function() {
+            console.log('[Delivery] Amount manually edited:', this.value);
+            isAmountManuallyEdited = true;
+        });
+        
+        // Reset manual edit flag when form is reset
+        const deliveryForm = document.getElementById('addDeliveryForm');
+        if (deliveryForm) {
+            deliveryForm.addEventListener('reset', function() {
+                console.log('[Delivery] Form reset - clearing manual edit flag');
+                isAmountManuallyEdited = false;
+            });
+        }
+        
+        console.log('[Delivery] ✅ Auto-calculation setup complete');
+    } else {
+        console.warn('[Delivery] ⚠️ Could not find delivery form fields for auto-calculation');
+    }
+});
