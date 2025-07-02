@@ -232,7 +232,14 @@ async function showSection(sectionName) {
             }
             break;
         case 'partner-tracking':
-            loadPartnerSummary();
+            console.log('🔄 CLIENT: showSection - partner-tracking appelé');
+            try {
+                await loadPartnerSummary();
+                console.log('✅ CLIENT: showSection - partner-tracking terminé avec succès');
+            } catch (error) {
+                console.error('❌ CLIENT: Erreur dans showSection - partner-tracking:', error);
+                showNotification('Erreur lors du chargement des Comptes Partenaires', 'error');
+            }
             break;
         case 'manage-users':
             loadAllUsers();
@@ -331,6 +338,9 @@ async function loadInitialData() {
     // Initialiser les menus selon les permissions
     initMenuVisibility();
     
+    // Initialiser l'observer pour la section partenaires
+    initPartnerSectionObserver();
+    
     // Définir les dates par défaut AVANT de charger le dashboard
     // Utiliser une plage de dates élargie pour inclure toutes les dépenses existantes
     const startDate = '2025-01-01'; // Début de l'année pour capturer toutes les dépenses
@@ -365,6 +375,35 @@ async function loadInitialData() {
     await initDirectorCreditModule();
     // Stock vivant sera initialisé seulement quand on clique sur le menu
     console.log('ℹ️ CLIENT: Stock vivant sera initialisé à la demande');
+}
+
+// Initialiser l'observateur pour la section partenaires
+function initPartnerSectionObserver() {
+    const partnerSection = document.getElementById('partner-tracking-section');
+    if (!partnerSection) return;
+    
+    // Observer les changements de visibilité de la section
+    const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+            if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                const isVisible = partnerSection.classList.contains('active');
+                if (isVisible) {
+                    console.log('👁️ CLIENT: Section partenaires visible - rafraîchissement automatique');
+                    // Petit délai pour s'assurer que la section est complètement affichée
+                    setTimeout(() => {
+                        loadPartnerSummary();
+                    }, 100);
+                }
+            }
+        });
+    });
+    
+    observer.observe(partnerSection, {
+        attributes: true,
+        attributeFilter: ['class']
+    });
+    
+    console.log('👁️ CLIENT: Observer section partenaires initialisé');
 }
 
 async function loadCategories() {
@@ -796,7 +835,11 @@ async function createAdjustmentAccount() {
 
 // Fonction pour mettre à jour les cartes de statistiques
 async function updateStatsCards(startDate, endDate, cutoffDate) {
+    console.log('🎯 updateStatsCards: ===== DÉBUT FONCTION =====');
     try {
+        console.log('🎯 updateStatsCards: ENTRÉE dans le TRY');
+        console.log('🔄 updateStatsCards: Début mise à jour', { startDate, endDate, cutoffDate });
+        
         // Construire l'URL avec les paramètres de date
         let url = '/api/dashboard/stats-cards';
         const params = new URLSearchParams();
@@ -809,8 +852,21 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             url += '?' + params.toString();
         }
         
+        console.log('🌐 updateStatsCards: Appel API vers', url);
+        console.log('🎯 updateStatsCards: AVANT fetch()');
+        
         const response = await fetch(url);
+        
+        console.log('🎯 updateStatsCards: APRÈS fetch(), status:', response.status);
+        
+        if (!response.ok) {
+            throw new Error(`Erreur HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        console.log('🎯 updateStatsCards: AVANT response.json()');
         const stats = await response.json();
+        console.log('🎯 updateStatsCards: APRÈS response.json()');
+        console.log('📊 updateStatsCards: Données reçues', stats);
         
         // Mettre à jour les valeurs des cartes
         document.getElementById('total-spent-amount').textContent = formatCurrency(stats.totalSpent || 0);
@@ -869,22 +925,41 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             `Du ${formatDate(startDate)} au ${formatDate(endDate)}` : 
             'Période sélectionnée';
         
+        console.log('🎯 updateStatsCards: AVANT mise à jour des périodes');
         document.getElementById('spent-period').textContent = periodText;
         document.getElementById('remaining-period').textContent = 'Soldes actuels';
         document.getElementById('credited-expenses-period').textContent = 'Comptes avec activité';
         document.getElementById('credited-general-period').textContent = 'Tous les comptes';
+        console.log('🎯 updateStatsCards: APRÈS mise à jour des périodes');
+        
+        console.log('✅ updateStatsCards: Mise à jour terminée avec succès');
+        console.log('🎯 updateStatsCards: SORTIE du TRY avec succès');
         
     } catch (error) {
-        console.error('Erreur chargement statistiques cartes:', error);
+        console.log('🎯 updateStatsCards: ENTRÉE dans le CATCH');
+        console.error('❌ updateStatsCards: Erreur chargement statistiques cartes:', error);
+        
+        console.log('🎯 updateStatsCards: AVANT gestion valeurs par défaut');
         // Afficher des valeurs par défaut en cas d'erreur
-        document.getElementById('total-spent-amount').textContent = '0 FCFA';
-        document.getElementById('total-remaining-amount').textContent = '0 FCFA';
-        document.getElementById('total-credited-with-expenses').textContent = '0 FCFA';
-        document.getElementById('total-credited-general').textContent = '0 FCFA';
-        document.getElementById('total-depot-balance').textContent = '0 FCFA';
-        document.getElementById('total-partner-balance').textContent = '0 FCFA';
-        document.getElementById('pl-sans-stock-charges').textContent = '0 FCFA';
+        const defaultElements = [
+            'total-spent-amount', 'total-remaining-amount', 'total-credited-with-expenses',
+            'total-credited-general', 'total-depot-balance', 'total-partner-balance', 
+            'pl-sans-stock-charges', 'pl-estim-charges'
+        ];
+        
+        defaultElements.forEach(elementId => {
+            const element = document.getElementById(elementId);
+            if (element) {
+                element.textContent = '0 FCFA';
+            }
+        });
+        console.log('🎯 updateStatsCards: APRÈS gestion valeurs par défaut');
+        
+        // Ne pas relancer l'erreur pour permettre au finally parent de s'exécuter
+        console.warn('⚠️ updateStatsCards: Erreur gérée, continuant l\'exécution');
+        console.log('🎯 updateStatsCards: SORTIE du CATCH');
     }
+    console.log('🎯 updateStatsCards: ===== FIN FONCTION =====');
 }
 
 function createChart(containerId, data, type) {
@@ -4901,17 +4976,22 @@ function setupPartnerEventListeners() {
 // Charger le résumé des comptes partenaires
 async function loadPartnerSummary() {
     try {
+        console.log('🔄 CLIENT: loadPartnerSummary - début du chargement');
         const response = await fetch('/api/partner/delivery-summary');
         const partnerSummary = await response.json();
         
+        console.log('📊 CLIENT: loadPartnerSummary - données reçues:', partnerSummary.length, 'comptes');
         displayPartnerSummary(partnerSummary);
         
         // Charger aussi la configuration si admin
         if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
             await loadPartnerConfiguration();
         }
+        
+        console.log('✅ CLIENT: loadPartnerSummary - chargement terminé avec succès');
     } catch (error) {
-        console.error('Erreur chargement résumé partenaires:', error);
+        console.error('❌ CLIENT: Erreur chargement résumé partenaires:', error);
+        showNotification('Erreur lors du chargement des données partenaires', 'error');
     }
 }
 
@@ -4966,6 +5046,10 @@ async function showPartnerDetails(accountId, accountName) {
         // Hide summary view and show the details view
         if (partnerSummarySection) partnerSummarySection.style.display = 'none';
         if (partnerDetailsSection) partnerDetailsSection.style.display = 'block';
+        
+        // Show the back button when entering details view
+        const backButton = document.querySelector('.partner-back-button');
+        if (backButton) backButton.style.display = 'block';
 
         // Set the title and hidden input value
         document.getElementById('partner-details-title').textContent = `Détails - ${accountName}`;
@@ -5004,14 +5088,14 @@ async function displayDeliveries(accountId, deliveries, assignedDirectors) {
     const currentUser = await getCurrentUser();
     if (!currentUser) {
         console.error('[Partner] CRITICAL: Could not get current user. Aborting render.');
-        deliveriesTbody.innerHTML = '<tr><td colspan="8" class="error-message">Erreur: Utilisateur non chargé.</td></tr>';
+        deliveriesTbody.innerHTML = '<tr><td colspan="9" class="error-message">Erreur: Utilisateur non chargé.</td></tr>';
         return;
     }
     
     deliveriesTbody.innerHTML = ''; // Clear previous content
 
     if (!deliveries || deliveries.length === 0) {
-        deliveriesTbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Aucune livraison pour ce compte.</td></tr>';
+        deliveriesTbody.innerHTML = '<tr><td colspan="9" style="text-align: center;">Aucune livraison pour ce compte.</td></tr>';
     } else {
         deliveries.forEach(delivery => {
             const row = deliveriesTbody.insertRow();
@@ -5019,6 +5103,7 @@ async function displayDeliveries(accountId, deliveries, assignedDirectors) {
             
             // Pass currentUser to the function that generates action buttons
             const actionButtons = getDeliveryActionButtons(delivery, accountId, assignedDirectors, currentUser);
+            const deleteButton = getDeliveryDeleteButton(delivery, currentUser, assignedDirectors);
             
             row.innerHTML = `
                 <td>${new Date(delivery.delivery_date).toLocaleDateString()}</td>
@@ -5028,7 +5113,8 @@ async function displayDeliveries(accountId, deliveries, assignedDirectors) {
                 <td>${delivery.description || ''}</td>
                 <td>${delivery.created_by_name || 'N/A'}</td>
                 <td>${getDeliveryStatusText(delivery)}</td>
-                <td>${actionButtons}</td>
+                <td class="validation-cell">${actionButtons}</td>
+                <td class="delete-cell">${deleteButton}</td>
             `;
         });
     }
@@ -5047,7 +5133,41 @@ function getDeliveryActionButtons(delivery, accountId, assignedDirectors, curren
     if (canReject) {
         buttons += `<button class="reject-delivery-btn" data-delivery-id="${delivery.id}" data-account-id="${accountId}">Rejeter</button>`;
     }
-    return buttons;
+    
+    return buttons || '<span class="text-muted">-</span>';
+}
+
+// Generate delete button separately for isolation
+function getDeliveryDeleteButton(delivery, currentUser, assignedDirectors) {
+    const canDelete = canDeleteDelivery(delivery, currentUser, assignedDirectors);
+    
+    if (!canDelete) {
+        return '<span class="text-muted">-</span>';
+    }
+    
+    // Calculate remaining time for directors
+    let timeWarning = '';
+    if (currentUser.role === 'directeur') {
+        const deliveryDate = new Date(delivery.delivery_date);
+        const now = new Date();
+        const timeDiff = now - deliveryDate;
+        const hoursDiff = timeDiff / (1000 * 60 * 60);
+        const remainingHours = 48 - hoursDiff;
+        
+        if (remainingHours > 0) {
+            const hours = Math.floor(remainingHours);
+            const minutes = Math.floor((remainingHours % 1) * 60);
+            timeWarning = `Il reste ${hours}h${minutes}min`;
+        }
+    }
+    
+    const title = currentUser.role === 'directeur' && timeWarning ? 
+                 `Supprimer (${timeWarning})` : 
+                 'Supprimer définitivement';
+    
+    return `<button class="btn-delete-isolated" onclick="deletePartnerDelivery(${delivery.id})" title="${title}">
+                <i class="fas fa-trash"></i>
+            </button>`;
 }
 
 // Checks if the current user can validate a delivery
@@ -5102,6 +5222,31 @@ function canRejectDelivery(delivery, currentUser, assignedDirectors) {
     return false;
 }
 
+// Checks if the current user can delete a delivery
+function canDeleteDelivery(delivery, currentUser, assignedDirectors) {
+    if (!currentUser) return false;
+    
+    // DG, PCA, and Admin can delete any delivery (including validated ones)
+    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        return true;
+    }
+    
+    // Assigned directors can delete within 48h regardless of status
+    if (currentUser.role === 'directeur') {
+        const isAssigned = assignedDirectors.includes(currentUser.id);
+        if (!isAssigned) return false;
+        
+        // Check if delivery is within 48h window
+        const deliveryDate = new Date(delivery.delivery_date);
+        const now = new Date();
+        const timeDiff = now - deliveryDate;
+        const hoursDiff = timeDiff / (1000 * 60 * 60); // Convert to hours
+        
+        return hoursDiff <= 48;
+    }
+    
+    return false;
+}
 
 // Returns a formatted HTML string for the delivery status
 function getDeliveryStatusText(delivery) {
@@ -5126,6 +5271,13 @@ function closePartnerDetails() {
     const summarySection = document.querySelector('.partner-summary');
     if (detailsSection) detailsSection.style.display = 'none';
     if (summarySection) summarySection.style.display = 'block';
+    
+    // Hide the back button when returning to summary view
+    const backButton = document.querySelector('.partner-back-button');
+    if (backButton) backButton.style.display = 'none';
+    
+    // Force refresh of partner summary data
+    console.log('🔄 CLIENT: closePartnerDetails - rafraîchissement des données');
     loadPartnerSummary(); // Refresh the summary view
 }
 
@@ -5287,28 +5439,70 @@ async function editRejectedDelivery(deliveryId) {
     showNotification('Votre livraison a été rejetée. Vous pouvez créer une nouvelle livraison avec les corrections demandées.', 'info');
 }
 
-// Supprimer une livraison partenaire (Admin uniquement)
+// Supprimer une livraison partenaire (DG, PCA, Admin)
 async function deletePartnerDelivery(deliveryId) {
-    // Vérifier que l'utilisateur est admin
-    if (currentUser.role !== 'admin') {
-        showNotification('Seul l\'admin peut supprimer des livraisons', 'error');
-        return;
-    }
-    
-    // Demander confirmation avec avertissement
-    const confirmMessage = `⚠️ ATTENTION - Suppression Admin ⚠️\n\n` +
-                          `Êtes-vous sûr de vouloir supprimer définitivement cette livraison ?\n\n` +
-                          `Cette action :\n` +
-                          `• Supprimera la livraison de façon permanente\n` +
-                          `• Remboursera automatiquement le montant au compte si elle était validée\n` +
-                          `• Ne peut pas être annulée\n\n` +
-                          `Confirmez-vous la suppression ?`;
-    
-    if (!confirm(confirmMessage)) {
+    // Vérifier que l'utilisateur a les permissions appropriées
+    if (!['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        showNotification('Seuls les directeurs généraux, PCA et admin peuvent supprimer des livraisons', 'error');
         return;
     }
     
     try {
+        // D'abord récupérer les détails de la livraison pour afficher le montant
+        const accountId = document.getElementById('delivery-account-id').value;
+        const deliveriesResponse = await fetch(`/api/partner/${accountId}/deliveries`);
+        const deliveries = await deliveriesResponse.json();
+        const delivery = deliveries.find(d => d.id == deliveryId);
+        
+        if (!delivery) {
+            showNotification('Livraison non trouvée', 'error');
+            return;
+        }
+        
+        const formattedAmount = formatCurrency(delivery.amount);
+        const deliveryDate = new Date(delivery.delivery_date).toLocaleDateString();
+        const statusText = delivery.validation_status === 'fully_validated' ? 'VALIDÉE' : 
+                         delivery.validation_status === 'first_validated' ? 'partiellement validée' : 'en attente';
+        
+        // Calculer le temps restant pour les directeurs
+        let timeWarning = '';
+        if (currentUser.role === 'directeur') {
+            const deliveryDateTime = new Date(delivery.delivery_date);
+            const now = new Date();
+            const timeDiff = now - deliveryDateTime;
+            const hoursDiff = timeDiff / (1000 * 60 * 60);
+            const remainingHours = 48 - hoursDiff;
+            
+            if (remainingHours > 0) {
+                const hours = Math.floor(remainingHours);
+                const minutes = Math.floor((remainingHours % 1) * 60);
+                timeWarning = `⏰ Temps restant: ${hours}h${minutes}min\n`;
+            } else {
+                timeWarning = `❌ Délai de 48h dépassé - suppression non autorisée\n`;
+            }
+        }
+        
+        // Demander confirmation avec avertissement incluant le montant
+        const confirmMessage = `⚠️ ATTENTION - Suppression ${currentUser.role === 'admin' ? 'Admin' : 'Directeur'} ⚠️\n\n` +
+                              `Êtes-vous sûr de vouloir supprimer définitivement cette livraison ?\n\n` +
+                              `📅 Date: ${deliveryDate}\n` +
+                              `💰 Montant: ${formattedAmount}\n` +
+                              `📊 Statut: ${statusText}\n` +
+                              `📝 Description: ${delivery.description || 'N/A'}\n` +
+                              `${timeWarning}\n` +
+                              `Cette action :\n` +
+                              `• Supprimera la livraison de façon permanente\n` +
+                              `• ${delivery.validation_status === 'fully_validated' ? 
+                                   `Remboursera automatiquement ${formattedAmount} au compte partenaire` : 
+                                   'N\'affectera pas le solde du compte (livraison non validée)'}\n` +
+                              `• Ne peut pas être annulée\n\n` +
+                              `Confirmez-vous la suppression de cette livraison de ${formattedAmount} ?`;
+        
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+        
+        // Procéder à la suppression
         const response = await fetch(`/api/partner/deliveries/${deliveryId}`, {
             method: 'DELETE',
             headers: {
@@ -5323,11 +5517,10 @@ async function deletePartnerDelivery(deliveryId) {
             
             // Si la livraison était validée, afficher une notification spéciale
             if (data.wasValidated) {
-                showNotification('💰 Le montant de cette livraison validée a été automatiquement remboursé au compte partenaire.', 'info');
+                showNotification(`💰 Le montant de ${formattedAmount} a été automatiquement remboursé au compte partenaire.`, 'info');
             }
             
             // Recharger les données
-            const accountId = document.getElementById('delivery-account-id').value;
             const accountName = document.getElementById('partner-details-title').textContent.split(' - ')[1];
             await showPartnerDetails(accountId, accountName);
             await loadPartnerSummary();
@@ -5335,7 +5528,7 @@ async function deletePartnerDelivery(deliveryId) {
             showNotification(data.error, 'error');
         }
     } catch (error) {
-        console.error('Erreur suppression livraison admin:', error);
+        console.error('Erreur suppression livraison:', error);
         showNotification('Erreur lors de la suppression de la livraison', 'error');
     }
 }
@@ -6733,11 +6926,19 @@ function initMonthSelector() {
     updateMonthDisplay(currentMonth);
     updateDateFilters(currentMonth);
     
+    // S'assurer que les contraintes de snapshot-date sont définies dès le départ
+    setTimeout(() => {
+        updateSnapshotDateConstraints(currentMonth);
+    }, 100);
+    
     // Gestionnaire de changement de mois
     monthInput.addEventListener('change', function() {
         selectedMonth = this.value;
         updateMonthDisplay(selectedMonth);
         updateDateFilters(selectedMonth);
+        
+        // Afficher un message informatif à l'utilisateur
+        showNotification(`Contraintes de date mises à jour pour ${getMonthName(selectedMonth)}`, 'info');
     });
     
     // Gestionnaire du bouton de chargement
@@ -6771,6 +6972,47 @@ function updateDateFilters(monthYear) {
         console.log(`📅 Filtres de date mis à jour pour ${monthYear}: ${firstDayStr} à ${lastDayStr}`);
     } else {
         console.error('❌ Éléments de date non trouvés:', { dashboardStartDate, dashboardEndDate });
+    }
+    
+    // Mettre à jour les contraintes du champ snapshot-date
+    updateSnapshotDateConstraints(monthYear);
+}
+
+// Mettre à jour les contraintes du champ snapshot-date selon le mois sélectionné
+function updateSnapshotDateConstraints(monthYear = null) {
+    const snapshotDateInput = document.getElementById('snapshot-date');
+    if (!snapshotDateInput) return;
+    
+    // Utiliser le mois sélectionné ou le mois en cours
+    const targetMonth = monthYear || selectedMonth || getCurrentMonth();
+    const [year, month] = targetMonth.split('-').map(Number);
+    
+    // Premier jour du mois
+    const firstDayStr = `${year}-${month.toString().padStart(2, '0')}-01`;
+    
+    // Dernier jour du mois - calculer le nombre de jours dans le mois
+    const lastDayOfMonth = new Date(year, month, 0).getDate();
+    const lastDayStr = `${year}-${month.toString().padStart(2, '0')}-${lastDayOfMonth.toString().padStart(2, '0')}`;
+    
+    // Date d'aujourd'hui pour empêcher les dates futures
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Contraindre entre le premier jour du mois et aujourd'hui (le plus restrictif)
+    snapshotDateInput.min = firstDayStr;
+    snapshotDateInput.max = today < lastDayStr ? today : lastDayStr;
+    
+    console.log(`📅 Contraintes snapshot-date mises à jour pour ${targetMonth}: min=${snapshotDateInput.min}, max=${snapshotDateInput.max}`);
+    
+    // Si la date actuelle est en dehors des contraintes, la corriger
+    const currentValue = snapshotDateInput.value;
+    if (currentValue) {
+        if (currentValue < snapshotDateInput.min) {
+            snapshotDateInput.value = snapshotDateInput.min;
+            console.log(`📅 Date corrigée: ${currentValue} -> ${snapshotDateInput.min} (trop ancienne)`);
+        } else if (currentValue > snapshotDateInput.max) {
+            snapshotDateInput.value = snapshotDateInput.max;
+            console.log(`📅 Date corrigée: ${currentValue} -> ${snapshotDateInput.max} (trop récente)`);
+        }
     }
 }
 
@@ -9075,6 +9317,343 @@ async function loadMonthlyCashBictorys(monthYear) {
     } catch (error) {
         console.error('Erreur chargement Cash Bictorys mensuel:', error);
         document.getElementById('cash-bictorys-latest').textContent = '0 FCFA';
+    }
+}
+
+// ✨ NOUVELLE FONCTION: Charger Cash Bictorys avec une date de cutoff
+async function loadCashBictorysWithCutoff(cutoffDate) {
+    try {
+        console.log(`💰 CLIENT: Chargement Cash Bictorys avec cutoff: ${cutoffDate}`);
+        
+        // Extraire le mois de la date de cutoff pour l'API
+        const date = new Date(cutoffDate);
+        const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+        
+        // Appeler l'API avec le paramètre cutoff_date et debug_details
+        const response = await fetch(apiUrl(`/api/dashboard/monthly-cash-bictorys?month=${monthYear}&cutoff_date=${cutoffDate}&debug_details=true`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            document.getElementById('cash-bictorys-latest').textContent = data.formatted;
+            
+            // 📊 DEBUG: Vérifier si les données debug arrivent pour Cash Bictorys
+            console.log(`🔥 FORCE DEBUG: cash-bictorys response FULL:`, data);
+            console.log(`🔥 FORCE DEBUG: cash-bictorys response keys:`, Object.keys(data));
+            console.log(`🔥 FORCE DEBUG: cashBictorysDetails présent?`, !!data.cashBictorysDetails);
+            
+            // 📊 LOGS DÉTAILLÉS CASH BICTORYS DU MOIS
+            if (data.cashBictorysDetails) {
+                console.group(`💰 CASH BICTORYS DU MOIS - Détail jour par jour (${monthYear} jusqu'au ${cutoffDate})`);
+                console.log(`📅 Période analysée: ${data.cashBictorysDetails.startDate} à ${data.cashBictorysDetails.endDate}`);
+                console.log(`📊 Total jours analysés: ${data.cashBictorysDetails.totalDays}`);
+                
+                if (data.cashBictorysDetails.dailyBreakdown && data.cashBictorysDetails.dailyBreakdown.length > 0) {
+                    console.table(data.cashBictorysDetails.dailyBreakdown.map(day => ({
+                        'Date': day.date,
+                        'Montant (FCFA)': day.amount.toLocaleString('fr-FR'),
+                        'Évolution': day.evolution || 'Stable',
+                        'Note': day.note || ''
+                    })));
+                    
+                    console.log(`💰 Valeur finale Cash Bictorys: ${data.cashBictorysDetails.finalAmount.toLocaleString('fr-FR')} FCFA`);
+                    console.log(`📈 Valeur au début du mois: ${data.cashBictorysDetails.startAmount.toLocaleString('fr-FR')} FCFA`);
+                    console.log(`📉 Évolution totale: ${(data.cashBictorysDetails.finalAmount - data.cashBictorysDetails.startAmount).toLocaleString('fr-FR')} FCFA`);
+                } else {
+                    console.log('📊 Aucune donnée Cash Bictorys trouvée pour cette période');
+                }
+                console.groupEnd();
+            }
+            
+            console.log(`✅ CLIENT: Cash Bictorys mis à jour avec cutoff ${cutoffDate}: ${data.formatted}`);
+        } else {
+            console.error('❌ CLIENT: Erreur Cash Bictorys avec cutoff:', data.error);
+            document.getElementById('cash-bictorys-latest').textContent = '0 FCFA';
+        }
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement Cash Bictorys avec cutoff:', error);
+        document.getElementById('cash-bictorys-latest').textContent = '0 FCFA';
+    }
+}
+
+// ✨ NOUVELLE FONCTION CENTRALISÉE: Charger tout le dashboard avec une date de cutoff
+async function loadDashboardWithCutoff(cutoffDate) {
+    try {
+        console.log(`🔄 CLIENT: Chargement complet du dashboard avec cutoff: ${cutoffDate}`);
+        
+        // Extraire le mois de la date de cutoff
+        const date = new Date(cutoffDate);
+        const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
+        
+        // Mettre à jour toutes les cartes principales avec cutoff
+        await Promise.all([
+            // 1. Stats cards principales (déjà gère cutoff)
+            updateStatsCards(null, null, cutoffDate),
+            
+            // 2. Cash Bictorys avec cutoff
+            loadCashBictorysWithCutoff(cutoffDate),
+            
+            // 3. Données mensuelles spécifiques avec cutoff
+            loadMonthlySpecificDataWithCutoff(monthYear, cutoffDate),
+            
+            // 4. Créances avec cutoff
+            loadMonthlyCreancesWithCutoff(monthYear, cutoffDate),
+            loadMonthlyCreancesMoisWithCutoff(monthYear, cutoffDate)
+        ]);
+        
+        // Charger également les données de stock si elles existent
+        try {
+            await Promise.all([
+                loadStockSummaryWithCutoff(cutoffDate),
+                loadStockVivantTotalWithCutoff(cutoffDate),
+                loadStockVivantVariationWithCutoff(cutoffDate)
+            ]);
+        } catch (stockError) {
+            console.log('📊 Certaines données de stock ne sont pas disponibles avec cutoff:', stockError.message);
+        }
+        
+        console.log(`✅ CLIENT: Dashboard complet mis à jour avec cutoff ${cutoffDate}`);
+        
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement dashboard avec cutoff:', error);
+        showNotification('Erreur lors de la mise à jour complète du dashboard', 'error');
+    }
+}
+
+// ✨ NOUVELLES FONCTIONS AVEC CUTOFF
+
+// Charger les données mensuelles spécifiques avec cutoff
+async function loadMonthlySpecificDataWithCutoff(monthYear, cutoffDate) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/monthly-data?month=${monthYear}&cutoff_date=${cutoffDate}&debug_details=true`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            // Mettre à jour les données mensuelles
+            const monthlyBurnElement = document.getElementById('monthly-burn');
+            const weeklyBurnElement = document.getElementById('weekly-burn');
+            
+            if (monthlyBurnElement) {
+                monthlyBurnElement.textContent = data.monthlyBurn || '0 FCFA';
+            }
+            if (weeklyBurnElement) {
+                weeklyBurnElement.textContent = data.weeklyBurn || '0 FCFA';
+            }
+            
+            // 📊 DEBUG: Logs de debug des données mensuelles (masqués en production)
+            // console.log(`🔍 DEBUG: monthly-data response keys:`, Object.keys(data));
+            // console.log(`🔍 DEBUG: monthlyBurnDetails présent?`, !!data.monthlyBurnDetails);
+            
+            // 📊 LOGS DÉTAILLÉS CASH BURN DU MOIS
+            if (data.monthlyBurnDetails) {
+                console.group(`💸 CASH BURN DU MOIS - Détail jour par jour (${monthYear} jusqu'au ${cutoffDate})`);
+                console.log(`📅 Période analysée: ${data.monthlyBurnDetails.startDate} à ${data.monthlyBurnDetails.endDate}`);
+                console.log(`📊 Total jours analysés: ${data.monthlyBurnDetails.totalDays}`);
+                
+                if (data.monthlyBurnDetails.dailyBreakdown && data.monthlyBurnDetails.dailyBreakdown.length > 0) {
+                    console.table(data.monthlyBurnDetails.dailyBreakdown.map(day => ({
+                        'Date': day.date,
+                        'Montant (FCFA)': day.amount.toLocaleString('fr-FR'),
+                        'Nb Dépenses': day.count,
+                        'Comptes': day.accounts || 'N/A'
+                    })));
+                    
+                    console.log(`💰 Total Cash Burn: ${data.monthlyBurnDetails.totalAmount.toLocaleString('fr-FR')} FCFA`);
+                    console.log(`📈 Moyenne par jour: ${Math.round(data.monthlyBurnDetails.totalAmount / data.monthlyBurnDetails.totalDays).toLocaleString('fr-FR')} FCFA`);
+                } else {
+                    console.log('📊 Aucune dépense trouvée pour cette période');
+                }
+                console.groupEnd();
+            } else {
+                console.warn(`⚠️ ATTENTION: monthlyBurnDetails non reçu pour ${monthYear} avec cutoff ${cutoffDate}`);
+            }
+            
+            console.log(`✅ CLIENT: Données mensuelles mises à jour avec cutoff ${cutoffDate}`);
+        } else {
+            console.error('❌ CLIENT: Erreur données mensuelles avec cutoff:', data.error);
+        }
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement données mensuelles avec cutoff:', error);
+    }
+}
+
+// Charger les créances totales avec cutoff
+async function loadMonthlyCreancesWithCutoff(monthYear, cutoffDate) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/monthly-creances?month=${monthYear}&cutoff_date=${cutoffDate}`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            const totalCreancesElement = document.getElementById('total-creances');
+            if (totalCreancesElement) {
+                totalCreancesElement.textContent = data.formatted;
+            }
+            console.log(`✅ CLIENT: Créances totales mises à jour avec cutoff ${cutoffDate}: ${data.formatted}`);
+        } else {
+            console.error('❌ CLIENT: Erreur créances avec cutoff:', data.error);
+            const totalCreancesElement = document.getElementById('total-creances');
+            if (totalCreancesElement) {
+                totalCreancesElement.textContent = '0 FCFA';
+            }
+        }
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement créances avec cutoff:', error);
+        const totalCreancesElement = document.getElementById('total-creances');
+        if (totalCreancesElement) {
+            totalCreancesElement.textContent = '0 FCFA';
+        }
+    }
+}
+
+// Charger les créances du mois avec cutoff
+async function loadMonthlyCreancesMoisWithCutoff(monthYear, cutoffDate) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/creances-mois?month=${monthYear}&cutoff_date=${cutoffDate}&debug_details=true`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            const creancesMoisElement = document.getElementById('creances-mois');
+            if (creancesMoisElement) {
+                creancesMoisElement.textContent = data.formatted;
+            }
+            
+            // 📊 DEBUG: Vérifier si les données debug arrivent pour créances du mois
+            console.log(`🔥 FORCE DEBUG: creances-mois response FULL:`, data);
+            console.log(`🔥 FORCE DEBUG: creances-mois response keys:`, Object.keys(data));
+            console.log(`🔥 FORCE DEBUG: creancesDetails présent?`, !!data.creancesDetails);
+            
+            // 📊 LOGS DÉTAILLÉS CRÉANCES DU MOIS
+            if (data.creancesDetails) {
+                console.group(`💳 CRÉANCES DU MOIS - Détail jour par jour (${monthYear} jusqu'au ${cutoffDate})`);
+                console.log(`📅 Période analysée: ${data.creancesDetails.startDate} à ${data.creancesDetails.endDate}`);
+                console.log(`📊 Total jours analysés: ${data.creancesDetails.totalDays}`);
+                
+                if (data.creancesDetails.dailyBreakdown && data.creancesDetails.dailyBreakdown.length > 0) {
+                    console.table(data.creancesDetails.dailyBreakdown.map(day => ({
+                        'Date': day.date,
+                        'Montant (FCFA)': day.amount.toLocaleString('fr-FR'),
+                        'Nb Opérations': day.count,
+                        'Clients': day.clients || 'N/A',
+                        'Type': day.type || 'Crédit'
+                    })));
+                    
+                    console.log(`💰 Total Créances du Mois: ${data.creancesDetails.totalAmount.toLocaleString('fr-FR')} FCFA`);
+                    console.log(`📈 Moyenne par jour: ${Math.round(data.creancesDetails.totalAmount / data.creancesDetails.totalDays).toLocaleString('fr-FR')} FCFA`);
+                } else {
+                    console.log('📊 Aucune opération de créance trouvée pour cette période');
+                }
+                console.groupEnd();
+            } else {
+                console.warn(`⚠️ ATTENTION: creancesDetails non reçu pour ${monthYear} avec cutoff ${cutoffDate}`);
+            }
+            
+            console.log(`✅ CLIENT: Créances du mois mises à jour avec cutoff ${cutoffDate}: ${data.formatted}`);
+        } else {
+            console.error('❌ CLIENT: Erreur créances du mois avec cutoff:', data.error);
+            const creancesMoisElement = document.getElementById('creances-mois');
+            if (creancesMoisElement) {
+                creancesMoisElement.textContent = '0 FCFA';
+            }
+        }
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement créances du mois avec cutoff:', error);
+        const creancesMoisElement = document.getElementById('creances-mois');
+        if (creancesMoisElement) {
+            creancesMoisElement.textContent = '0 FCFA';
+        }
+    }
+}
+
+// Charger le stock summary avec cutoff (optionnel)
+async function loadStockSummaryWithCutoff(cutoffDate) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/stock-summary?cutoff_date=${cutoffDate}`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            const stockTotalElement = document.getElementById('stock-total');
+            const stockDateElement = document.getElementById('stock-date');
+            
+            if (stockTotalElement && stockDateElement) {
+                stockTotalElement.textContent = data.total_value || '0';
+                stockDateElement.textContent = data.latest_date ? `(${data.latest_date})` : 'Aucune date';
+                console.log(`✅ CLIENT: Stock summary mis à jour avec cutoff ${cutoffDate}: ${data.total_value}`);
+            }
+        } else {
+            console.log(`📊 CLIENT: Stock summary avec cutoff non disponible: ${data.error}`);
+        }
+    } catch (error) {
+        console.log(`📊 CLIENT: Stock summary avec cutoff non disponible: ${error.message}`);
+    }
+}
+
+// Charger le stock vivant total avec cutoff (optionnel)
+async function loadStockVivantTotalWithCutoff(cutoffDate) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/stock-vivant-total?cutoff_date=${cutoffDate}`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            const stockVivantElement = document.getElementById('stock-vivant-total');
+            const stockVivantDateElement = document.getElementById('stock-vivant-date');
+            
+            if (stockVivantElement && stockVivantDateElement) {
+                stockVivantElement.textContent = data.formatted || '0 FCFA';
+                stockVivantDateElement.textContent = data.latest_date ? `(${data.latest_date})` : 'Aucune date';
+                console.log(`✅ CLIENT: Stock vivant total mis à jour avec cutoff ${cutoffDate}: ${data.formatted}`);
+            }
+        } else {
+            console.log(`📊 CLIENT: Stock vivant total avec cutoff non disponible: ${data.error}`);
+        }
+    } catch (error) {
+        console.log(`📊 CLIENT: Stock vivant total avec cutoff non disponible: ${error.message}`);
+    }
+}
+
+// Charger la variation stock vivant avec cutoff (optionnel)
+async function loadStockVivantVariationWithCutoff(cutoffDate) {
+    try {
+        const response = await fetch(apiUrl(`/api/dashboard/stock-vivant-variation?cutoff_date=${cutoffDate}&debug_details=true`));
+        const data = await response.json();
+        
+        if (response.ok) {
+            const variationElement = document.getElementById('stock-vivant-variation');
+            
+            if (variationElement) {
+                variationElement.textContent = data.formatted || '0 FCFA';
+                
+                // 📊 LOGS DÉTAILLÉS ÉCART STOCK VIVANT MENSUEL
+                if (data.stockVariationDetails) {
+                    const cutoffMonth = cutoffDate.substring(0, 7); // YYYY-MM
+                    console.group(`🌱 ÉCART STOCK VIVANT MENSUEL - Détail jour par jour (${cutoffMonth} jusqu'au ${cutoffDate})`);
+                    console.log(`📅 Période analysée: ${data.stockVariationDetails.startDate} à ${data.stockVariationDetails.endDate}`);
+                    console.log(`📊 Total jours analysés: ${data.stockVariationDetails.totalDays}`);
+                    
+                    if (data.stockVariationDetails.dailyBreakdown && data.stockVariationDetails.dailyBreakdown.length > 0) {
+                        console.table(data.stockVariationDetails.dailyBreakdown.map(day => ({
+                            'Date': day.date,
+                            'Stock Vivant (FCFA)': day.stockAmount.toLocaleString('fr-FR'),
+                            'Variation vs J-1 (FCFA)': day.dailyVariation.toLocaleString('fr-FR'),
+                            'Variation Cumul (FCFA)': day.cumulativeVariation.toLocaleString('fr-FR'),
+                            'Note': day.note || ''
+                        })));
+                        
+                        console.log(`💰 Stock Vivant final: ${data.stockVariationDetails.finalStockAmount.toLocaleString('fr-FR')} FCFA`);
+                        console.log(`📈 Stock Vivant début mois: ${data.stockVariationDetails.startStockAmount.toLocaleString('fr-FR')} FCFA`);
+                        console.log(`📉 Écart Total du Mois: ${data.stockVariationDetails.totalVariation.toLocaleString('fr-FR')} FCFA`);
+                        console.log(`📊 Variation moyenne par jour: ${Math.round(data.stockVariationDetails.totalVariation / data.stockVariationDetails.totalDays).toLocaleString('fr-FR')} FCFA`);
+                    } else {
+                        console.log('📊 Aucune donnée de stock vivant trouvée pour cette période');
+                    }
+                    console.groupEnd();
+                }
+                
+                console.log(`✅ CLIENT: Stock vivant variation mis à jour avec cutoff ${cutoffDate}: ${data.formatted}`);
+            }
+        } else {
+            console.log(`📊 CLIENT: Stock vivant variation avec cutoff non disponible: ${data.error}`);
+        }
+    } catch (error) {
+        console.log(`📊 CLIENT: Stock vivant variation avec cutoff non disponible: ${error.message}`);
     }
 }
 
@@ -12559,30 +13138,47 @@ function initDashboardSaveSection() {
     const today = new Date().toISOString().split('T')[0];
     const snapshotDateInput = document.getElementById('snapshot-date');
     if (snapshotDateInput) {
+        // Contraindre la date selon le mois sélectionné
+        updateSnapshotDateConstraints();
         snapshotDateInput.value = today;
         
-        // ✨ NOUVEAU: Mise à jour automatique du dashboard quand la date change
+                // ✨ NOUVEAU: Mise à jour automatique du dashboard quand la date change
+        let isUpdating = false; // Flag pour prévenir les exécutions multiples
+        
         async function handleDateChange() {
-            const selectedDate = snapshotDateInput.value;
+            // Prévenir les exécutions multiples
+            if (isUpdating) {
+                console.log('⚠️ handleDateChange: Mise à jour déjà en cours, ignoré');
+                return;
+            }
             
+            isUpdating = true;
+            const selectedDate = snapshotDateInput.value;
+
             // Afficher un indicateur de chargement
             const saveButton = document.getElementById('save-dashboard-snapshot');
             const originalText = saveButton ? saveButton.innerHTML : '';
+            
             if (saveButton) {
                 saveButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mise à jour...';
                 saveButton.disabled = true;
             }
-            
+
             try {
                 if (selectedDate) {
-                    console.log(`📅 CLIENT: Date snapshot changée vers: ${selectedDate} - Mise à jour du dashboard...`);
-                    // Mettre à jour les stats avec la nouvelle date cutoff
-                    await updateStatsCards(null, null, selectedDate);
-                    console.log('✅ CLIENT: Dashboard mis à jour avec succès pour la date:', selectedDate);
+                    console.log(`📅 CLIENT: Date snapshot changée vers: ${selectedDate} - Mise à jour COMPLÈTE du dashboard...`);
+                    
+                    // ✨ NOUVELLE APPROCHE: Mettre à jour TOUTES les cartes avec la date cutoff
+                    await loadDashboardWithCutoff(selectedDate);
+                    
+                    console.log('✅ CLIENT: Dashboard mis à jour COMPLÈTEMENT avec succès pour la date:', selectedDate);
                 } else {
                     // Si pas de date, revenir aux valeurs actuelles (sans cutoff)
                     console.log('📅 CLIENT: Pas de date sélectionnée - retour aux valeurs actuelles');
-                    await updateStatsCards();
+                    
+                    // Recharger toutes les données sans cutoff
+                    const currentMonth = selectedMonth || getCurrentMonth();
+                    await loadMonthlyDashboard(currentMonth);
                 }
             } catch (error) {
                 console.error('❌ CLIENT: Erreur mise à jour dashboard:', error);
@@ -12593,12 +13189,24 @@ function initDashboardSaveSection() {
                     saveButton.innerHTML = originalText || '<i class="fas fa-download"></i> Sauvegarder Snapshot';
                     saveButton.disabled = false;
                 }
+                
+                // Libérer le flag pour permettre les futures exécutions
+                isUpdating = false;
+                
+                console.log('🔄 CLIENT: Bouton de sauvegarde restauré');
             }
         }
         
         // Écouter les changements de date (sélecteur de date et saisie manuelle)
+        // Attacher un seul event listener (change suffit pour les inputs de type date)
         snapshotDateInput.addEventListener('change', handleDateChange);
-        snapshotDateInput.addEventListener('input', handleDateChange);
+        
+        // Ajouter validation en temps réel des contraintes
+        snapshotDateInput.addEventListener('input', function() {
+            validateSnapshotDate();
+        });
+        
+        console.log('✅ CLIENT: Event listeners de changement de date attachés');
     }
     
     // Ajouter l'événement de sauvegarde
@@ -12608,6 +13216,50 @@ function initDashboardSaveSection() {
     }
     
     console.log('✅ CLIENT: Section de sauvegarde initialisée avec mise à jour automatique');
+}
+
+// Valider la date de snapshot en temps réel
+function validateSnapshotDate() {
+    const snapshotDateInput = document.getElementById('snapshot-date');
+    if (!snapshotDateInput) return;
+    
+    const selectedDate = snapshotDateInput.value;
+    if (!selectedDate) return;
+    
+    const min = snapshotDateInput.min;
+    const max = snapshotDateInput.max;
+    
+    let isValid = true;
+    let message = '';
+    let correctedValue = null;
+    
+    if (selectedDate < min) {
+        isValid = false;
+        const targetMonth = selectedMonth || getCurrentMonth();
+        message = `La date doit être dans le mois de ${getMonthName(targetMonth)}`;
+        correctedValue = min;
+    } else if (selectedDate > max) {
+        isValid = false;
+        message = 'Impossible de sélectionner une date future';
+        correctedValue = max;
+    }
+    
+    if (!isValid && correctedValue) {
+        // Appliquer la correction avec animation
+        snapshotDateInput.value = correctedValue;
+        snapshotDateInput.classList.add('corrected');
+        
+        // Supprimer la classe d'animation après qu'elle soit terminée
+        setTimeout(() => {
+            snapshotDateInput.classList.remove('corrected');
+        }, 800);
+        
+        showNotification(message, 'warning');
+        console.log(`📅 Date corrigée automatiquement: ${selectedDate} -> ${correctedValue}`);
+    }
+    
+    // Ajouter une classe visuelle pour indiquer l'état
+    snapshotDateInput.classList.toggle('date-constrained', min && max);
 }
 
 // Sauvegarder un snapshot du tableau de bord
