@@ -923,6 +923,13 @@
 
                 <!-- Suivi Comptes Partenaires -->
                 <section id="partner-tracking-section" class="section">
+                    <!-- Bouton de retour en haut (masqué par défaut) -->
+                    <div class="partner-back-button" style="display: none;">
+                        <button type="button" class="btn-back" onclick="closePartnerDetails()" title="Retour au résumé">
+                            <i class="fas fa-arrow-left"></i> Retour au résumé
+                        </button>
+                    </div>
+                    
                     <h2>Suivi des Comptes Partenaires</h2>
                     
                     <!-- Résumé des comptes partenaires -->
@@ -957,13 +964,6 @@
                     
                     <!-- Section des détails d'un compte partenaire -->
                     <div id="partner-details" style="display: none;">
-                        <!-- Bouton de retour en haut -->
-                        <div class="partner-back-button">
-                            <button type="button" class="btn-back" onclick="closePartnerDetails()" title="Retour au résumé">
-                                <i class="fas fa-arrow-left"></i> Retour au résumé
-                            </button>
-                        </div>
-                        
                         <h3 id="partner-details-title">Détails - Compte Partenaire</h3>
                         
                         <!-- Avertissement d'autorisation -->
@@ -1017,7 +1017,10 @@
                         
                         <!-- Liste des livraisons -->
                         <div class="accounts-list">
-                            <h4><i class="fas fa-list"></i> Historique des Livraisons</h4>
+                            <div class="deliveries-header">
+                                <h3><i class="fas fa-truck"></i> Historique des Livraisons</h3>
+                                <p class="header-description">Suivi et gestion des livraisons partenaires</p>
+                            </div>
                             <div class="table-container">
                                 <table id="deliveries-table">
                                     <thead>
@@ -1029,7 +1032,14 @@
                                             <th>Description</th>
                                             <th>Créé par</th>
                                             <th>Statut</th>
-                                            <th>Actions</th>
+                                            <th class="validation-column">
+                                                <i class="fas fa-check-circle"></i>
+                                                <span class="validation-label">Validation</span>
+                                            </th>
+                                            <th class="delete-column">
+                                                <i class="fas fa-trash-alt"></i>
+                                                <span class="delete-label">Suppr.</span>
+                                            </th>
                                         </tr>
                                     </thead>
                                     <tbody id="deliveries-tbody">
