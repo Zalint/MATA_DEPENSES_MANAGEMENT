@@ -573,6 +573,14 @@ async function validateExpenseAmount() {
         
         if (!selectedAccount) return;
         
+        // Pour les comptes de type statut, pas de validation de solde
+        if (selectedAccount.account_type === 'statut') {
+            submitButton.disabled = false;
+            submitButton.style.opacity = '1';
+            submitButton.style.cursor = 'pointer';
+            return;
+        }
+        
         const currentBalance = selectedAccount.current_balance;
         const totalCredited = selectedAccount.total_credited;
         
@@ -598,10 +606,8 @@ async function validateExpenseAmount() {
             `;
             hasError = true;
         } else if (totalCredited > 0 && amount <= currentBalance) {
-            // Calculer les dépenses existantes
-            const expensesResponse = await fetch(`/api/accounts/${selectedAccount.account_name}/expenses`);
-            const expensesData = await expensesResponse.json();
-            const currentTotalSpent = expensesData.expenses.reduce((sum, exp) => sum + (parseInt(exp.total) || 0), 0);
+            // UTILISER LA VALEUR STOCKÉE EN BASE (synchronisée) au lieu de recalculer
+            const currentTotalSpent = selectedAccount.total_spent || 0;
             const newTotalSpent = currentTotalSpent + amount;
             
             if (newTotalSpent > totalCredited) {
@@ -965,23 +971,16 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
 function createChart(containerId, data, type) {
     const container = document.getElementById(containerId);
     container.innerHTML = '';
-    
     if (!data || data.length === 0) {
         container.innerHTML = '<p style="text-align: center; color: #666;">Aucune donnée disponible</p>';
         return;
     }
-    
-    // Vérifier si on doit afficher les comptes avec zéro dépenses
     const showZeroAccounts = document.getElementById('show-zero-accounts')?.checked || false;
-    
-    // Filtrer les données selon l'option sélectionnée
     let filteredData;
     if (type === 'account') {
         if (showZeroAccounts) {
-            // Pour les comptes, si l'option est cochée, afficher tous les comptes
             filteredData = data;
         } else {
-            // Pour les comptes, afficher ceux qui ont des dépenses OU un solde > 0
             filteredData = data.filter(item => {
                 const spent = parseInt(item.spent) || parseInt(item.amount) || 0;
                 const balance = parseInt(item.current_balance) || 0;
@@ -990,29 +989,23 @@ function createChart(containerId, data, type) {
             });
         }
     } else {
-        // Pour les catégories, filtrer les données avec un montant > 0 (comportement par défaut)
         filteredData = data.filter(item => item.amount > 0);
     }
-    
     if (filteredData.length === 0) {
         container.innerHTML = '<p style="text-align: center; color: #666;">Aucune dépense pour cette période</p>';
         return;
     }
-    
-    // Créer le tableau
     const table = document.createElement('table');
     table.className = 'summary-table';
-    
-    // En-tête du tableau
     const thead = document.createElement('thead');
     let headerRow = '';
-    
     if (type === 'account') {
         headerRow = `
             <tr>
                 <th>Compte</th>
                 <th>Montant Dépensé</th>
                 <th>Montant Restant</th>
+                <th>Dépenses mois précédents</th>
                 <th>Total Crédité</th>
             </tr>
         `;
@@ -1025,23 +1018,15 @@ function createChart(containerId, data, type) {
             </tr>
         `;
     }
-    
     thead.innerHTML = headerRow;
     table.appendChild(thead);
-    
-    // Corps du tableau
     const tbody = document.createElement('tbody');
-    
-    // Calculer le total des dépenses pour les pourcentages (seulement pour les catégories)
     let totalExpenses = 0;
     if (type === 'category') {
         totalExpenses = filteredData.reduce((sum, item) => sum + (parseInt(item.amount) || 0), 0);
     }
-    
     filteredData.forEach(item => {
         const row = document.createElement('tr');
-        
-        // Déterminer le label selon le type
         let label = '';
         if (type === 'account') {
             label = item.account;
@@ -1050,12 +1035,11 @@ function createChart(containerId, data, type) {
         } else {
             label = item.category || item.user || item.account;
         }
-        
-        if (type === 'account' && item.total_credited && item.total_credited > 0) {
+        if (type === 'account') {
             const spent = parseInt(item.spent) || 0;
             const totalCredited = parseInt(item.total_credited) || 0;
-            const remaining = parseInt(item.current_balance) || 0; // Utiliser current_balance au lieu de totalCredited - spent
-            
+            const remaining = parseInt(item.current_balance) || 0;
+            const previousMonths = totalCredited - remaining - spent;
             row.innerHTML = `
                 <td class="label-cell">
                   <span class="clickable-account-name" onclick="showAccountExpenseDetails('${label}', ${spent}, ${remaining}, ${totalCredited})" 
@@ -1066,22 +1050,20 @@ function createChart(containerId, data, type) {
                 </td>
                 <td class="amount-cell spent">${formatCurrency(spent)}</td>
                 <td class="amount-cell remaining">${formatCurrency(remaining)}</td>
+                <td class="amount-cell previous">${formatCurrency(previousMonths)}</td>
                 <td class="amount-cell total">${formatCurrency(totalCredited)}</td>
             `;
         } else {
             const amount = parseInt(item.amount) || 0;
             const percentage = totalExpenses > 0 ? ((amount / totalExpenses) * 100).toFixed(1) : 0;
-            
             row.innerHTML = `
                 <td class="label-cell">${label}</td>
                 <td class="amount-cell spent">${formatCurrency(amount)}</td>
                 <td class="amount-cell percentage" colspan="2">${percentage}%</td>
             `;
         }
-        
         tbody.appendChild(row);
     });
-    
     table.appendChild(tbody);
     container.appendChild(table);
 }
@@ -2516,14 +2498,33 @@ async function editAccount(accountId) {
             
             if (initialAmountField) {
                 initialAmountField.value = account.current_balance || 0;
-                initialAmountField.disabled = true;
-                initialAmountField.style.backgroundColor = '#f8f9fa';
-                initialAmountField.style.color = '#6c757d';
+                
+                // Pour les comptes statut, rendre le champ éditable
+                if (account.account_type === 'statut') {
+                    initialAmountField.disabled = false;
+                    initialAmountField.readOnly = false;
+                    initialAmountField.removeAttribute('min');
+                    initialAmountField.style.backgroundColor = '';
+                    initialAmountField.style.color = '';
+                    initialAmountField.placeholder = 'Solde négatif ou positif';
+                    
+                    if (initialAmountLabel) {
+                        initialAmountLabel.textContent = 'Solde Actuel (modifiable)';
+                    }
+                } else {
+                    initialAmountField.disabled = true;
+                    initialAmountField.readOnly = true;
+                    initialAmountField.setAttribute('min', '0');
+                    initialAmountField.style.backgroundColor = '#f8f9fa';
+                    initialAmountField.style.color = '#6c757d';
+                    initialAmountField.placeholder = '';
+                    
+                    if (initialAmountLabel) {
+                        initialAmountLabel.textContent = 'Solde Actuel (lecture seule)';
+                    }
+                }
+                
                 console.log(`[editAccount] Set current balance: ${account.current_balance}`);
-            }
-            
-            if (initialAmountLabel) {
-                initialAmountLabel.textContent = 'Solde Actuel (lecture seule)';
             }
 
         }, 100); // Reduced timeout
@@ -3075,7 +3076,7 @@ document.addEventListener('DOMContentLoaded', function() {
             user_id: (accountType === 'partenaire' || accountType === 'statut' || accountType === 'Ajustement' || accountType === 'depot')
                 ? null : parseInt(document.getElementById('createDirectorSelect').value),
             account_name: document.getElementById('accountName').value,
-            initial_amount: parseInt(document.getElementById('initialAmount').value) || 0,
+            initial_amount: parseFloat(document.getElementById('initialAmount').value) || 0,
             description: document.getElementById('createDescription').value,
             account_type: accountType,
             credit_permission_user_id: document.getElementById('creditPermissionDirectorSelect').value || null
@@ -10273,13 +10274,35 @@ async function displayBudgetValidationInModal() {
         if (!accountId || amount <= 0) return;
         
         // Récupérer les informations du compte
-        const response = await fetch(`/api/account/${accountId}/balance`);
-        if (!response.ok) {
-            console.warn('Impossible de récupérer le solde du compte pour la validation');
+        const accountsResponse = await fetch('/api/accounts');
+        const accounts = await accountsResponse.json();
+        const selectedAccount = accounts.find(acc => acc.id.toString() === accountId);
+        
+        if (!selectedAccount) {
+            console.warn('Compte non trouvé pour la validation');
             return;
         }
         
-        const balance = await response.json();
+        // Pour les comptes de type statut, pas de validation - toujours autoriser
+        if (selectedAccount.account_type === 'statut') {
+            const confirmBtn = document.getElementById('confirm-expense-btn');
+            confirmBtn.disabled = false;
+            confirmBtn.style.opacity = '1';
+            confirmBtn.style.cursor = 'pointer';
+            
+            budgetContainer.className = 'budget-validation budget-ok';
+            budgetContainer.innerHTML = `
+                <strong>✓ Compte statut - Validation désactivée</strong><br>
+                Les comptes de type statut peuvent avoir un solde négatif.
+            `;
+            return;
+        }
+        
+        const balance = {
+            current_balance: selectedAccount.current_balance,
+            total_credited: selectedAccount.total_credited,
+            total_spent: selectedAccount.total_spent
+        };
         
         // Calculer les nouveaux totaux
         const currentBalance = balance.current_balance;
