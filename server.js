@@ -799,9 +799,16 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
 // Route pour les cartes de statistiques du dashboard
 app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
     try {
-        const { start_date, end_date } = req.query;
+        const { start_date, end_date, cutoff_date } = req.query;
         const isDirector = req.session.user.role === 'directeur';
         const userId = req.session.user.id;
+        
+        // Si cutoff_date est fourni, utiliser cette date comme référence pour tous les calculs
+        // Sinon, utiliser la logique actuelle (date du jour)
+        const referenceDate = cutoff_date ? new Date(cutoff_date) : new Date();
+        const referenceDateStr = cutoff_date || new Date().toISOString().split('T')[0];
+        
+        console.log(`🔍 CALCUL AVEC DATE DE RÉFÉRENCE: ${referenceDateStr}`);
         
         // 1. Montant Dépensé Total (période sélectionnée)
         let totalSpentQuery = `
@@ -810,7 +817,14 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         `;
         let spentParams = [];
         
-        if (start_date && end_date) {
+        // Si cutoff_date est fourni, l'utiliser comme filtre de fin
+        // Sinon, utiliser la logique actuelle avec start_date/end_date
+        if (cutoff_date) {
+            // Pour le snapshot : calculer du début du mois jusqu'à cutoff_date (inclus)
+            const cutoffMonth = referenceDateStr.substring(0, 7) + '-01'; // Premier jour du mois
+            totalSpentQuery += ` WHERE e.expense_date >= $1 AND e.expense_date <= $2`;
+            spentParams = [cutoffMonth, referenceDateStr];
+        } else if (start_date && end_date) {
             totalSpentQuery += ` WHERE e.expense_date >= $1 AND e.expense_date <= $2`;
             spentParams = [start_date, end_date];
         }
@@ -927,7 +941,10 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         try {
             // Récupérer la vraie valeur Cash Bictorys du mois
             let monthYear;
-            if (start_date && end_date) {
+            if (cutoff_date) {
+                // Utiliser le mois de la cutoff_date
+                monthYear = referenceDateStr.substring(0, 7); // Format YYYY-MM
+            } else if (start_date && end_date) {
                 // Utiliser les dates de filtre pour le mois
                 monthYear = start_date.substring(0, 7); // Format YYYY-MM
             } else {
@@ -936,25 +953,65 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 monthYear = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}`;
             }
             
-            const cashBictorysQuery = `
-                SELECT amount
-                FROM cash_bictorys
-                WHERE date = (
-                    SELECT MAX(date)
+            // Approche en deux étapes pour Cash Bictorys
+            let cashBictorysResult;
+            
+            if (cutoff_date) {
+                // Pour cutoff_date : récupérer la dernière valeur avant ou égale à cette date
+                cashBictorysResult = await pool.query(`
+                    SELECT amount
                     FROM cash_bictorys
-                    WHERE amount != 0 
+                    WHERE date = (
+                        SELECT MAX(date)
+                        FROM cash_bictorys
+                        WHERE month_year = $1
+                        AND date <= $2
+                    )
                     AND month_year = $1
-                )
-                AND amount != 0
-                AND month_year = $1
-            `;
-            const cashBictorysResult = await pool.query(cashBictorysQuery, [monthYear]);
+                    AND date <= $2
+                `, [monthYear, referenceDateStr]);
+            } else {
+                // Étape 1 : Chercher des valeurs non-nulles pour le mois
+                cashBictorysResult = await pool.query(`
+                    SELECT amount
+                    FROM cash_bictorys
+                    WHERE date = (
+                        SELECT MAX(date)
+                        FROM cash_bictorys
+                        WHERE amount != 0 
+                        AND month_year = $1
+                    )
+                    AND amount != 0
+                    AND month_year = $1
+                `, [monthYear]);
+                
+                // Étape 2 : Si aucune valeur non-nulle, prendre la dernière valeur (même si 0)
+                if (cashBictorysResult.rows.length === 0) {
+                    console.log(`💰 DEBUG: Aucune valeur non-nulle trouvée pour ${monthYear}, recherche de la dernière valeur...`);
+                    cashBictorysResult = await pool.query(`
+                        SELECT amount
+                        FROM cash_bictorys
+                        WHERE date = (
+                            SELECT MAX(date)
+                            FROM cash_bictorys
+                            WHERE month_year = $1
+                        )
+                        AND month_year = $1
+                    `, [monthYear]);
+                }
+            }
+            
             cashBictorysValue = cashBictorysResult.rows.length > 0 ? parseInt(cashBictorysResult.rows[0].amount) || 0 : 0;
-            console.log(`💰 DEBUG: Cash Bictorys pour ${monthYear}: ${cashBictorysValue} FCFA`);
+            console.log(`💰 DEBUG: Cash Bictorys pour ${monthYear} (jusqu'au ${cutoff_date || 'aujourd\'hui'}): ${cashBictorysValue} FCFA`);
             
             // Récupérer Créances du Mois RÉELLES via l'API
             try {
-                const creancesResponse = await fetch(`http://localhost:${PORT}/api/dashboard/creances-mois?month=${monthYear}`, {
+                let creancesUrl = `http://localhost:${PORT}/api/dashboard/creances-mois?month=${monthYear}`;
+                if (cutoff_date) {
+                    creancesUrl += `&cutoff_date=${referenceDateStr}`;
+                }
+                
+                const creancesResponse = await fetch(creancesUrl, {
                     headers: {
                         'Cookie': `connect.sid=${req.sessionID}` // Transmettre la session
                     }
@@ -962,7 +1019,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 if (creancesResponse.ok) {
                     const creancesData = await creancesResponse.json();
                     creancesMoisValue = creancesData.creances_mois || 0;
-                    console.log(`💰 Créances du mois récupérées: ${creancesMoisValue} FCFA`);
+                    console.log(`💰 Créances du mois récupérées (jusqu'au ${cutoff_date || 'aujourd\'hui'}): ${creancesMoisValue} FCFA`);
                 } else {
                     console.warn('Erreur récupération créances API, utilisation valeur 0');
                     creancesMoisValue = 0;
@@ -973,12 +1030,32 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             }
             
             // Récupérer Stock Point de Vente (dernière valeur disponible)
-            const stockQuery = `
-                SELECT COALESCE(SUM(stock_soir), 0) as total_stock
-                FROM stock_mata 
-                WHERE date = (SELECT MAX(date) FROM stock_mata WHERE date IS NOT NULL)
-            `;
-            const stockResult = await pool.query(stockQuery);
+            let stockQuery, stockParams;
+            
+            if (cutoff_date) {
+                // Pour cutoff_date : récupérer la dernière valeur avant ou égale à cette date
+                stockQuery = `
+                    SELECT COALESCE(SUM(stock_soir), 0) as total_stock
+                    FROM stock_mata 
+                    WHERE date = (
+                        SELECT MAX(date) 
+                        FROM stock_mata 
+                        WHERE date IS NOT NULL 
+                        AND date <= $1
+                    )
+                `;
+                stockParams = [referenceDateStr];
+            } else {
+                // Logique actuelle
+                stockQuery = `
+                    SELECT COALESCE(SUM(stock_soir), 0) as total_stock
+                    FROM stock_mata 
+                    WHERE date = (SELECT MAX(date) FROM stock_mata WHERE date IS NOT NULL)
+                `;
+                stockParams = [];
+            }
+            
+            const stockResult = await pool.query(stockQuery, stockParams);
             stockPointVenteValue = parseFloat(stockResult.rows[0].total_stock) || 0;
             
             // Calculer PL = Cash Bictorys + Créances du Mois + Stock Point de Vente - Cash Burn du Mois
@@ -995,7 +1072,8 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         let stockVivantVariation = 0;
         try {
             // Utiliser la même logique que dans la route /api/stock-vivant/monthly-variation
-            const currentDate = new Date();
+            // Adapter pour utiliser la cutoff_date si fournie
+            const currentDate = cutoff_date ? new Date(cutoff_date) : new Date();
             const currentYear = currentDate.getFullYear();
             const currentMonth = currentDate.getMonth() + 1;
             
@@ -1021,18 +1099,41 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 stockVivantVariation = 0;
                 console.log(`📊 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (pas de données pour le mois en cours)`);
             } else {
-                // Stock du mois actuel
-                const currentStockQuery = `
-                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
-                    FROM stock_vivant
-                    WHERE date_stock = (
-                        SELECT MAX(date_stock) 
-                        FROM stock_vivant 
-                        WHERE date_stock >= $1::date 
-                        AND date_stock < ($1::date + INTERVAL '1 month')
-                    )
-                `;
-                const currentStockResult = await pool.query(currentStockQuery, [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`]);
+                // Stock du mois actuel (jusqu'à la cutoff_date si fournie)
+                let currentStockQuery, currentStockParams;
+                
+                if (cutoff_date) {
+                    // Pour cutoff_date : récupérer le dernier stock avant ou égal à cette date dans le mois
+                    currentStockQuery = `
+                        SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                        FROM stock_vivant
+                        WHERE date_stock = (
+                            SELECT MAX(date_stock) 
+                            FROM stock_vivant 
+                            WHERE date_stock >= $1::date 
+                            AND date_stock <= $2::date
+                        )
+                    `;
+                    currentStockParams = [
+                        `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`,
+                        referenceDateStr
+                    ];
+                } else {
+                    // Logique actuelle
+                    currentStockQuery = `
+                        SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                        FROM stock_vivant
+                        WHERE date_stock = (
+                            SELECT MAX(date_stock) 
+                            FROM stock_vivant 
+                            WHERE date_stock >= $1::date 
+                            AND date_stock < ($1::date + INTERVAL '1 month')
+                        )
+                    `;
+                    currentStockParams = [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`];
+                }
+                
+                const currentStockResult = await pool.query(currentStockQuery, currentStockParams);
                 
                 // Stock du mois précédent
                 const previousStockQuery = `
@@ -1093,12 +1194,14 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             // Calculer le prorata des charges fixes basé sur les jours écoulés (hors dimanche)
             chargesProrata = 0;
             if (chargesFixesEstimation > 0) {
-                const now = new Date();
-                currentDay = now.getDate();
-                currentMonth = now.getMonth() + 1;
-                currentYear = now.getFullYear();
+                // Utiliser la cutoff_date si fournie, sinon la date actuelle
+                const refDate = cutoff_date ? new Date(cutoff_date) : new Date();
+                currentDay = refDate.getDate();
+                currentMonth = refDate.getMonth() + 1;
+                currentYear = refDate.getFullYear();
                 
                 // Calculer le nombre de jours ouvrables écoulés dans le mois (lundi à samedi)
+                // Du début du mois jusqu'à la date de référence (inclus)
                 joursOuvrablesEcoules = 0;
                 for (let day = 1; day <= currentDay; day++) {
                     const date = new Date(currentYear, currentMonth - 1, day);
@@ -1122,7 +1225,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 // Calculer le prorata
                 chargesProrata = (chargesFixesEstimation * joursOuvrablesEcoules) / totalJoursOuvrables;
                 
-                console.log(`📅 Aujourd'hui: ${currentDay}/${currentMonth}/${currentYear}`);
+                console.log(`📅 Date de référence: ${currentDay}/${currentMonth}/${currentYear} ${cutoff_date ? '(cutoff_date)' : '(aujourd\'hui)'}`);
                 console.log(`📅 Jours ouvrables écoulés (lundi-samedi): ${joursOuvrablesEcoules}`);
                 console.log(`📅 Total jours ouvrables dans le mois: ${totalJoursOuvrables}`);
                 console.log(`💸 Calcul prorata: ${chargesFixesEstimation} × ${joursOuvrablesEcoules}/${totalJoursOuvrables} = ${Math.round(chargesProrata)} FCFA`);
@@ -5893,12 +5996,12 @@ app.get('/api/dashboard/total-creances', requireAuth, async (req, res) => {
     }
 });
 
-// Route pour obtenir les créances du mois (accepte paramètre month optionnel)
+// Route pour obtenir les créances du mois (accepte paramètre month optionnel et cutoff_date)
 app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
     try {
         const userRole = req.session.user.role;
         const userId = req.session.user.id;
-        const { month } = req.query; // Format optionnel YYYY-MM
+        const { month, cutoff_date } = req.query; // Format optionnel YYYY-MM et YYYY-MM-DD
 
         let accountFilter = '';
         let params = [];
@@ -5925,12 +6028,17 @@ app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
         }
 
         const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
-        const endOfMonthStr = endOfMonth.toISOString().split('T')[0] + ' 23:59:59';
+        let endOfMonthStr = endOfMonth.toISOString().split('T')[0] + ' 23:59:59';
+        
+        // Si cutoff_date est fourni, l'utiliser comme date de fin
+        if (cutoff_date) {
+            endOfMonthStr = cutoff_date + ' 23:59:59';
+        }
 
         // Paramètres pour la requête
         const queryParams = userRole === 'directeur' ? [userId, startOfMonthStr, endOfMonthStr] : [startOfMonthStr, endOfMonthStr];
 
-        console.log(`🎯 Calcul créances pour période: ${startOfMonthStr} à ${endOfMonthStr.split(' ')[0]}`);
+        console.log(`🎯 Calcul créances pour période: ${startOfMonthStr} à ${endOfMonthStr.split(' ')[0]}${cutoff_date ? ' (cutoff_date)' : ''}`);
 
         const result = await pool.query(`
             SELECT 
@@ -6141,18 +6249,21 @@ app.get('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
             });
         }
 
-        // Récupérer SEULEMENT les données existantes avec montant > 0
+        // Récupérer TOUTES les données existantes (pas seulement > 0)
         const result = await pool.query(`
             SELECT date, amount
             FROM cash_bictorys 
-            WHERE month_year = $1 AND amount > 0
+            WHERE month_year = $1
             ORDER BY date
         `, [monthYear]);
-
+        
         // Fusionner les données existantes avec les dates par défaut (pour l'affichage)
         const existingData = result.rows.reduce((acc, row) => {
-            const dateStr = row.date.toISOString().split('T')[0];
-            acc[dateStr] = parseInt(row.amount) || 0;
+            // Utiliser toLocaleDateString pour éviter les problèmes de timezone
+            const date = new Date(row.date);
+            const dateStr = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+            const amount = parseInt(row.amount) || 0;
+            acc[dateStr] = amount;
             return acc;
         }, {});
 
