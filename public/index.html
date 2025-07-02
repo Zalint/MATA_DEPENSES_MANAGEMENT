@@ -562,6 +562,7 @@
                                 <div class="balance-item">
                                     <span class="balance-label">Solde actuel :</span>
                                     <span class="balance-value" id="current-balance">0 FCFA</span>
+                                    <input type="number" id="current-balance-input" style="display:none; width:120px; margin-left:8px;" min="0" step="1" />
                                 </div>
                                 <div class="balance-item">
                                     <span class="balance-label">Total crédité :</span>
@@ -845,8 +846,8 @@
                         </div>
                         
                         <div class="form-group">
-                            <label>Montant Initial (optionnel)</label>
-                            <input type="number" id="initialAmount" placeholder="0">
+                            <label id="initialAmountLabel" for="initialAmount">Solde Actuel (lecture seule)</label>
+                            <input type="number" id="initialAmount" name="initial_amount" step="0.01" placeholder="Solde négatif ou positif" />
                         </div>
                         
                         <div class="form-group">
