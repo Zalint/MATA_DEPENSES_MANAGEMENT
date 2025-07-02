@@ -795,7 +795,7 @@ async function createAdjustmentAccount() {
 }
 
 // Fonction pour mettre à jour les cartes de statistiques
-async function updateStatsCards(startDate, endDate) {
+async function updateStatsCards(startDate, endDate, cutoffDate) {
     try {
         // Construire l'URL avec les paramètres de date
         let url = '/api/dashboard/stats-cards';
@@ -803,6 +803,7 @@ async function updateStatsCards(startDate, endDate) {
         
         if (startDate) params.append('start_date', startDate);
         if (endDate) params.append('end_date', endDate);
+        if (cutoffDate) params.append('cutoff_date', cutoffDate);
         
         if (params.toString()) {
             url += '?' + params.toString();
@@ -11601,6 +11602,7 @@ async function handleLoadCashBictorysMonth() {
 // Charger les données d'un mois spécifique
 async function loadCashBictorysMonth(monthYear) {
     try {
+        console.log(`🔍 CASH DEBUG: Chargement ${monthYear}...`);
         const response = await fetch(apiUrl(`/api/cash-bictorys/${monthYear}`));
         
         if (!response.ok) {
@@ -11609,6 +11611,11 @@ async function loadCashBictorysMonth(monthYear) {
         }
         
         const data = await response.json();
+        console.log(`🔍 CASH DEBUG: Données reçues:`, data);
+        
+        // Vérifier spécifiquement le 1er juillet
+        const july1st = data.data.find(d => d.date === '2025-07-01');
+        console.log(`🔍 CASH DEBUG: 1er juillet dans les données:`, july1st);
         
         currentCashBictorysData = data.data;
         currentMonthYear = monthYear;
@@ -11669,12 +11676,18 @@ function updateCashBictorysPermissions(monthYear) {
 
 // Afficher les données dans le tableau
 function displayCashBictorysTable(data) {
+    console.log(`🔍 CASH DEBUG: Affichage de ${data.length} jours de données`);
     const tbody = document.getElementById('cash-bictorys-tbody');
     if (!tbody) return;
     
     tbody.innerHTML = '';
     
     data.forEach((dayData, index) => {
+        // Debug spécifique pour le 1er juillet
+        if (dayData.date === '2025-07-01') {
+            console.log(`🔍 CASH DEBUG: Affichage 1er juillet - amount: ${dayData.amount}, type: ${typeof dayData.amount}`);
+        }
+        
         const row = document.createElement('tr');
         
         // Convertir la date en objet Date pour obtenir le nom du jour
@@ -12547,6 +12560,45 @@ function initDashboardSaveSection() {
     const snapshotDateInput = document.getElementById('snapshot-date');
     if (snapshotDateInput) {
         snapshotDateInput.value = today;
+        
+        // ✨ NOUVEAU: Mise à jour automatique du dashboard quand la date change
+        async function handleDateChange() {
+            const selectedDate = snapshotDateInput.value;
+            
+            // Afficher un indicateur de chargement
+            const saveButton = document.getElementById('save-dashboard-snapshot');
+            const originalText = saveButton ? saveButton.innerHTML : '';
+            if (saveButton) {
+                saveButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Mise à jour...';
+                saveButton.disabled = true;
+            }
+            
+            try {
+                if (selectedDate) {
+                    console.log(`📅 CLIENT: Date snapshot changée vers: ${selectedDate} - Mise à jour du dashboard...`);
+                    // Mettre à jour les stats avec la nouvelle date cutoff
+                    await updateStatsCards(null, null, selectedDate);
+                    console.log('✅ CLIENT: Dashboard mis à jour avec succès pour la date:', selectedDate);
+                } else {
+                    // Si pas de date, revenir aux valeurs actuelles (sans cutoff)
+                    console.log('📅 CLIENT: Pas de date sélectionnée - retour aux valeurs actuelles');
+                    await updateStatsCards();
+                }
+            } catch (error) {
+                console.error('❌ CLIENT: Erreur mise à jour dashboard:', error);
+                showNotification('Erreur lors de la mise à jour du dashboard', 'error');
+            } finally {
+                // Restaurer le bouton
+                if (saveButton) {
+                    saveButton.innerHTML = originalText || '<i class="fas fa-download"></i> Sauvegarder Snapshot';
+                    saveButton.disabled = false;
+                }
+            }
+        }
+        
+        // Écouter les changements de date (sélecteur de date et saisie manuelle)
+        snapshotDateInput.addEventListener('change', handleDateChange);
+        snapshotDateInput.addEventListener('input', handleDateChange);
     }
     
     // Ajouter l'événement de sauvegarde
@@ -12555,7 +12607,7 @@ function initDashboardSaveSection() {
         saveButton.addEventListener('click', saveDashboardSnapshot);
     }
     
-    console.log('✅ CLIENT: Section de sauvegarde initialisée');
+    console.log('✅ CLIENT: Section de sauvegarde initialisée avec mise à jour automatique');
 }
 
 // Sauvegarder un snapshot du tableau de bord
@@ -12580,6 +12632,10 @@ async function saveDashboardSnapshot() {
     }
     
     try {
+        // Les données sont déjà mises à jour automatiquement quand la date change
+        // Attendre un peu pour s'assurer que toutes les données sont à jour
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
         // Fonction utilitaire pour parser les valeurs formatées en français
         function parseFormattedNumber(text) {
             if (!text) return 0;
