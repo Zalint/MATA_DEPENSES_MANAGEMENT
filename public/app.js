@@ -173,12 +173,7 @@ async function showApp() {
         document.getElementById('stock-vivant-menu').style.display = 'block';
         document.getElementById('user-column').style.display = 'table-cell';
         
-        // Afficher la section de sauvegarde du tableau de bord
-        const saveSection = document.getElementById('dashboard-save-section');
-        if (saveSection) {
-            saveSection.style.display = 'block';
-            initDashboardSaveSection();
-        }
+        // Section de sauvegarde du tableau de bord initialisée dans loadInitialData()
     }
     
     // Afficher le menu créance pour les utilisateurs autorisés
@@ -367,6 +362,15 @@ async function loadInitialData() {
             transfersChartCard.style.display = 'none';
         }
     }
+    // ✨ Initialiser la section de sauvegarde AVANT le chargement du dashboard
+    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        const saveSection = document.getElementById('dashboard-save-section');
+        if (saveSection) {
+            saveSection.style.display = 'block';
+            initDashboardSaveSection();
+        }
+    }
+    
     if (['directeur_general', 'pca', 'admin'] || ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         await loadDashboard();
     }
@@ -544,6 +548,7 @@ function calculateTotal() {
 
 // Fonction pour valider le montant par rapport au solde disponible
 async function validateExpenseAmount() {
+    console.log(`🔍 [validateExpenseAmount] === DÉBUT DE VALIDATION ===`);
     try {
         const accountSelect = document.getElementById('expense-account');
         const totalField = document.getElementById('expense-total');
@@ -553,6 +558,8 @@ async function validateExpenseAmount() {
         
         const accountId = accountSelect.value;
         const amount = parseFloat(totalField.value) || 0;
+        
+        console.log(`💰 [validateExpenseAmount] Validation pour le compte ID: ${accountId}, Montant saisi: ${amount.toLocaleString()} FCFA`);
         
         // Supprimer les anciens messages d'erreur
         let errorDiv = document.getElementById('balance-error');
@@ -584,6 +591,11 @@ async function validateExpenseAmount() {
         const currentBalance = selectedAccount.current_balance;
         const totalCredited = selectedAccount.total_credited;
         
+        console.log(`📊 [validateExpenseAmount] Données du compte "${selectedAccount.account_name}":`);
+        console.log(`   💳 Budget total alloué (totalCredited): ${totalCredited.toLocaleString()} FCFA`);
+        console.log(`   💰 Solde actuel disponible: ${currentBalance.toLocaleString()} FCFA`);
+        console.log(`   📋 Type de compte: ${selectedAccount.account_type}`);
+        
         // Créer le div d'erreur s'il n'existe pas
         errorDiv = document.createElement('div');
         errorDiv.id = 'balance-error';
@@ -595,6 +607,7 @@ async function validateExpenseAmount() {
         let hasError = false;
         
         if (amount > currentBalance) {
+            console.log(`⚠️ [validateExpenseAmount] SOLDE INSUFFISANT! Manque ${(amount - currentBalance).toLocaleString()} FCFA`);
             errorDiv.style.backgroundColor = '#fee';
             errorDiv.style.color = '#c33';
             errorDiv.style.border = '1px solid #fcc';
@@ -610,7 +623,14 @@ async function validateExpenseAmount() {
             const currentTotalSpent = selectedAccount.total_spent || 0;
             const newTotalSpent = currentTotalSpent + amount;
             
+            console.log(`📈 [validateExpenseAmount] Calcul budgétaire:`);
+            console.log(`   💸 Montant déjà dépensé (currentTotalSpent): ${currentTotalSpent.toLocaleString()} FCFA`);
+            console.log(`   💰 Nouveau montant saisi (amount): ${amount.toLocaleString()} FCFA`);
+            console.log(`   🧮 Total après cette dépense: ${newTotalSpent.toLocaleString()} FCFA`);
+            console.log(`   📊 Budget disponible: ${(totalCredited - newTotalSpent).toLocaleString()} FCFA`);
+            
             if (newTotalSpent > totalCredited) {
+                console.log(`❌ [validateExpenseAmount] BUDGET DÉPASSÉ! Dépassement de ${(newTotalSpent - totalCredited).toLocaleString()} FCFA`);
                 errorDiv.style.backgroundColor = '#fee';
                 errorDiv.style.color = '#c33';
                 errorDiv.style.border = '1px solid #fcc';
@@ -629,6 +649,7 @@ async function validateExpenseAmount() {
                 const percentageUsed = (newTotalSpent / totalCredited) * 100;
                 
                 if (percentageUsed >= 80) {
+                    console.log(`⚡ [validateExpenseAmount] ATTENTION! Utilisation de ${percentageUsed.toFixed(1)}% du budget`);
                     errorDiv.style.backgroundColor = '#fff3cd';
                     errorDiv.style.color = '#856404';
                     errorDiv.style.border = '1px solid #ffeaa7';
@@ -637,6 +658,7 @@ async function validateExpenseAmount() {
                         Budget restant après cette dépense: <strong>${remainingBudget.toLocaleString()} FCFA</strong>
                     `;
                 } else {
+                    console.log(`✅ [validateExpenseAmount] BUDGET OK! ${percentageUsed.toFixed(1)}% du budget utilisé`);
                     errorDiv.style.backgroundColor = '#d4edda';
                     errorDiv.style.color = '#155724';
                     errorDiv.style.border = '1px solid #c3e6cb';
@@ -656,14 +678,18 @@ async function validateExpenseAmount() {
             submitButton.disabled = true;
             submitButton.style.opacity = '0.5';
             submitButton.style.cursor = 'not-allowed';
+            console.log(`🚫 [validateExpenseAmount] Bouton DÉSACTIVÉ - Validation échouée`);
         } else {
             submitButton.disabled = false;
             submitButton.style.opacity = '1';
             submitButton.style.cursor = 'pointer';
+            console.log(`✅ [validateExpenseAmount] Bouton ACTIVÉ - Validation réussie`);
         }
         
+        console.log(`🏁 [validateExpenseAmount] === FIN DE VALIDATION ===`);
+        
     } catch (error) {
-        console.error('Erreur validation solde:', error);
+        console.error('❌ [validateExpenseAmount] Erreur dans la validation:', error);
     }
 }
 
@@ -6969,8 +6995,16 @@ function updateDateFilters(monthYear) {
     
     if (dashboardStartDate && dashboardEndDate) {
         dashboardStartDate.value = firstDayStr;
-        dashboardEndDate.value = lastDayStr;
-        console.log(`📅 Filtres de date mis à jour pour ${monthYear}: ${firstDayStr} à ${lastDayStr}`);
+        
+        // Vérifier si une date de snapshot existe pour maintenir la cohérence
+        const snapshotDate = document.getElementById('snapshot-date')?.value;
+        if (snapshotDate) {
+            dashboardEndDate.value = snapshotDate;
+            console.log(`📅 Filtres de date mis à jour pour ${monthYear}: ${firstDayStr} à ${snapshotDate} (cohérence snapshot)`);
+        } else {
+            dashboardEndDate.value = lastDayStr;
+            console.log(`📅 Filtres de date mis à jour pour ${monthYear}: ${firstDayStr} à ${lastDayStr}`);
+        }
     } else {
         console.error('❌ Éléments de date non trouvés:', { dashboardStartDate, dashboardEndDate });
     }
@@ -13153,6 +13187,15 @@ function switchVisualisationTab(tabId) {
 
 // ===== MODULE DE SAUVEGARDE DU TABLEAU DE BORD =====
 
+// Fonction simple pour synchroniser la date de fin avec le snapshot
+function synchronizeEndDateWithSnapshot(snapshotDate) {
+    const dashboardEndDate = document.getElementById('dashboard-end-date');
+    if (dashboardEndDate && snapshotDate) {
+        dashboardEndDate.value = snapshotDate;
+        console.log(`📅 CLIENT: Date de fin synchronisée avec snapshot: ${snapshotDate}`);
+    }
+}
+
 // Initialiser la section de sauvegarde du tableau de bord
 function initDashboardSaveSection() {
     console.log('🔄 CLIENT: Initialisation de la section de sauvegarde du tableau de bord');
@@ -13164,6 +13207,9 @@ function initDashboardSaveSection() {
         // Contraindre la date selon le mois sélectionné
         updateSnapshotDateConstraints();
         snapshotDateInput.value = today;
+        
+        // ✨ SYNCHRONISATION INITIALE: Mettre à jour la "Date de fin" avec la date du snapshot
+        synchronizeEndDateWithSnapshot(today);
         
                 // ✨ NOUVEAU: Mise à jour automatique du dashboard quand la date change
         let isUpdating = false; // Flag pour prévenir les exécutions multiples
@@ -13190,6 +13236,9 @@ function initDashboardSaveSection() {
             try {
                 if (selectedDate) {
                     console.log(`📅 CLIENT: Date snapshot changée vers: ${selectedDate} - Mise à jour COMPLÈTE du dashboard...`);
+                    
+                    // ✨ SYNCHRONISATION AUTOMATIQUE: Mettre à jour la "Date de fin" avec la date du snapshot
+                    synchronizeEndDateWithSnapshot(selectedDate);
                     
                     // ✨ NOUVELLE APPROCHE: Mettre à jour TOUTES les cartes avec la date cutoff
                     await loadDashboardWithCutoff(selectedDate);
@@ -13238,7 +13287,7 @@ function initDashboardSaveSection() {
         saveButton.addEventListener('click', saveDashboardSnapshot);
     }
     
-    console.log('✅ CLIENT: Section de sauvegarde initialisée avec mise à jour automatique');
+    console.log('✅ CLIENT: Section de sauvegarde initialisée');
 }
 
 // Valider la date de snapshot en temps réel
