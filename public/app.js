@@ -557,9 +557,15 @@ async function validateExpenseAmount() {
         if (!accountSelect || !totalField || !submitButton) return;
         
         const accountId = accountSelect.value;
-        const amount = parseFloat(totalField.value) || 0;
+        // S'assurer que amount est bien un nombre en supprimant les caractères non numériques
+        const rawAmountValue = totalField.value;
+        const rawAmount = rawAmountValue.replace(/[^\d.,]/g, '').replace(',', '.');
+        const amount = parseFloat(rawAmount) || 0;
         
-        console.log(`💰 [validateExpenseAmount] Validation pour le compte ID: ${accountId}, Montant saisi: ${amount.toLocaleString()} FCFA`);
+        console.log(`💰 [validateExpenseAmount] Validation pour le compte ID: ${accountId}`);
+        console.log(`   📝 Valeur brute du champ: "${rawAmountValue}"`);
+        console.log(`   🔧 Valeur nettoyée: "${rawAmount}"`);
+        console.log(`   💯 Montant final: ${amount.toLocaleString()} FCFA [type: ${typeof amount}]`);
         
         // Supprimer les anciens messages d'erreur
         let errorDiv = document.getElementById('balance-error');
@@ -588,10 +594,16 @@ async function validateExpenseAmount() {
             return;
         }
         
-        const currentBalance = selectedAccount.current_balance;
-        const totalCredited = selectedAccount.total_credited;
+        // S'assurer que toutes les valeurs numériques sont bien des nombres
+        console.log(`📊 [validateExpenseAmount] Données brutes du compte "${selectedAccount.account_name}":`);
+        console.log(`   🔍 current_balance brut: "${selectedAccount.current_balance}" [type: ${typeof selectedAccount.current_balance}]`);
+        console.log(`   🔍 total_credited brut: "${selectedAccount.total_credited}" [type: ${typeof selectedAccount.total_credited}]`);
+        console.log(`   🔍 total_spent brut: "${selectedAccount.total_spent}" [type: ${typeof selectedAccount.total_spent}]`);
         
-        console.log(`📊 [validateExpenseAmount] Données du compte "${selectedAccount.account_name}":`);
+        const currentBalance = parseFloat(selectedAccount.current_balance) || 0;
+        const totalCredited = parseFloat(selectedAccount.total_credited) || 0;
+        
+        console.log(`📊 [validateExpenseAmount] Données converties du compte:`);
         console.log(`   💳 Budget total alloué (totalCredited): ${totalCredited.toLocaleString()} FCFA`);
         console.log(`   💰 Solde actuel disponible: ${currentBalance.toLocaleString()} FCFA`);
         console.log(`   📋 Type de compte: ${selectedAccount.account_type}`);
@@ -620,13 +632,20 @@ async function validateExpenseAmount() {
             hasError = true;
         } else if (totalCredited > 0 && amount <= currentBalance) {
             // UTILISER LA VALEUR STOCKÉE EN BASE (synchronisée) au lieu de recalculer
-            const currentTotalSpent = selectedAccount.total_spent || 0;
-            const newTotalSpent = currentTotalSpent + amount;
+            // S'assurer que currentTotalSpent est bien un nombre
+            const currentTotalSpent = parseFloat(selectedAccount.total_spent) || 0;
+            // S'assurer que l'addition est numérique en forçant le type Number
+            const newTotalSpent = Number(currentTotalSpent) + Number(amount);
+            
+            // Vérification de l'addition pour debug
+            console.log(`🔧 [validateExpenseAmount] Vérification addition:`);
+            console.log(`   🎯 ${currentTotalSpent} + ${amount} = ${newTotalSpent}`);
+            console.log(`   ✓ Addition correcte: ${(currentTotalSpent + amount) === newTotalSpent}`);
             
             console.log(`📈 [validateExpenseAmount] Calcul budgétaire:`);
-            console.log(`   💸 Montant déjà dépensé (currentTotalSpent): ${currentTotalSpent.toLocaleString()} FCFA`);
-            console.log(`   💰 Nouveau montant saisi (amount): ${amount.toLocaleString()} FCFA`);
-            console.log(`   🧮 Total après cette dépense: ${newTotalSpent.toLocaleString()} FCFA`);
+            console.log(`   💸 Montant déjà dépensé (currentTotalSpent): ${currentTotalSpent.toLocaleString()} FCFA [type: ${typeof currentTotalSpent}]`);
+            console.log(`   💰 Nouveau montant saisi (amount): ${amount.toLocaleString()} FCFA [type: ${typeof amount}]`);
+            console.log(`   🧮 Total après cette dépense: ${newTotalSpent.toLocaleString()} FCFA [type: ${typeof newTotalSpent}]`);
             console.log(`   📊 Budget disponible: ${(totalCredited - newTotalSpent).toLocaleString()} FCFA`);
             
             if (newTotalSpent > totalCredited) {
