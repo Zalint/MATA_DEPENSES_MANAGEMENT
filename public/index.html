@@ -65,74 +65,94 @@
             <!-- Menu latéral -->
             <aside class="sidebar" id="sidebar">
                 <ul class="nav-menu">
-                    <li><a href="#" data-section="dashboard" class="nav-link active">
-                        <i class="fas fa-tachometer-alt"></i> Tableau de bord
-                    </a></li>
-                    <li><a href="#" data-section="expenses" class="nav-link">
-                        <i class="fas fa-receipt"></i> Mes Dépenses
-                    </a></li>
-                    <li><a href="#" data-section="add-expense" class="nav-link">
-                        <i class="fas fa-plus"></i> Ajouter Dépense
-                    </a></li>
-                    <li id="credit-menu" style="display: none;">
-                        <a href="#" data-section="credit-account" class="nav-link">
-                            <i class="fas fa-credit-card"></i> Créditer Compte
-                        </a>
+                    <!-- 📊 SUIVI & TABLEAU DE BORD -->
+                    <li class="menu-section-title collapsible" data-section-group="dashboard-group">
+                        <span><i class="fas fa-chart-bar"></i> SUIVI & TABLEAU DE BORD <i class="fas fa-chevron-down chevron"></i></span>
                     </li>
-                    <li id="admin-menu" style="display: none;">
-                        <a href="#" data-section="manage-accounts" class="nav-link">
-                            <i class="fas fa-users-cog"></i> Gérer Comptes
-                        </a>
+                    <ul class="section-group" data-group="dashboard-group">
+                        <li><a href="#" data-section="dashboard" class="nav-link active">
+                            <i class="fas fa-tachometer-alt"></i> Tableau de bord
+                        </a></li>
+                        <li id="visualisation-menu" style="display: none;">
+                            <a href="#" data-section="visualisation" class="nav-link">
+                                <i class="fas fa-chart-line"></i> Visualisation
+                            </a>
+                        </li>
+                        <li>
+                            <a href="#" data-section="partner-tracking" class="nav-link">
+                                <i class="fas fa-handshake"></i> Suivi Partenaires
+                            </a>
+                        </li>
+                    </ul>
+                    <!-- 💵 GESTION FINANCIÈRE -->
+                    <li class="menu-section-title collapsible" data-section-group="finance-group">
+                        <span><i class="fas fa-money-check"></i> GESTION FINANCIÈRE <i class="fas fa-chevron-down chevron"></i></span>
                     </li>
-                    <li id="admin-users-menu" style="display: none;">
-                        <a href="#" data-section="manage-users" class="nav-link">
-                            <i class="fas fa-user-shield"></i> Gérer Utilisateurs
-                        </a>
+                    <ul class="section-group" data-group="finance-group">
+                        <li><a href="#" data-section="expenses" class="nav-link">
+                            <i class="fas fa-receipt"></i> Mes Dépenses
+                        </a></li>
+                        <li><a href="#" data-section="add-expense" class="nav-link">
+                            <i class="fas fa-plus"></i> Ajouter Dépense
+                        </a></li>
+                        <li id="credit-menu" style="display: none;">
+                            <a href="#" data-section="credit-account" class="nav-link">
+                                <i class="fas fa-credit-card"></i> Créditer Compte
+                            </a>
+                        </li>
+                        <li id="transfert-menu" style="display: none;">
+                            <a href="#" data-section="transfert" class="nav-link">
+                                <i class="fas fa-exchange-alt"></i> Transfert
+                            </a>
+                        </li>
+                        <li id="creance-menu" style="display: none;">
+                            <a href="#" data-section="creance" class="nav-link">
+                                <i class="fas fa-money-check-alt"></i> Créance
+                            </a>
+                        </li>
+                        <li id="cash-bictorys-menu" style="display: none;">
+                            <a href="#" data-section="cash-bictorys" class="nav-link">
+                                <i class="fas fa-money-bill-wave"></i> Cash Bictorys Mois
+                            </a>
+                        </li>
+                        <li id="admin-menu" style="display: none;">
+                            <a href="#" data-section="manage-accounts" class="nav-link">
+                                <i class="fas fa-users-cog"></i> Gérer Comptes
+                            </a>
+                        </li>
+                    </ul>
+                    <!-- 🏪 GESTION DES STOCKS -->
+                    <li class="menu-section-title collapsible" data-section-group="stock-group">
+                        <span><i class="fas fa-warehouse"></i> GESTION DES STOCKS <i class="fas fa-chevron-down chevron"></i></span>
                     </li>
-                    <li id="admin-config-menu" style="display: none;">
-                        <a href="#" data-section="admin-config" class="nav-link">
-                            <i class="fas fa-cogs"></i> Config
-                        </a>
+                    <ul class="section-group" data-group="stock-group">
+                        <li id="stock-menu" style="display: none;">
+                            <a href="#" data-section="stock-soir" class="nav-link">
+                                <i class="fas fa-warehouse"></i> Gestion Stock
+                            </a>
+                        </li>
+                        <li id="stock-vivant-menu" style="display: none;">
+                            <a href="#" data-section="stock-vivant" class="nav-link">
+                                <i class="fas fa-seedling"></i> Stock Vivant
+                            </a>
+                        </li>
+                    </ul>
+                    <!-- ⚙️ PARAMÉTRAGE -->
+                    <li class="menu-section-title collapsible" data-section-group="param-group">
+                        <span><i class="fas fa-cogs"></i> PARAMÉTRAGE <i class="fas fa-chevron-down chevron"></i></span>
                     </li>
-                    <li id="visualisation-menu" style="display: none;">
-                        <a href="#" data-section="visualisation" class="nav-link">
-                            <i class="fas fa-chart-line"></i> Visualisation
-                        </a>
-                    </li>
-                    <li>
-                        <a href="#" data-section="partner-tracking" class="nav-link">
-                            <i class="fas fa-handshake"></i> Suivi Partenaires
-                        </a>
-                    </li>
-                    <li id="creance-menu" style="display: none;">
-                        <a href="#" data-section="creance" class="nav-link">
-                            <i class="fas fa-money-check-alt"></i> Créance
-                        </a>
-                    </li>
-                    <li id="cash-bictorys-menu" style="display: none;">
-                        <a href="#" data-section="cash-bictorys" class="nav-link">
-                            <i class="fas fa-money-bill-wave"></i> Cash Bictorys Mois
-                        </a>
-                    </li>
-                    <!--<li><a href="#" data-section="remboursements" class="nav-link">
-                        <i class="fas fa-money-bill-wave"></i> Remboursements
-                    </a></li>-->
-                    <li id="transfert-menu" style="display: none;">
-                        <a href="#" data-section="transfert" class="nav-link">
-                            <i class="fas fa-exchange-alt"></i> Transfert
-                        </a>
-                    </li>
-                    <li id="stock-menu" style="display: none;">
-                        <a href="#" data-section="stock-soir" class="nav-link">
-                            <i class="fas fa-warehouse"></i> Gestion Stock
-                        </a>
-                    </li>
-                    <li id="stock-vivant-menu" style="display: none;">
-                        <a href="#" data-section="stock-vivant" class="nav-link">
-                            <i class="fas fa-seedling"></i> Stock Vivant
-                        </a>
-                    </li>
-
+                    <ul class="section-group" data-group="param-group">
+                        <li id="admin-users-menu" style="display: none;">
+                            <a href="#" data-section="manage-users" class="nav-link">
+                                <i class="fas fa-user-shield"></i> Gérer Utilisateurs
+                            </a>
+                        </li>
+                        <li id="admin-config-menu" style="display: none;">
+                            <a href="#" data-section="admin-config" class="nav-link">
+                                <i class="fas fa-cogs"></i> Config
+                            </a>
+                        </li>
+                    </ul>
                 </ul>
             </aside>
 
@@ -177,23 +197,14 @@
                     </div>
                     
                     <div class="stats-grid">
+                        <!-- Cartes principales (toujours visibles) -->
                         <div class="stat-card">
                             <div class="stat-icon">
                                 <i class="fas fa-calendar-day"></i>
                             </div>
                             <div class="stat-content">
-                                <h3>Solde</h3>
+                                <h3>Cash disponible</h3>
                                 <p class="stat-value" id="solde-amount">0 FCFA</p>
-                            </div>
-                        </div>
-
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-warehouse"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>Solde Comptes Dépôt</h3>
-                                <p class="stat-value" id="total-depot-balance">0 FCFA</p>
                             </div>
                         </div>
 
@@ -206,50 +217,7 @@
                                 <p class="stat-value" id="total-partner-balance">0 FCFA</p>
                             </div>
                         </div>
-                        
-                        
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-boxes"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>Stock Point de Vente</h3>
-                                <p class="stat-value" id="stock-total">0</p>
-                                <small class="stat-period" id="stock-date">Dernière date</small>
-                            </div>
-                        </div>
 
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-seedling"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>Total Général Stock Vivant</h3>
-                                <p class="stat-value" id="stock-vivant-total">0 FCFA</p>
-                                <small class="stat-period" id="stock-vivant-date">Dernière date</small>
-                            </div>
-                        </div>
-
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-money-check-alt"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>Total Créances</h3>
-                                <p class="stat-value" id="total-creances">0 FCFA</p>
-                                <small class="stat-period">Soldes clients créance</small>
-                            </div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-calendar-week"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>Cash Burn depuis Lundi</h3>
-                                <p class="stat-value" id="weekly-burn">0 FCFA</p>
-                            </div>
-                        </div>
-                        
                         <div class="stat-card">
                             <div class="stat-icon">
                                 <i class="fas fa-calendar-alt"></i>
@@ -259,18 +227,7 @@
                                 <p class="stat-value" id="monthly-burn">0 FCFA</p>
                             </div>
                         </div>
-
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-calendar-check"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>Créances du Mois</h3>
-                                <p class="stat-value" id="creances-mois">0 FCFA</p>
-                                <small class="stat-period" id="creances-mois-period">Mois en cours</small>
-                            </div>
-                        </div>
-
+                        
                         <div class="stat-card">
                             <div class="stat-icon">
                                 <i class="fas fa-money-bill-wave"></i>
@@ -282,8 +239,104 @@
                             </div>
                         </div>
 
+                        <!-- Nouvelle carte PL avec estimation charges -->
+                        <div class="stat-card" title="PL avec estimation charges fixes au prorata: Cash Bictorys + Créances + Stock PV + Écart Stock Vivant Mensuel - Cash Burn - Estim. Charges Mensuelles Fixes - Livraisons partenaire du mois">
+                            <div class="stat-icon">
+                                <i class="fas fa-calculator"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>PL (avec ecart stock mensuel et une estim. charges)</h3>
+                                <p class="stat-value" id="pl-estim-charges">0 FCFA</p>
+                            </div>
+                        </div>
+
+                        <!-- Nouvelle carte PL brut -->
+                        <div class="stat-card" title="PL brut avec écart stock mensuel: Cash Bictorys + Créances + Stock PV + Écart Stock Vivant Mensuel - Cash Burn - Livraisons partenaire du mois">
+                            <div class="stat-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>PL brut (avec ecart stock mensuel)</h3>
+                                <p class="stat-value" id="pl-brut">0 FCFA</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Contrôles d'affichage des cartes additionnelles -->
+                    <div class="dashboard-controls">
+                        <button id="toggle-additional-cards" class="btn btn-secondary">
+                            <i class="fas fa-eye"></i> Afficher toutes les cartes
+                        </button>
+                    </div>
+
+                    <div class="stats-grid">
+                        <!-- Cartes additionnelles (cachées par défaut) -->
+                        <div class="stat-card additional-card" style="display: none;">
+                            <div class="stat-icon">
+                                <i class="fas fa-warehouse"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Solde Comptes Dépôt</h3>
+                                <p class="stat-value" id="total-depot-balance">0 FCFA</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card additional-card" style="display: none;">
+                            <div class="stat-icon">
+                                <i class="fas fa-boxes"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Stock Point de Vente</h3>
+                                <p class="stat-value" id="stock-total">0</p>
+                                <small class="stat-period" id="stock-date">Dernière date</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card additional-card" style="display: none;">
+                            <div class="stat-icon">
+                                <i class="fas fa-seedling"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Total Général Stock Vivant</h3>
+                                <p class="stat-value" id="stock-vivant-total">0 FCFA</p>
+                                <small class="stat-period" id="stock-vivant-date">Dernière date</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card additional-card" style="display: none;">
+                            <div class="stat-icon">
+                                <i class="fas fa-money-check-alt"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Total Créances</h3>
+                                <p class="stat-value" id="total-creances">0 FCFA</p>
+                                <small class="stat-period">Soldes clients créance</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card additional-card" style="display: none;">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-week"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Cash Burn depuis Lundi</h3>
+                                <p class="stat-value" id="weekly-burn">0 FCFA</p>
+                            </div>
+                        </div>
+                        
+                        <div class="stat-card additional-card" style="display: none;">
+                            <div class="stat-icon">
+                                <i class="fas fa-calendar-check"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Créances du Mois</h3>
+                                <p class="stat-value" id="creances-mois">0 FCFA</p>
+                                <small class="stat-period" id="creances-mois-period">Mois en cours</small>
+                            </div>
+                        </div>
+
                         <!-- Nouvelle carte Écart Stock Vivant Mensuel -->
-                        <div class="stat-card">
+                        <div class="stat-card additional-card" style="display: none;">
                             <div class="stat-icon">
                                 <i class="fas fa-exchange-alt"></i>
                             </div>
@@ -295,7 +348,7 @@
                         </div>
 
                         <!-- Nouvelle carte PL (sans stock + charges) -->
-                        <div class="stat-card">
+                        <div class="stat-card additional-card" style="display: none;">
                             <div class="stat-icon">
                                 <i class="fas fa-chart-pie"></i>
                             </div>
@@ -303,19 +356,6 @@
                                 <h3>PL (sans stock + sans charges)</h3>
                                 <p class="stat-value" id="pl-sans-stock-charges">0 FCFA</p>
                                 <small class="stat-period">Cash Bictorys + Créances + Stock PV - Cash Burn</small>
-                            </div>
-                        </div>
-
-                        <!-- Nouvelle carte PL avec estimation charges -->
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-calculator"></i>
-                            </div>
-                            <div class="stat-content">
-                                <h3>PL (avec ecart stock mensuel et une estim. charges)</h3>
-                                <p class="stat-value" id="pl-estim-charges">0 FCFA</p>
-                                <small class="stat-period">PL avec estimation charges fixes au prorata</small>
-                                <small class="stat-period">Cash Bictorys + Créances + Stock PV + Écart Stock Vivant Mensuel - Cash Burn - Estim. Charges Mensuelles Fixes</small>
                             </div>
                         </div>
                     </div>
@@ -662,7 +702,7 @@
                                 <label for="expense-predictable">Prévisible</label>
                                 <select id="expense-predictable" name="predictable" required>
                                     <option value="">Sélectionner</option>
-                                    <option value="oui">Oui</option>
+                                <option value="oui" selected>Oui</option>
                                     <option value="non">Non</option>
                                 </select>
                             </div>
@@ -757,7 +797,7 @@
                             
                             <div class="form-group">
                                 <label for="director-credit-comment">Commentaire</label>
-                                <textarea id="director-credit-comment" placeholder="Ex: Budget mensuel, remboursement..." required></textarea>
+                            <textarea id="director-credit-comment" placeholder="Ex: Budget mensuel, remboursement..."></textarea>
                             </div>
                             
                             <div class="form-actions">
@@ -884,7 +924,7 @@
                         
                         <div class="form-group">
                             <label>Commentaire</label>
-                            <textarea id="creditDescription" placeholder="Ex: Budget mensuel, remboursement..." required></textarea>
+                            <textarea id="creditDescription" placeholder="Ex: Budget mensuel, remboursement..."></textarea>
                         </div>
                         
                         <div id="creditWarning" class="warning-message" style="display: none;">
@@ -952,14 +992,6 @@
                                     <!-- Les données seront chargées ici -->
                                 </tbody>
                             </table>
-                        </div>
-                    </div>
-                    
-                    <!-- Configuration des directeurs (Admin seulement) -->
-                    <div id="partner-config" style="display: none;">
-                        <h3>Configuration des Directeurs Partenaires</h3>
-                        <div id="partner-accounts-config">
-                            <!-- Configuration sera chargée ici -->
                         </div>
                     </div>
                     
@@ -1075,69 +1107,6 @@
                             <p id="creance-account-director">Directeur assigné : [Nom du directeur]</p>
                         </div>
 
-                        <!-- Tableau récapitulatif par client -->
-                        <div class="creance-summary-section">
-                            <div class="section-card">
-                                <h4><i class="fas fa-table"></i> Récapitulatif par Client</h4>
-                                
-                                <div class="table-container">
-                                    <table id="clients-summary-table" class="data-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Client</th>
-                                                <th>Téléphone</th>
-                                                <th>Crédit Initial</th>
-                                                <th>Total Avances</th>
-                                                <th>Total Remboursements</th>
-                                                <th>Solde Final</th>
-                                                <th>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="clients-summary-tbody">
-                                            <!-- Les données seront chargées ici -->
-                                        </tbody>
-                                    </table>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Gestion des clients (Admin/DG/PCA uniquement) -->
-                        <div id="creance-admin-section" class="creance-section" style="display: none;">
-                            <div class="section-card">
-                                <h4><i class="fas fa-users"></i> Gestion des Clients</h4>
-                                
-                                <!-- Formulaire d'ajout de client -->
-                                <div class="add-client-form">
-                                    <h5>Ajouter un nouveau client</h5>
-                                    <form id="add-client-form">
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <label for="client-name">Nom du client *</label>
-                                                <input type="text" id="client-name" name="client-name" required placeholder="Nom complet du client">
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="client-phone">Téléphone</label>
-                                                <input type="text" id="client-phone" name="client-phone" placeholder="Numéro de téléphone">
-                                            </div>
-                                        </div>
-                                        <div class="form-row">
-                                            <div class="form-group">
-                                                <label for="client-address">Adresse</label>
-                                                <input type="text" id="client-address" name="client-address" placeholder="Adresse du client">
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="initial-credit">Crédit initial (FCFA)</label>
-                                                <input type="number" id="initial-credit" name="initial-credit" min="0" value="0" placeholder="0">
-                                            </div>
-                                        </div>
-                                        <button type="submit" class="btn btn-success">
-                                            <i class="fas fa-plus"></i> Ajouter le client
-                                        </button>
-                                    </form>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- Opérations créance (Tous les utilisateurs autorisés) -->
                         <div id="creance-operations-section" class="creance-section">
                             <div class="section-card">
@@ -1190,7 +1159,68 @@
                             </div>
                         </div>
 
+                        <!-- Gestion des clients (Admin/DG/PCA uniquement) -->
+                        <div id="creance-admin-section" class="creance-section" style="display: none;">
+                            <div class="section-card">
+                                <h4><i class="fas fa-users"></i> Gestion des Clients</h4>
+                                
+                                <!-- Formulaire d'ajout de client -->
+                                <div class="add-client-form">
+                                    <h5>Ajouter un nouveau client</h5>
+                                    <form id="add-client-form">
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="client-name">Nom du client *</label>
+                                                <input type="text" id="client-name" name="client-name" required placeholder="Nom complet du client">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="client-phone">Téléphone</label>
+                                                <input type="text" id="client-phone" name="client-phone" placeholder="Numéro de téléphone">
+                                            </div>
+                                        </div>
+                                        <div class="form-row">
+                                            <div class="form-group">
+                                                <label for="client-address">Adresse</label>
+                                                <input type="text" id="client-address" name="client-address" placeholder="Adresse du client">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="initial-credit">Crédit initial (FCFA)</label>
+                                                <input type="number" id="initial-credit" name="initial-credit" min="0" value="0" placeholder="0">
+                                            </div>
+                                        </div>
+                                        <button type="submit" class="btn btn-success">
+                                            <i class="fas fa-plus"></i> Ajouter le client
+                                        </button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
 
+                        <!-- Tableau récapitulatif par client -->
+                        <div class="creance-summary-section">
+                            <div class="section-card">
+                                <h4><i class="fas fa-table"></i> Récapitulatif par Client</h4>
+                                
+                                <div class="table-container">
+                                    <table id="clients-summary-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Client</th>
+                                                <th>Téléphone</th>
+                                                <th>Crédit Initial</th>
+                                                <th>Total Avances</th>
+                                                <th>Total Remboursements</th>
+                                                <th>Solde Final</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="clients-summary-tbody">
+                                            <!-- Les données seront chargées ici -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
 
                         <!-- Historique des opérations -->
                         <div class="creance-history-section">
@@ -1493,6 +1523,14 @@
                             <!-- Les utilisateurs seront chargés ici -->
                         </div>
                     </div>
+
+                    <!-- Configuration des directeurs partenaires -->
+                    <div class="users-list-section">
+                        <h3>Configuration des Directeurs Partenaires</h3>
+                        <div id="partner-accounts-config">
+                            <!-- Configuration sera chargée ici -->
+                        </div>
+                    </div>
                 </section>
 
                 <!-- Section Remboursements -->
@@ -1571,7 +1609,7 @@
                     <h2>Gestion des Stocks du Soir</h2>
                     
                     <!-- Upload de fichier JSON -->
-                    <div class="stock-upload-card">
+                    <div class="stock-upload-card" style="display: none;">
                         <h3><i class="fas fa-upload"></i> Importer un fichier de réconciliation</h3>
                         <form id="stock-upload-form" enctype="multipart/form-data">
                             <div class="form-group">
@@ -2096,6 +2134,7 @@
                                                 <th>Créances</th>
                                                 <th>Stock PV (FCFA)</th>
                                                 <th>Écart Stock Vivant</th>
+                                                <th>Livraisons Partenaires</th>
                                                 <th>Cash Burn</th>
                                                 <th>Charges Estimées</th>
                                                 <th>PL Final</th>
@@ -2417,7 +2456,7 @@
                         <label for="edit-expense-predictable">Prévisible</label>
                         <select id="edit-expense-predictable" name="predictable" required>
                             <option value="">Sélectionner</option>
-                            <option value="oui">Oui</option>
+                            <option value="oui" selected>Oui</option>
                             <option value="non">Non</option>
                         </select>
                     </div>
