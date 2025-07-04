@@ -325,6 +325,9 @@ function initMenuVisibility() {
 
 // Chargement des données initiales
 async function loadInitialData() {
+    // Initialize menu collapse
+    initMenuCollapse();
+    
     await loadCategories();
     
     // Charger les types de comptes pour le formulaire de création
@@ -379,6 +382,36 @@ async function loadInitialData() {
     await initDirectorCreditModule();
     // Stock vivant sera initialisé seulement quand on clique sur le menu
     console.log('ℹ️ CLIENT: Stock vivant sera initialisé à la demande');
+}
+
+// Initialiser le menu collapse
+function initMenuCollapse() {
+    // Get all menu section titles
+    const menuSectionTitles = document.querySelectorAll('.menu-section-title');
+    
+    menuSectionTitles.forEach(title => {
+        title.addEventListener('click', function() {
+            // Get the associated section group
+            const sectionGroup = document.querySelector(`.section-group[data-group="${this.getAttribute('data-section-group')}"]`);
+            if (!sectionGroup) return;
+            
+            // Toggle collapsed state
+            this.classList.toggle('collapsed');
+            sectionGroup.classList.toggle('collapsed');
+            
+            // Rotate chevron
+            const chevron = this.querySelector('.chevron');
+            if (chevron) {
+                chevron.style.transform = this.classList.contains('collapsed') ? 'rotate(-90deg)' : 'rotate(180deg)';
+            }
+            
+            console.log('Menu section clicked:', {
+                title: this,
+                group: sectionGroup,
+                collapsed: this.classList.contains('collapsed')
+            });
+        });
+    });
 }
 
 // Initialiser l'observateur pour la section partenaires
@@ -928,6 +961,49 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
         document.getElementById('total-partner-balance').textContent = formatCurrency(stats.totalPartnerBalance || 0);
         document.getElementById('pl-sans-stock-charges').textContent = formatCurrency(stats.plSansStockCharges || 0);
         document.getElementById('pl-estim-charges').textContent = formatCurrency(stats.plEstimCharges || 0);
+        document.getElementById('pl-brut').textContent = formatCurrency(stats.plBrut || 0);
+        
+        // Mettre à jour la carte de solde principale avec le solde calculé dynamiquement
+        // (surtout important quand cutoff_date est utilisé)
+        if (cutoffDate || (startDate && endDate)) {
+            document.getElementById('solde-amount').textContent = formatCurrency(stats.totalRemaining || 0);
+            console.log('💰 updateStatsCards: Solde principal mis à jour avec solde dynamique:', formatCurrency(stats.totalRemaining || 0));
+        }
+        
+        // Afficher les détails du calcul du solde dans la console client
+        console.group('🔍 DÉTAIL CALCUL SOLDE (dynamique)');
+        console.log('📅 Date de référence:', cutoffDate || endDate || 'Date actuelle');
+        console.log('💰 Formule utilisée: Total Crédité - Dépenses jusqu\'à la date de référence');
+        console.log('📊 Comptes inclus: Tous sauf dépôts, partenaires et créances');
+        if (cutoffDate) {
+            console.log('🎯 Mode Snapshot: Solde calculé jusqu\'au', cutoffDate);
+        } else if (startDate && endDate) {
+            console.log('🎯 Mode Période: Solde calculé jusqu\'au', endDate);
+        } else {
+            console.log('🎯 Mode Actuel: Solde calculé à aujourd\'hui');
+        }
+        console.log('');
+        console.log('💸 ===== DÉPENSES TOTAUX (MISE EN EXERGUE) =====');
+        console.log('💸 🔥 MONTANT TOTAL DÉPENSÉ:', formatCurrency(stats.totalSpent || 0));
+        console.log('💸 📅 Période de calcul:', (cutoffDate ? `Du début du mois au ${cutoffDate}` : (startDate && endDate ? `Du ${startDate} au ${endDate}` : 'Aujourd\'hui')));
+        console.log('💸 ================================================');
+        console.log('');
+        console.log('');
+        console.log('📋 ===== TOTAUX CRÉDITÉS (COMPARAISON) =====');
+        console.log('📋 🎯 Total Crédité avec ACTIVITÉ:', formatCurrency(stats.totalCreditedWithExpenses || 0));
+        console.log('📋    └─ Comptes ayant eu des dépenses dans la période seulement');
+        console.log('📋 🌐 Total Crédité GÉNÉRAL:', formatCurrency(stats.totalCreditedGeneral || 0));
+        console.log('📋    └─ TOUS les comptes actifs (avec ou sans dépenses)');
+        
+        const difference = (stats.totalCreditedGeneral || 0) - (stats.totalCreditedWithExpenses || 0);
+        if (difference === 0) {
+            console.log('📋 ✅ RÉSULTAT: Identiques - Tous les comptes ont eu des dépenses');
+        } else {
+            console.log('📋 📊 DIFFÉRENCE:', formatCurrency(difference), '(comptes sans activité)');
+        }
+        console.log('📋 =============================================');
+        console.log('💵 ✅ SOLDE FINAL CALCULÉ:', formatCurrency(stats.totalRemaining || 0));
+        console.groupEnd();
         
         // Afficher les détails du calcul PL dans la console du navigateur (F12)
         if (stats.plCalculationDetails) {
@@ -944,6 +1020,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
                 formatCurrency(stats.plCalculationDetails.plBase)
             );
             console.log('🌱 Écart Stock Vivant Mensuel:', formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0));
+            console.log('🚚 Livraisons partenaires du mois:', formatCurrency(stats.plCalculationDetails.livraisonsPartenaires || 0));
             console.log('⚙️ Estimation charges fixes mensuelle:', formatCurrency(stats.plCalculationDetails.chargesFixesEstimation));
             if (stats.plCalculationDetails.prorata.totalJours > 0) {
                 console.log('📅 Date actuelle:', 
@@ -962,7 +1039,8 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.log('🎯 PL FINAL =', 
                 formatCurrency(stats.plCalculationDetails.plBase), '+',
                 formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0), '-',
-                formatCurrency(stats.plCalculationDetails.chargesProrata), '=',
+                formatCurrency(stats.plCalculationDetails.chargesProrata), '-',
+                formatCurrency(stats.plCalculationDetails.livraisonsPartenaires || 0), '=',
                 formatCurrency(stats.plCalculationDetails.plFinal)
             );
             if (stats.plCalculationDetails.error) {
@@ -995,7 +1073,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
         const defaultElements = [
             'total-spent-amount', 'total-remaining-amount', 'total-credited-with-expenses',
             'total-credited-general', 'total-depot-balance', 'total-partner-balance', 
-            'pl-sans-stock-charges', 'pl-estim-charges'
+            'pl-sans-stock-charges', 'pl-estim-charges', 'pl-brut'
         ];
         
         defaultElements.forEach(elementId => {
@@ -1048,8 +1126,8 @@ function createChart(containerId, data, type) {
         headerRow = `
             <tr>
                 <th>Compte</th>
-                <th>Montant Dépensé</th>
                 <th>Montant Restant</th>
+                <th>Montant Dépensé</th>
                 <th>Dépenses mois précédents</th>
                 <th>Total Crédité</th>
             </tr>
@@ -1093,8 +1171,8 @@ function createChart(containerId, data, type) {
                     ${label}
                   </span>
                 </td>
-                <td class="amount-cell spent">${formatCurrency(spent)}</td>
                 <td class="amount-cell remaining">${formatCurrency(remaining)}</td>
+                <td class="amount-cell spent">${formatCurrency(spent)}</td>
                 <td class="amount-cell previous">${formatCurrency(previousMonths)}</td>
                 <td class="amount-cell total">${formatCurrency(totalCredited)}</td>
             `;
@@ -2057,6 +2135,15 @@ function displayAccounts(accounts) {
         </style>
     `;
     
+    // Bouton pour afficher/masquer les colonnes financières
+    const toggleFinancialBtn = `
+        <div style="margin-bottom: 15px; text-align: right;">
+            <button id="toggle-financial-columns" class="btn btn-outline-primary" style="border-radius: 10px; padding: 8px 15px; font-weight: 500; border: 2px solid #667eea; color: #667eea; background: white; transition: all 0.3s ease;">
+                <i class="fas fa-eye" style="margin-right: 5px;"></i>Afficher colonnes financières
+            </button>
+        </div>
+    `;
+
     // Créer le tableau
     const tableHtml = `
         <div class="table-responsive" style="border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
@@ -2075,13 +2162,13 @@ function displayAccounts(accounts) {
                         <th style="border: none; padding: 15px; font-weight: 600;">
                             <i class="fas fa-folder" style="margin-right: 8px;"></i>Catégorie
                         </th>
-                        <th style="border: none; padding: 15px; font-weight: 600;">
+                        <th style="border: none; padding: 15px; font-weight: 600; display: none;" class="financial-column">
                             <i class="fas fa-wallet" style="margin-right: 8px;"></i>Solde
                         </th>
-                        <th style="border: none; padding: 15px; font-weight: 600;">
+                        <th style="border: none; padding: 15px; font-weight: 600; display: none;" class="financial-column">
                             <i class="fas fa-plus-circle" style="margin-right: 8px;"></i>Crédité
                         </th>
-                        <th style="border: none; padding: 15px; font-weight: 600;">
+                        <th style="border: none; padding: 15px; font-weight: 600; display: none;" class="financial-column">
                             <i class="fas fa-minus-circle" style="margin-right: 8px;"></i>Dépensé
                         </th>
                         <th style="border: none; padding: 15px; font-weight: 600;">
@@ -2150,7 +2237,7 @@ function displayAccounts(accounts) {
         </style>
     `;
     
-    accountsList.innerHTML = filtersHtml + tableHtml;
+    accountsList.innerHTML = filtersHtml + toggleFinancialBtn + tableHtml;
     
     // Peupler les filtres
     populateAccountFilters(accounts);
@@ -2293,6 +2380,44 @@ function setupAccountFilters() {
         updateSelectedAccountsText();
         filterAndDisplayAccounts();
     });
+    
+    // Ajouter l'événement pour le toggle des colonnes financières
+    const toggleButton = document.getElementById('toggle-financial-columns');
+    if (toggleButton) {
+        toggleButton.addEventListener('click', toggleFinancialColumns);
+    }
+}
+
+// Fonction pour afficher/masquer les colonnes financières
+function toggleFinancialColumns() {
+    const financialColumns = document.querySelectorAll('.financial-column');
+    const toggleButton = document.getElementById('toggle-financial-columns');
+    const isHidden = financialColumns[0].style.display === 'none';
+    
+    financialColumns.forEach(column => {
+        column.style.display = isHidden ? 'table-cell' : 'none';
+    });
+    
+    // Mettre à jour le texte et l'icône du bouton
+    if (isHidden) {
+        toggleButton.innerHTML = '<i class="fas fa-eye-slash" style="margin-right: 5px;"></i>Masquer colonnes financières';
+        toggleButton.style.background = '#667eea';
+        toggleButton.style.color = 'white';
+        // Ajuster le colspan si nécessaire
+        const emptyRow = document.querySelector('#accounts-table-body tr td[colspan]');
+        if (emptyRow) {
+            emptyRow.setAttribute('colspan', '10');
+        }
+    } else {
+        toggleButton.innerHTML = '<i class="fas fa-eye" style="margin-right: 5px;"></i>Afficher colonnes financières';
+        toggleButton.style.background = 'white';
+        toggleButton.style.color = '#667eea';
+        // Ajuster le colspan si nécessaire
+        const emptyRow = document.querySelector('#accounts-table-body tr td[colspan]');
+        if (emptyRow) {
+            emptyRow.setAttribute('colspan', '7');
+        }
+    }
 }
 
 function updateSelectedAccountsText() {
@@ -2348,7 +2473,7 @@ function displayAccountsTable(accounts) {
     updateAccountFilterCount(accounts.length, window.allAccounts ? window.allAccounts.length : 0);
     
     if (accounts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align: center;">Aucun compte trouvé avec ces filtres</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Aucun compte trouvé avec ces filtres</td></tr>';
         return;
     }
     
@@ -2402,9 +2527,9 @@ function displayAccountsTable(accounts) {
                 <td><span class="badge badge-secondary">${account.account_type || 'classique'}</span></td>
                 <td>${usernameDisplay}</td>
                 <td>${account.category_type || '-'}</td>
-                <td><strong>${formatCurrency(account.current_balance)}</strong></td>
-                <td>${formatCurrency(account.total_credited)}</td>
-                <td>${formatCurrency(account.total_spent)}</td>
+                <td style="display: none;" class="financial-column"><strong>${formatCurrency(account.current_balance)}</strong></td>
+                <td style="display: none;" class="financial-column">${formatCurrency(account.total_credited)}</td>
+                <td style="display: none;" class="financial-column">${formatCurrency(account.total_spent)}</td>
                 <td>${formatDate(account.created_at)}</td>
                 <td><span class="${statusClass}"><strong>${statusText}</strong></span></td>
                 <td>${actionButtons}</td>
@@ -2959,6 +3084,11 @@ function setDefaultDate() {
     if (quantityField) {
         quantityField.value = '1';
     }
+    // Initialiser prévisible à "oui"
+    const predictableField = document.getElementById('expense-predictable');
+    if (predictableField) {
+        predictableField.value = 'oui';
+    }
 }
 
 // Gestionnaires d'événements
@@ -3243,6 +3373,34 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Configurer les event listeners pour les comptes partenaires
     setupPartnerEventListeners();
+    
+    // Gestionnaire pour le bouton toggle des cartes additionnelles du dashboard
+    const toggleButton = document.getElementById('toggle-additional-cards');
+    if (toggleButton) {
+        let showingAll = false;
+        
+        toggleButton.addEventListener('click', function() {
+            const additionalCards = document.querySelectorAll('.additional-card');
+            
+            if (showingAll) {
+                // Masquer les cartes additionnelles
+                additionalCards.forEach(card => {
+                    card.style.display = 'none';
+                    card.classList.remove('show');
+                });
+                this.innerHTML = '<i class="fas fa-eye"></i> Afficher toutes les cartes';
+                showingAll = false;
+            } else {
+                // Afficher les cartes additionnelles
+                additionalCards.forEach(card => {
+                    card.style.display = 'block';
+                    card.classList.add('show');
+                });
+                this.innerHTML = '<i class="fas fa-eye-slash"></i> Masquer les cartes additionnelles';
+                showingAll = true;
+            }
+        });
+    }
 });
 
 async function creditAccount(formData) {
@@ -5625,9 +5783,6 @@ async function loadPartnerConfiguration() {
         const directors = await directorsResponse.json();
         
         displayPartnerConfiguration(partnerAccounts, directors);
-        
-        // Afficher la section config pour les admins
-        document.getElementById('partner-config').style.display = 'block';
     } catch (error) {
         console.error('Erreur chargement configuration partenaires:', error);
     }
@@ -13078,6 +13233,7 @@ function updateVisualisationTable(tab, data) {
                     <td>${formatCurrency(row.creances)}</td>
                     <td>${formatCurrency(row.stock_pv)}</td>
                     <td>${formatCurrency(row.ecart_stock_vivant)}</td>
+                    <td>${formatCurrency(row.livraisons_partenaires || 0)}</td>
                     <td>${formatCurrency(row.cash_burn)}</td>
                     <td>${formatCurrency(row.charges_estimees)}</td>
                     <td><strong>${formatCurrency(row.pl_final)}</strong></td>

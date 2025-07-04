@@ -774,12 +774,20 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         const monthlyBurn = await pool.query(monthlyBurnQuery, [month_start, ...userParam]);
         
         // Dépenses par compte (période sélectionnée) avec total crédité, sauf dépôts et partenaires
+        // CALCUL DYNAMIQUE DU SOLDE À LA DATE SÉLECTIONNÉE
         let accountBurnQuery = `
             SELECT 
                 a.account_name as name,
                 COALESCE(SUM(e.total), 0) as spent,
                 a.total_credited,
-                a.current_balance
+                a.current_balance,
+                -- Calculer le solde à la date de fin sélectionnée
+                (a.total_credited - COALESCE(
+                    (SELECT SUM(e2.total) 
+                     FROM expenses e2 
+                     WHERE e2.account_id = a.id 
+                     AND e2.expense_date <= $2), 0)
+                ) as balance_at_end_date
             FROM accounts a
             LEFT JOIN users u ON a.user_id = u.id
             LEFT JOIN expenses e ON a.id = e.account_id 
@@ -841,7 +849,8 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                 account: row.name,
                 spent: parseInt(row.spent),
                 total_credited: parseInt(row.total_credited || 0),
-                current_balance: parseInt(row.current_balance || 0), // Ajouter current_balance
+                current_balance: parseInt(row.balance_at_end_date || 0), // Utiliser balance_at_end_date au lieu de current_balance
+                remaining: parseInt(row.balance_at_end_date || 0), // Ajouter remaining pour la compatibilité
                 amount: parseInt(row.spent) // Pour compatibilité avec le code existant
             })),
             category_breakdown: categoryBurn.rows.map(row => ({
@@ -905,17 +914,23 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         
 
         
-        // 2. Montant Restant Total (soldes actuels de tous les comptes, sauf dépôts, partenaires et créances)
+        // 2. Montant Restant Total (soldes calculés dynamiquement selon la date de référence)
         let totalRemainingQuery = `
-            SELECT COALESCE(SUM(a.current_balance), 0) as total 
+            SELECT COALESCE(SUM(
+                a.total_credited - COALESCE(
+                    (SELECT SUM(e.total) 
+                     FROM expenses e 
+                     WHERE e.account_id = a.id 
+                     AND e.expense_date <= $1), 0)
+            ), 0) as total 
             FROM accounts a 
             WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
         `;
-        let remainingParams = [];
+        let remainingParams = [referenceDateStr];
         
         if (isDirector) {
-            totalRemainingQuery += ` AND a.user_id = $1`;
-            remainingParams = [userId];
+            totalRemainingQuery += ` AND a.user_id = $2`;
+            remainingParams.push(userId);
         }
         
         const totalRemainingResult = await pool.query(totalRemainingQuery, remainingParams);
@@ -961,6 +976,23 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         
         const totalCreditedResult = await pool.query(totalCreditedQuery, creditedParams);
         const totalCreditedGeneral = parseInt(totalCreditedResult.rows[0].total);
+
+        // 📊 LOGS DÉTAILLÉS pour comprendre la différence
+        console.log('');
+        console.log('📋 ===== COMPARAISON TOTAUX CRÉDITÉS =====');
+        console.log('📋 🎯 Total Crédité avec ACTIVITÉ:', totalCreditedWithExpenses, 'FCFA');
+        console.log('📋    └─ Comptes ayant eu des dépenses dans la période');
+        console.log('📋 🌐 Total Crédité GÉNÉRAL:', totalCreditedGeneral, 'FCFA');
+        console.log('📋    └─ TOUS les comptes actifs (avec ou sans dépenses)');
+        
+        const difference = totalCreditedGeneral - totalCreditedWithExpenses;
+        if (difference === 0) {
+            console.log('📋 ✅ RÉSULTAT: Identiques - Tous les comptes ont eu des dépenses');
+        } else {
+            console.log('📋 📊 DIFFÉRENCE:', difference, 'FCFA (comptes sans activité)');
+        }
+        console.log('📋 ==========================================');
+        console.log('');
         
         // 5. Solde des comptes depot
         let depotBalanceQuery = `
@@ -1099,19 +1131,16 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 // Paramètres pour la requête
                 const queryParams = userRole === 'directeur' ? [userId, startOfMonthStr, endOfMonthStr] : [startOfMonthStr, endOfMonthStr];
 
-                // Requête pour calculer les créances du mois
+                // Requête pour calculer les créances du mois (SEULEMENT les crédits/avances)
+                // Utiliser la même logique que l'API /api/dashboard/creances-mois pour la cohérence
                 const creancesQuery = `
                     SELECT 
-                        COALESCE(SUM(
-                            CASE 
-                                WHEN co.operation_type = 'credit' THEN co.amount 
-                                ELSE -co.amount 
-                            END
-                        ), 0) as creances_mois
+                        COALESCE(SUM(co.amount), 0) as creances_mois
                     FROM creance_operations co
                     JOIN creance_clients cc ON co.client_id = cc.id
                     JOIN accounts a ON cc.account_id = a.id
-                    WHERE co.operation_date >= $${queryParams.length - 1}
+                    WHERE co.operation_type = 'credit'
+                    AND co.operation_date >= $${queryParams.length - 1}
                     AND co.operation_date <= $${queryParams.length}
                     AND a.account_type = 'creance' 
                     AND a.is_active = true 
@@ -1262,9 +1291,88 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             stockVivantVariation = 0;
         }
 
-        // 9. Calcul de la nouvelle carte PL avec estimation des charges fixes
-        // PL (sans stock + estim. charges) = Cash Bictorys + Créances + Stock PV + Écart Stock Vivant - Cash Burn - Estim charge prorata
+        // 9. Récupérer les livraisons partenaires validées du mois
+        let livraisonsPartenaires = 0;
+        try {
+            // Calculer les dates selon le mois demandé
+            let startOfMonth, endOfMonth;
+            
+            if (cutoff_date) {
+                // Utiliser le mois de la cutoff_date
+                const refDate = new Date(cutoff_date);
+                const year = refDate.getFullYear();
+                const month = refDate.getMonth() + 1;
+                startOfMonth = new Date(year, month - 1, 1);
+                endOfMonth = new Date(cutoff_date);
+            } else if (start_date && end_date) {
+                // Utiliser les dates de filtre
+                startOfMonth = new Date(start_date);
+                endOfMonth = new Date(end_date);
+            } else {
+                // Si pas de dates, utiliser le mois en cours
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = now.getMonth() + 1;
+                startOfMonth = new Date(year, month - 1, 1);
+                endOfMonth = now;
+            }
+
+            const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
+            const endOfMonthStr = endOfMonth.toISOString().split('T')[0];
+
+            // Récupérer les livraisons partenaires validées du mois
+            const livraisonsQuery = `
+                SELECT COALESCE(SUM(pd.amount), 0) as total_livraisons
+                FROM partner_deliveries pd
+                JOIN accounts a ON pd.account_id = a.id
+                WHERE pd.delivery_date >= $1 
+                AND pd.delivery_date <= $2
+                AND pd.validation_status = 'fully_validated'
+                AND pd.is_validated = true
+                AND a.account_type = 'partenaire'
+                AND a.is_active = true
+            `;
+
+            const livraisonsResult = await pool.query(livraisonsQuery, [startOfMonthStr, endOfMonthStr]);
+            livraisonsPartenaires = parseInt(livraisonsResult.rows[0].total_livraisons) || 0;
+            
+            console.log(`🚚 Livraisons partenaires du mois (${startOfMonthStr} au ${endOfMonthStr}): ${livraisonsPartenaires} FCFA`);
+            console.log(`🔍 Requête SQL livraisons: ${livraisonsQuery.replace(/\s+/g, ' ')}`);
+            console.log(`📅 Paramètres: startDate=${startOfMonthStr}, endDate=${endOfMonthStr}`);
+            
+            // Debug: vérifier les comptes partenaires
+            const partnerAccountsResult = await pool.query(`
+                SELECT id, account_name, account_type, is_active
+                FROM accounts 
+                WHERE account_type = 'partenaire' AND is_active = true
+            `);
+            console.log(`👥 Comptes partenaires actifs: ${partnerAccountsResult.rows.length}`);
+            partnerAccountsResult.rows.forEach(account => {
+                console.log(`   - ${account.account_name} (ID: ${account.id})`);
+            });
+            
+            // Debug: vérifier les livraisons dans la période
+            const deliveriesDebugResult = await pool.query(`
+                SELECT pd.id, pd.delivery_date, pd.amount, pd.validation_status, pd.is_validated, a.account_name
+                FROM partner_deliveries pd
+                JOIN accounts a ON pd.account_id = a.id
+                WHERE pd.delivery_date >= $1 AND pd.delivery_date <= $2
+                ORDER BY pd.delivery_date DESC
+            `, [startOfMonthStr, endOfMonthStr]);
+            console.log(`📦 Livraisons dans la période: ${deliveriesDebugResult.rows.length}`);
+            deliveriesDebugResult.rows.forEach(delivery => {
+                console.log(`   - ${delivery.delivery_date}: ${delivery.amount} FCFA (${delivery.validation_status}, validated: ${delivery.is_validated}) - ${delivery.account_name}`);
+            });
+            
+        } catch (error) {
+            console.error('Erreur calcul livraisons partenaires pour PL:', error);
+            livraisonsPartenaires = 0;
+        }
+
+        // 10. Calcul de la nouvelle carte PL avec estimation des charges fixes
+        // PL = Cash Bictorys + Créances + Stock PV + Écart Stock Vivant - Cash Burn - Estim charge prorata - Livraisons partenaires
         let plEstimCharges = 0;
+        let plBrut = 0;
         let chargesFixesEstimation = 0;
         let chargesProrata = 0;
         let joursOuvrablesEcoules = 0;
@@ -1331,19 +1439,24 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 console.log(`💸 Calcul prorata: ${chargesFixesEstimation} × ${joursOuvrablesEcoules}/${totalJoursOuvrables} = ${Math.round(chargesProrata)} FCFA`);
             }
             
-            // Calculer le PL avec estimation des charges ET écart stock vivant
-            plEstimCharges = plSansStockCharges + stockVivantVariation - chargesProrata;
+            // Calculer le PL brut (sans estimation des charges)
+            plBrut = plSansStockCharges + stockVivantVariation - livraisonsPartenaires;
             
-            console.log('🔍=== DÉTAIL CALCUL PL (sans stock + estim. charges) ===');
+            // Calculer le PL avec estimation des charges ET écart stock vivant ET livraisons partenaires
+            plEstimCharges = plSansStockCharges + stockVivantVariation - chargesProrata - livraisonsPartenaires;
+            
+            console.log('🔍=== DÉTAIL CALCUL PL (avec ecart stock mensuel et une estim. charges) ===');
             console.log(`💰 Cash Bictorys du mois: ${cashBictorysValue} FCFA`);
             console.log(`💳 Créances du mois: ${creancesMoisValue} FCFA`);
             console.log(`📦 Stock Point de Vente: ${stockPointVenteValue} FCFA`);
             console.log(`💸 Cash Burn du mois: ${totalSpent} FCFA`);
             console.log(`📊 PL de base = ${cashBictorysValue} + ${creancesMoisValue} + ${stockPointVenteValue} - ${totalSpent} = ${plSansStockCharges} FCFA`);
             console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA`);
+            console.log(`🚚 Livraisons partenaires du mois: ${livraisonsPartenaires} FCFA`);
             console.log(`⚙️ Estimation charges fixes mensuelle: ${chargesFixesEstimation} FCFA`);
             console.log(`⏰ Charges prorata (jours ouvrables): ${Math.round(chargesProrata)} FCFA`);
-            console.log(`🎯 PL FINAL = ${plSansStockCharges} + ${stockVivantVariation} - ${Math.round(chargesProrata)} = ${Math.round(plEstimCharges)} FCFA`);
+            console.log(`🎯 PL BRUT = ${plSansStockCharges} + ${stockVivantVariation} - ${livraisonsPartenaires} = ${Math.round(plBrut)} FCFA`);
+            console.log(`🎯 PL FINAL = ${plSansStockCharges} + ${stockVivantVariation} - ${Math.round(chargesProrata)} - ${livraisonsPartenaires} = ${Math.round(plEstimCharges)} FCFA`);
             console.log('🔍===============================================');
             
             // Préparer les détails pour le frontend
@@ -1352,8 +1465,10 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 creances: creancesMoisValue,
                 stockPointVente: stockPointVenteValue,
                 stockVivantVariation: stockVivantVariation,
+                livraisonsPartenaires: livraisonsPartenaires,
                 cashBurn: totalSpent,
                 plBase: plSansStockCharges,
+                plBrut: Math.round(plBrut),
                 chargesFixesEstimation: chargesFixesEstimation,
                 chargesProrata: Math.round(chargesProrata),
                 plFinal: Math.round(plEstimCharges),
@@ -1372,6 +1487,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         } catch (error) {
             console.error('Erreur calcul PL avec estim charges:', error);
             plEstimCharges = plSansStockCharges; // Fallback au PL de base
+            plBrut = plSansStockCharges + stockVivantVariation - livraisonsPartenaires; // Fallback PL brut
             
             // Préparer les détails d'erreur pour le frontend
             plCalculationDetails = {
@@ -1379,8 +1495,10 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 creances: creancesMoisValue,
                 stockPointVente: stockPointVenteValue,
                 stockVivantVariation: stockVivantVariation,
+                livraisonsPartenaires: livraisonsPartenaires,
                 cashBurn: totalSpent,
                 plBase: plSansStockCharges,
+                plBrut: Math.round(plBrut),
                 chargesFixesEstimation: 0,
                 chargesProrata: 0,
                 plFinal: Math.round(plEstimCharges),
@@ -1399,6 +1517,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             totalPartnerBalance,
             plSansStockCharges,
             plEstimCharges,
+            plBrut: Math.round(plBrut),
             plCalculationDetails,
             period: {
                 start_date: start_date || null,
@@ -7254,6 +7373,39 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
         
         const username = req.session.user.username;
         
+        // Calculer automatiquement les livraisons partenaires validées du mois
+        let livraisons_partenaires = 0;
+        try {
+            // Utiliser le mois de la snapshot_date
+            const snapshotDate = new Date(snapshot_date);
+            const year = snapshotDate.getFullYear();
+            const month = snapshotDate.getMonth() + 1;
+            const firstDayOfMonth = `${year}-${month.toString().padStart(2, '0')}-01`;
+            const snapshotDateStr = snapshot_date;
+            
+            // Récupérer les livraisons partenaires validées du mois jusqu'à la date du snapshot
+            const livraisonsQuery = `
+                SELECT COALESCE(SUM(pd.amount), 0) as total_livraisons
+                FROM partner_deliveries pd
+                JOIN accounts a ON pd.account_id = a.id
+                WHERE pd.delivery_date >= $1 
+                AND pd.delivery_date <= $2
+                AND pd.validation_status = 'fully_validated'
+                AND pd.is_validated = true
+                AND a.account_type = 'partenaire'
+                AND a.is_active = true
+            `;
+
+            const livraisonsResult = await pool.query(livraisonsQuery, [firstDayOfMonth, snapshotDateStr]);
+            livraisons_partenaires = parseInt(livraisonsResult.rows[0].total_livraisons) || 0;
+            
+            console.log(`🚚 Livraisons partenaires calculées pour snapshot ${snapshot_date}: ${livraisons_partenaires} FCFA`);
+            
+        } catch (error) {
+            console.error('Erreur calcul livraisons partenaires pour snapshot:', error);
+            livraisons_partenaires = 0;
+        }
+        
         // Vérifier si un snapshot existe déjà pour cette date
         const existingCheck = await pool.query(
             'SELECT id, created_by, created_at FROM dashboard_snapshots WHERE snapshot_date = $1',
@@ -7275,6 +7427,7 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
             total_credited_with_expenses || 0, total_credited_general || 0,
             cash_bictorys_amount || 0, creances_total || 0, creances_mois || 0,
             stock_point_vente || 0, stock_vivant_total || 0, stock_vivant_variation || 0,
+            livraisons_partenaires,
             daily_burn || 0, weekly_burn || 0, monthly_burn || 0,
             solde_depot || 0, solde_partner || 0, solde_general || 0,
             username, notes || ''
@@ -7286,11 +7439,12 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
                 total_credited_with_expenses, total_credited_general,
                 cash_bictorys_amount, creances_total, creances_mois,
                 stock_point_vente, stock_vivant_total, stock_vivant_variation,
+                livraisons_partenaires,
                 daily_burn, weekly_burn, monthly_burn,
                 solde_depot, solde_partner, solde_general,
                 created_by, notes
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
             )
             ON CONFLICT (snapshot_date) 
             DO UPDATE SET
@@ -7304,6 +7458,7 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
                 stock_point_vente = EXCLUDED.stock_point_vente,
                 stock_vivant_total = EXCLUDED.stock_vivant_total,
                 stock_vivant_variation = EXCLUDED.stock_vivant_variation,
+                livraisons_partenaires = EXCLUDED.livraisons_partenaires,
                 daily_burn = EXCLUDED.daily_burn,
                 weekly_burn = EXCLUDED.weekly_burn,
                 monthly_burn = EXCLUDED.monthly_burn,
@@ -7335,14 +7490,15 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
         console.log('$9 (stock_point_vente):', sqlValues[8]);
         console.log('$10 (stock_vivant_total):', sqlValues[9]);
         console.log('$11 (stock_vivant_variation):', sqlValues[10]);
-        console.log('$12 (daily_burn):', sqlValues[11]);
-        console.log('$13 (weekly_burn):', sqlValues[12]);
-        console.log('$14 (monthly_burn):', sqlValues[13]);
-        console.log('$15 (solde_depot):', sqlValues[14]);
-        console.log('$16 (solde_partner):', sqlValues[15]);
-        console.log('$17 (solde_general):', sqlValues[16]);
-        console.log('$18 (created_by):', sqlValues[17]);
-        console.log('$19 (notes):', sqlValues[18]);
+        console.log('$12 (livraisons_partenaires):', sqlValues[11]);
+        console.log('$13 (daily_burn):', sqlValues[12]);
+        console.log('$14 (weekly_burn):', sqlValues[13]);
+        console.log('$15 (monthly_burn):', sqlValues[14]);
+        console.log('$16 (solde_depot):', sqlValues[15]);
+        console.log('$17 (solde_partner):', sqlValues[16]);
+        console.log('$18 (solde_general):', sqlValues[17]);
+        console.log('$19 (created_by):', sqlValues[18]);
+        console.log('$20 (notes):', sqlValues[19]);
         console.log('\n⏳ Exécution de la requête...');
         
         // Insérer ou mettre à jour le snapshot (UPSERT)
@@ -7451,6 +7607,7 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                     creances_mois as creances,
                     stock_point_vente as stock_pv,
                     stock_vivant_variation as ecart_stock_vivant,
+                    COALESCE(livraisons_partenaires, 0) as livraisons_partenaires,
                     monthly_burn as cash_burn,
                     monthly_burn as cash_burn_monthly,
                     weekly_burn as cash_burn_weekly
@@ -7481,6 +7638,7 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
             const creances = parseFloat(row.creances) || 0;
             const stockPv = parseFloat(row.stock_pv) || 0;
             const ecartStockVivant = parseFloat(row.ecart_stock_vivant) || 0;
+            const livraisonsPartenaires = parseFloat(row.livraisons_partenaires) || 0;
             
             // Utiliser le cash burn approprié selon le type de période
             let cashBurn = 0;
@@ -7523,9 +7681,9 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                 chargesProrata = (chargesFixesEstimation * joursOuvrablesEcoules) / totalJoursOuvrables;
             }
             
-            // Calcul du PL final avec la formule correcte
+            // Calcul du PL final avec la formule correcte incluant les livraisons partenaires
             const plBase = cashBictorys + creances + stockPv - cashBurn;
-            const plFinal = plBase + ecartStockVivant - chargesProrata;
+            const plFinal = plBase + ecartStockVivant - chargesProrata - livraisonsPartenaires;
             
             return {
                 date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
@@ -7533,6 +7691,7 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                 creances: creances,
                 stock_pv: stockPv,
                 ecart_stock_vivant: ecartStockVivant,
+                livraisons_partenaires: livraisonsPartenaires,
                 cash_burn: cashBurn,
                 charges_estimees: Math.round(chargesProrata),
                 pl_final: Math.round(plFinal)
