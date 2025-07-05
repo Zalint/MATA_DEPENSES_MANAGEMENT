@@ -1276,9 +1276,19 @@
                         <!-- En-tête du mois sélectionné -->
                         <div class="cash-bictorys-header">
                             <h3 id="cash-bictorys-month-title">Mois : [Nom du mois]</h3>
-                                                    <div class="month-total">
-                            <span class="total-label">Dernière valeur :</span>
-                            <span id="cash-bictorys-total" class="total-value">0 FCFA</span>
+                                                    <div class="month-totals">
+                            <div class="month-total">
+                                <span class="total-label">Dernière valeur :</span>
+                                <span id="cash-bictorys-total" class="total-value">0 FCFA</span>
+                            </div>
+                            <div class="month-total">
+                                <span class="total-label">Balance :</span>
+                                <span id="cash-bictorys-balance" class="total-value">0 FCFA</span>
+                            </div>
+                            <div class="month-total">
+                                <span class="total-label">Frais :</span>
+                                <span id="cash-bictorys-fees" class="total-value">0 FCFA</span>
+                            </div>
                         </div>
                         </div>
 
@@ -1300,6 +1310,8 @@
                                                 <th>Date</th>
                                                 <th>Jour</th>
                                                 <th>Valeur (FCFA)</th>
+                                                <th>Balance (FCFA)</th>
+                                                <th>Frais (FCFA)</th>
                                             </tr>
                                         </thead>
                                         <tbody id="cash-bictorys-tbody">
@@ -1342,15 +1354,23 @@
                     font-size: 1.4em;
                 }
                 
+                .month-totals {
+                    display: flex;
+                    gap: 20px;
+                    flex-wrap: wrap;
+                }
+
                 .month-total {
                     display: flex;
                     align-items: center;
                     gap: 10px;
+                    min-width: 200px;
                 }
                 
                 .total-label {
                     font-weight: 500;
                     opacity: 0.9;
+                    white-space: nowrap;
                 }
                 
                 .total-value {
@@ -1359,6 +1379,8 @@
                     padding: 8px 16px;
                     background: rgba(255, 255, 255, 0.2);
                     border-radius: 8px;
+                    min-width: 120px;
+                    text-align: right;
                 }
                 
                 .permissions-info {
@@ -1391,6 +1413,8 @@
                 .amount-display {
                     font-family: monospace;
                     font-weight: 500;
+                    min-width: 100px;
+                    display: inline-block;
                 }
                 
                 .day-name {
@@ -1409,6 +1433,23 @@
                 
                 .amount-cell {
                     text-align: right;
+                    min-width: 120px;
+                }
+
+                .amount-cell input {
+                    width: 100%;
+                }
+
+                .amount-positive {
+                    color: #2f855a;
+                }
+
+                .amount-negative {
+                    color: #c53030;
+                }
+
+                .amount-neutral {
+                    color: #4a5568;
                 }
                 
                 .btn-disabled {
@@ -1427,9 +1468,38 @@
                         gap: 15px;
                         text-align: center;
                     }
+
+                    .month-totals {
+                        flex-direction: column;
+                        gap: 10px;
+                        width: 100%;
+                    }
+
+                    .month-total {
+                        width: 100%;
+                        justify-content: space-between;
+                        min-width: unset;
+                    }
                     
                     .cash-amount-input {
                         width: 100px;
+                    }
+
+                    .amount-cell {
+                        min-width: 100px;
+                    }
+
+                    .amount-display {
+                        min-width: 80px;
+                    }
+
+                    .table-container {
+                        overflow-x: auto;
+                        -webkit-overflow-scrolling: touch;
+                    }
+
+                    #cash-bictorys-table {
+                        min-width: 800px;
                     }
                 }
                 </style>
