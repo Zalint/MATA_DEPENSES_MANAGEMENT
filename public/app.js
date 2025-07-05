@@ -39,7 +39,13 @@ function getServerConfig() {
     const port = window.location.port;
     
     // Détection automatique de l'environnement
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
+    // Check if we're in a development environment
+const isDevelopment = hostname === 'localhost' || 
+                     hostname === '127.0.0.1' || 
+                     hostname.startsWith('192.168.') ||
+                     hostname.endsWith('.local');
+
+if (isDevelopment) {
         // Environnement local
         const baseUrl = port ? `${protocol}//${hostname}:${port}` : `${protocol}//${hostname}`;
         return {
@@ -581,43 +587,20 @@ function calculateTotal() {
 
 // Fonction pour valider le montant par rapport au solde disponible
 async function validateExpenseAmount() {
-    console.log(`🔍 [validateExpenseAmount] === DÉBUT DE VALIDATION ===`);
     try {
-        const accountSelect = document.getElementById('expense-account');
         const totalField = document.getElementById('expense-total');
-        const submitButton = document.querySelector('#expense-form button[type="submit"]');
+        const amount = parseFloat(totalField.value) || 0;
+        const submitButton = document.getElementById('expense-submit');
         
-        if (!accountSelect || !totalField || !submitButton) return;
-        
-        const accountId = accountSelect.value;
-        // S'assurer que amount est bien un nombre en supprimant les caractères non numériques
-        const rawAmountValue = totalField.value;
-        const rawAmount = rawAmountValue.replace(/[^\d.,]/g, '').replace(',', '.');
-        const amount = parseFloat(rawAmount) || 0;
-        
-        console.log(`💰 [validateExpenseAmount] Validation pour le compte ID: ${accountId}`);
-        console.log(`   📝 Valeur brute du champ: "${rawAmountValue}"`);
-        console.log(`   🔧 Valeur nettoyée: "${rawAmount}"`);
-        console.log(`   💯 Montant final: ${amount.toLocaleString()} FCFA [type: ${typeof amount}]`);
-        
-        // Supprimer les anciens messages d'erreur
+        // Supprimer l'ancien message d'erreur s'il existe
         let errorDiv = document.getElementById('balance-error');
         if (errorDiv) {
             errorDiv.remove();
         }
         
-        if (!accountId || amount <= 0) {
-            submitButton.disabled = false;
-            submitButton.style.opacity = '1';
+        if (!selectedAccount || amount <= 0) {
             return;
         }
-        
-        // Récupérer les informations du compte
-        const response = await fetch('/api/accounts');
-        const accounts = await response.json();
-        const selectedAccount = accounts.find(acc => acc.id.toString() === accountId);
-        
-        if (!selectedAccount) return;
         
         // Pour les comptes de type statut, pas de validation de solde
         if (selectedAccount.account_type === 'statut') {
@@ -651,8 +634,9 @@ async function validateExpenseAmount() {
         
         let hasError = false;
         
+        // Vérifier d'abord le solde disponible
         if (amount > currentBalance) {
-            console.log(`⚠️ [validateExpenseAmount] SOLDE INSUFFISANT! Manque ${(amount - currentBalance).toLocaleString()} FCFA`);
+            console.log(`❌ [validateExpenseAmount] SOLDE INSUFFISANT! Manque ${(amount - currentBalance).toLocaleString()} FCFA`);
             errorDiv.style.backgroundColor = '#fee';
             errorDiv.style.color = '#c33';
             errorDiv.style.border = '1px solid #fcc';
@@ -663,17 +647,10 @@ async function validateExpenseAmount() {
                 Manque: <strong>${(amount - currentBalance).toLocaleString()} FCFA</strong>
             `;
             hasError = true;
-        } else if (totalCredited > 0 && amount <= currentBalance) {
+        } else if (totalCredited > 0) {
             // UTILISER LA VALEUR STOCKÉE EN BASE (synchronisée) au lieu de recalculer
-            // S'assurer que currentTotalSpent est bien un nombre
             const currentTotalSpent = parseFloat(selectedAccount.total_spent) || 0;
-            // S'assurer que l'addition est numérique en forçant le type Number
             const newTotalSpent = Number(currentTotalSpent) + Number(amount);
-            
-            // Vérification de l'addition pour debug
-            console.log(`🔧 [validateExpenseAmount] Vérification addition:`);
-            console.log(`   🎯 ${currentTotalSpent} + ${amount} = ${newTotalSpent}`);
-            console.log(`   ✓ Addition correcte: ${(currentTotalSpent + amount) === newTotalSpent}`);
             
             console.log(`📈 [validateExpenseAmount] Calcul budgétaire:`);
             console.log(`   💸 Montant déjà dépensé (currentTotalSpent): ${currentTotalSpent.toLocaleString()} FCFA [type: ${typeof currentTotalSpent}]`);
@@ -696,7 +673,7 @@ async function validateExpenseAmount() {
                 `;
                 hasError = true;
             } else {
-                // Afficher un message informatif si proche de la limite
+                // Seulement si pas de dépassement, afficher le message de budget OK
                 const remainingBudget = totalCredited - newTotalSpent;
                 const percentageUsed = (newTotalSpent / totalCredited) * 100;
                 
@@ -725,23 +702,19 @@ async function validateExpenseAmount() {
         // Ajouter le div après le champ total
         totalField.parentNode.appendChild(errorDiv);
         
-        // Désactiver/activer le bouton de soumission
+        // Désactiver/activer le bouton de soumission selon la présence d'erreur
         if (hasError) {
             submitButton.disabled = true;
             submitButton.style.opacity = '0.5';
             submitButton.style.cursor = 'not-allowed';
-            console.log(`🚫 [validateExpenseAmount] Bouton DÉSACTIVÉ - Validation échouée`);
         } else {
             submitButton.disabled = false;
             submitButton.style.opacity = '1';
             submitButton.style.cursor = 'pointer';
-            console.log(`✅ [validateExpenseAmount] Bouton ACTIVÉ - Validation réussie`);
         }
         
-        console.log(`🏁 [validateExpenseAmount] === FIN DE VALIDATION ===`);
-        
     } catch (error) {
-        console.error('❌ [validateExpenseAmount] Erreur dans la validation:', error);
+        console.error('Erreur validation solde:', error);
     }
 }
 
@@ -962,6 +935,22 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
         document.getElementById('pl-sans-stock-charges').textContent = formatCurrency(stats.plSansStockCharges || 0);
         document.getElementById('pl-estim-charges').textContent = formatCurrency(stats.plEstimCharges || 0);
         document.getElementById('pl-brut').textContent = formatCurrency(stats.plBrut || 0);
+        
+        // Mettre à jour les dépenses des mois précédents dans le tableau
+        const expensesTable = document.querySelector('.expenses-table tbody');
+        if (expensesTable && stats.previousMonthsExpenses) {
+            const rows = expensesTable.querySelectorAll('tr');
+            rows.forEach(row => {
+                const accountName = row.querySelector('td:first-child').textContent;
+                const previousMonthsCell = row.querySelector('td:nth-child(4)');
+                if (previousMonthsCell) {
+                    const accountData = stats.previousMonthsExpenses.find(acc => acc.account_name === accountName);
+                    if (accountData) {
+                        previousMonthsCell.textContent = formatCurrency(accountData.previous_months_spent);
+                    }
+                }
+            });
+        }
         
         // Mettre à jour la carte de solde principale avec le solde calculé dynamiquement
         // (surtout important quand cutoff_date est utilisé)
@@ -2151,31 +2140,34 @@ function displayAccounts(accounts) {
                 <thead style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
                     <tr>
                         <th style="border: none; padding: 15px; font-weight: 600;">
-                            <i class="fas fa-university" style="margin-right: 8px;"></i>Compte
+                            <i class="fas fa-university" style="margin-right: 8px;"></i>COMPTE
                         </th>
                         <th style="border: none; padding: 15px; font-weight: 600;">
-                            <i class="fas fa-tags" style="margin-right: 8px;"></i>Type
+                            <i class="fas fa-tags" style="margin-right: 8px;"></i>TYPE
                         </th>
                         <th style="border: none; padding: 15px; font-weight: 600;">
-                            <i class="fas fa-user" style="margin-right: 8px;"></i>Utilisateur
+                            <i class="fas fa-user" style="margin-right: 8px;"></i>UTILISATEUR
                         </th>
                         <th style="border: none; padding: 15px; font-weight: 600;">
-                            <i class="fas fa-folder" style="margin-right: 8px;"></i>Catégorie
+                            <i class="fas fa-cogs" style="margin-right: 8px;"></i>ACTIONS
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-folder" style="margin-right: 8px;"></i>CATÉGORIE
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-calendar" style="margin-right: 8px;"></i>CRÉATION
+                        </th>
+                        <th style="border: none; padding: 15px; font-weight: 600;">
+                            <i class="fas fa-toggle-on" style="margin-right: 8px;"></i>STATUT
                         </th>
                         <th style="border: none; padding: 15px; font-weight: 600; display: none;" class="financial-column">
-                            <i class="fas fa-wallet" style="margin-right: 8px;"></i>Solde
+                            <i class="fas fa-wallet" style="margin-right: 8px;"></i>SOLDE
                         </th>
                         <th style="border: none; padding: 15px; font-weight: 600; display: none;" class="financial-column">
-                            <i class="fas fa-plus-circle" style="margin-right: 8px;"></i>Crédité
+                            <i class="fas fa-plus-circle" style="margin-right: 8px;"></i>CRÉDITÉ
                         </th>
                         <th style="border: none; padding: 15px; font-weight: 600; display: none;" class="financial-column">
-                            <i class="fas fa-minus-circle" style="margin-right: 8px;"></i>Dépensé
-                        </th>
-                        <th style="border: none; padding: 15px; font-weight: 600;">
-                            <i class="fas fa-calendar" style="margin-right: 8px;"></i>Création
-                        </th>
-                        <th style="border: none; padding: 15px; font-weight: 600;">
-                            <i class="fas fa-toggle-on" style="margin-right: 8px;"></i>Statut
+                            <i class="fas fa-minus-circle" style="margin-right: 8px;"></i>DÉPENSÉ
                         </th>
                         <th style="border: none; padding: 15px; font-weight: 600;">
                             <i class="fas fa-cogs" style="margin-right: 8px;"></i>Actions
@@ -2526,13 +2518,13 @@ function displayAccountsTable(accounts) {
                 <td><strong>${account.account_name}</strong></td>
                 <td><span class="badge badge-secondary">${account.account_type || 'classique'}</span></td>
                 <td>${usernameDisplay}</td>
+                <td>${actionButtons}</td>
                 <td>${account.category_type || '-'}</td>
+                <td>${formatDate(account.created_at)}</td>
+                <td><span class="${statusClass}"><strong>${statusText}</strong></span></td>
                 <td style="display: none;" class="financial-column"><strong>${formatCurrency(account.current_balance)}</strong></td>
                 <td style="display: none;" class="financial-column">${formatCurrency(account.total_credited)}</td>
                 <td style="display: none;" class="financial-column">${formatCurrency(account.total_spent)}</td>
-                <td>${formatDate(account.created_at)}</td>
-                <td><span class="${statusClass}"><strong>${statusText}</strong></span></td>
-                <td>${actionButtons}</td>
             </tr>
         `;
     }).join('');
@@ -10513,9 +10505,9 @@ async function displayBudgetValidationInModal() {
         };
         
         // Calculer les nouveaux totaux
-        const currentBalance = balance.current_balance;
-        const totalCredited = balance.total_credited;
-        const currentTotalSpent = balance.total_spent;
+        const currentBalance = parseFloat(balance.current_balance) || 0;
+        const totalCredited = parseFloat(balance.total_credited) || 0;
+        const currentTotalSpent = parseFloat(balance.total_spent) || 0;
         const newTotalSpent = currentTotalSpent + amount;
         
         let validationClass = 'budget-ok';
@@ -10547,29 +10539,31 @@ async function displayBudgetValidationInModal() {
             `;
         }
         // Avertissement si proche de la limite
-        else if (totalCredited > 0) {
+        else {
             const remainingBudget = totalCredited - newTotalSpent;
-            const percentageUsed = (newTotalSpent / totalCredited) * 100;
+            const percentageUsed = totalCredited > 0 ? (newTotalSpent / totalCredited) * 100 : 0;
             
-            if (percentageUsed >= 80) {
+            if (totalCredited > 0 && percentageUsed >= 80) {
                 validationClass = 'budget-warning';
-                validationIcon = '⚠️';
+                validationIcon = '⚡';
                 validationTitle = 'Attention - Budget élevé';
                 validationMessage = `
                     Utilisation du budget: <strong>${percentageUsed.toFixed(1)}%</strong><br>
                     Budget restant après: <strong>${formatCurrency(remainingBudget)}</strong>
                 `;
             } else {
-                validationMessage = `
+                validationMessage = totalCredited > 0 ? `
                     Budget restant après: <strong>${formatCurrency(remainingBudget)}</strong><br>
                     Utilisation: <strong>${percentageUsed.toFixed(1)}%</strong>
+                ` : `
+                    Solde disponible: <strong>${formatCurrency(currentBalance)}</strong>
                 `;
             }
         }
         
         budgetContainer.className = `budget-validation ${validationClass}`;
         budgetContainer.innerHTML = `
-            <strong>${validationIcon} ${validationTitle}</strong>
+            <strong>${validationIcon} ${validationTitle}</strong><br>
             ${validationMessage}
         `;
         
@@ -12519,8 +12513,28 @@ function displayCashBictorysTable(data) {
                          data-date="${dayData.date}" 
                          value="${dayData.amount}" 
                          min="0" step="1" 
-                         onchange="updateCashBictorysValue('${dayData.date}', this.value)">` 
+                         onchange="updateCashBictorysValue('${dayData.date}', 'amount', this.value)">` 
                     : `<span class="amount-display">${formatCurrency(dayData.amount)}</span>`
+                }
+            </td>
+            <td class="amount-cell">
+                ${canEditCashBictorys 
+                    ? `<input type="number" class="cash-amount-input" 
+                         data-date="${dayData.date}" 
+                         value="${dayData.balance}" 
+                         min="0" step="1" 
+                         onchange="updateCashBictorysValue('${dayData.date}', 'balance', this.value)">` 
+                    : `<span class="amount-display">${formatCurrency(dayData.balance)}</span>`
+                }
+            </td>
+            <td class="amount-cell">
+                ${canEditCashBictorys 
+                    ? `<input type="number" class="cash-amount-input" 
+                         data-date="${dayData.date}" 
+                         value="${dayData.fees}" 
+                         min="0" step="1" 
+                         onchange="updateCashBictorysValue('${dayData.date}', 'fees', this.value)">` 
+                    : `<span class="amount-display">${formatCurrency(dayData.fees)}</span>`
                 }
             </td>
         `;
@@ -12530,13 +12544,13 @@ function displayCashBictorysTable(data) {
 }
 
 // Mettre à jour une valeur dans les données
-function updateCashBictorysValue(date, value) {
+function updateCashBictorysValue(date, field, value) {
     const numericValue = parseInt(value) || 0;
     
     // Mettre à jour dans les données locales
     const dataItem = currentCashBictorysData.find(item => item.date === date);
     if (dataItem) {
-        dataItem.amount = numericValue;
+        dataItem[field] = numericValue;
     }
     
     // Recalculer le total
@@ -12545,7 +12559,9 @@ function updateCashBictorysValue(date, value) {
 
 // Calculer et afficher le total du mois (valeur de la dernière date avec valeur non-zéro)
 function updateCashBictorysTotal() {
-    let latestValue = 0;
+    let latestAmount = 0;
+    let latestBalance = 0;
+    let latestFees = 0;
     
     if (currentCashBictorysData && currentCashBictorysData.length > 0) {
         // Trier les données par date (la plus récente en premier)
@@ -12554,23 +12570,45 @@ function updateCashBictorysTotal() {
         // Trouver la dernière date avec une valeur différente de zéro
         const latestNonZeroEntry = sortedData.find(item => {
             const amount = parseInt(item.amount) || 0;
-            return amount !== 0;
+            const balance = parseInt(item.balance) || 0;
+            const fees = parseInt(item.fees) || 0;
+            return amount !== 0 || balance !== 0 || fees !== 0;
         });
         
         if (latestNonZeroEntry) {
-            latestValue = parseInt(latestNonZeroEntry.amount) || 0;
+            latestAmount = parseInt(latestNonZeroEntry.amount) || 0;
+            latestBalance = parseInt(latestNonZeroEntry.balance) || 0;
+            latestFees = parseInt(latestNonZeroEntry.fees) || 0;
         }
     }
     
+    // Mettre à jour l'affichage des totaux
     const totalElement = document.getElementById('cash-bictorys-total');
+    const balanceElement = document.getElementById('cash-bictorys-balance');
+    const feesElement = document.getElementById('cash-bictorys-fees');
+    
     if (totalElement) {
-        totalElement.textContent = formatCurrency(latestValue);
-        
-        // Couleur selon le montant
+        totalElement.textContent = formatCurrency(latestAmount);
         totalElement.className = 'total-value';
-        if (latestValue > 0) totalElement.classList.add('amount-positive');
-        else if (latestValue < 0) totalElement.classList.add('amount-negative');
+        if (latestAmount > 0) totalElement.classList.add('amount-positive');
+        else if (latestAmount < 0) totalElement.classList.add('amount-negative');
         else totalElement.classList.add('amount-neutral');
+    }
+    
+    if (balanceElement) {
+        balanceElement.textContent = formatCurrency(latestBalance);
+        balanceElement.className = 'total-value';
+        if (latestBalance > 0) balanceElement.classList.add('amount-positive');
+        else if (latestBalance < 0) balanceElement.classList.add('amount-negative');
+        else balanceElement.classList.add('amount-neutral');
+    }
+    
+    if (feesElement) {
+        feesElement.textContent = formatCurrency(latestFees);
+        feesElement.className = 'total-value';
+        if (latestFees > 0) feesElement.classList.add('amount-positive');
+        else if (latestFees < 0) feesElement.classList.add('amount-negative');
+        else feesElement.classList.add('amount-neutral');
     }
 }
 
@@ -12603,13 +12641,21 @@ async function handleSaveCashBictorys() {
     }
     
     try {
+        // Préparer les données à envoyer
+        const dataToSend = currentCashBictorysData.map(item => ({
+            date: item.date,
+            amount: parseInt(item.amount) || 0,
+            balance: parseInt(item.balance) || 0,
+            fees: parseInt(item.fees) || 0
+        }));
+
         const response = await fetch(apiUrl(`/api/cash-bictorys/${currentMonthYear}`), {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                data: currentCashBictorysData
+                data: dataToSend
             })
         });
         
@@ -12620,6 +12666,9 @@ async function handleSaveCashBictorys() {
         
         const result = await response.json();
         showNotification(result.message, 'success');
+        
+        // Recharger les données pour s'assurer de la synchronisation
+        await loadCashBictorysMonth(currentMonthYear);
         
     } catch (error) {
         console.error('Erreur sauvegarde Cash Bictorys:', error);

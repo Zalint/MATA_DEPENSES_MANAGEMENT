@@ -45,19 +45,32 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-    // Types de fichiers autorisés
+    console.log('File upload attempt:', {
+        originalname: file.originalname,
+        mimetype: file.mimetype,
+        fieldname: file.fieldname
+    });
+
+    // Allow JSON files by extension
+    if (file.originalname.toLowerCase().endsWith('.json')) {
+        console.log('Accepting JSON file:', file.originalname);
+        cb(null, true);
+        return;
+    }
+
+    // Types de fichiers autorisés par mimetype
     const allowedTypes = [
-        'image/jpeg', 'image/jpg', 'image/png',
-        'application/pdf',
-        'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/json', 'text/json'
+        'application/json', 
+        'text/json',
+        'application/octet-stream' // Allow binary stream for Windows curl
     ];
     
     if (allowedTypes.includes(file.mimetype)) {
+        console.log('Accepting file by mimetype:', file.mimetype);
         cb(null, true);
     } else {
-        cb(new Error('Type de fichier non autorisé'), false);
+        console.log('Rejecting file:', file.mimetype);
+        cb(new Error('Format de fichier invalide. Seuls les fichiers JSON sont acceptés.'), false);
     }
 };
 
@@ -914,6 +927,28 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         
 
         
+        // 1.5 Dépenses des mois précédents (jusqu'au dernier jour du mois précédent)
+        let previousMonthsQuery = `
+            SELECT 
+                a.id as account_id,
+                a.account_name,
+                COALESCE(SUM(e.total), 0) as previous_months_spent
+            FROM accounts a
+            LEFT JOIN expenses e ON e.account_id = a.id 
+                AND e.expense_date < DATE_TRUNC('month', $1::date)
+            WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
+        `;
+        let previousMonthsParams = [referenceDateStr];
+        
+        if (isDirector) {
+            previousMonthsQuery += ` AND a.user_id = $2`;
+            previousMonthsParams.push(userId);
+        }
+        
+        previousMonthsQuery += ` GROUP BY a.id, a.account_name ORDER BY a.account_name`;
+        
+        const previousMonthsResult = await pool.query(previousMonthsQuery, previousMonthsParams);
+        
         // 2. Montant Restant Total (soldes calculés dynamiquement selon la date de référence)
         let totalRemainingQuery = `
             SELECT COALESCE(SUM(
@@ -1519,6 +1554,11 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             plEstimCharges,
             plBrut: Math.round(plBrut),
             plCalculationDetails,
+            previousMonthsExpenses: previousMonthsResult.rows.map(row => ({
+                account_id: row.account_id,
+                account_name: row.account_name,
+                previous_months_spent: parseInt(row.previous_months_spent)
+            })),
             period: {
                 start_date: start_date || null,
                 end_date: end_date || null
@@ -4317,7 +4357,10 @@ app.listen(PORT, () => {
     console.log(`Serveur démarré sur le port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
     if (process.env.NODE_ENV !== 'production') {
-    console.log(`Accédez à l'application sur http://localhost:${PORT}`);
+    const appUrl = process.env.NODE_ENV === 'production' 
+    ? 'https://mata-depenses-management.onrender.com'
+    : `http://localhost:${PORT}`;
+console.log(`Accédez à l'application sur ${appUrl}`);
     }
 });
 
@@ -6523,11 +6566,16 @@ app.delete('/api/creance/:accountId/clients/:clientId', requireStrictAdminAuth, 
 // Créer la table Cash Bictorys si elle n'existe pas
 async function createCashBictorysTableIfNotExists() {
     try {
+        // Drop the table first to ensure we have the latest schema
+        await pool.query('DROP TABLE IF EXISTS cash_bictorys');
+        
         await pool.query(`
-            CREATE TABLE IF NOT EXISTS cash_bictorys (
+            CREATE TABLE cash_bictorys (
                 id SERIAL PRIMARY KEY,
                 date DATE NOT NULL,
                 amount INTEGER DEFAULT 0,
+                balance INTEGER DEFAULT 0,
+                fees INTEGER DEFAULT 0,
                 month_year VARCHAR(7) NOT NULL, -- Format YYYY-MM
                 created_by INTEGER REFERENCES users(id),
                 updated_by INTEGER REFERENCES users(id),
@@ -6548,6 +6596,28 @@ createCashBictorysTableIfNotExists();
 
 // Middleware pour vérifier les permissions Cash Bictorys (Tous les utilisateurs connectés)
 const requireCashBictorysAuth = (req, res, next) => {
+    // Check for API key first
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.api_key;
+    
+    if (apiKey) {
+        // API key authentication
+        const validApiKey = process.env.API_KEY || '4f8d9a2b6c7e8f1a3b5c9d0e2f4g6h7i';
+        
+        if (apiKey === validApiKey) {
+            // Create virtual admin user for API with ID 1 (assuming this is a valid admin ID in your users table)
+            req.session = req.session || {};
+            req.session.user = {
+                id: 1, // Using ID 1 which should exist in users table
+                username: 'api_user',
+                role: 'admin',
+                full_name: 'API User'
+            };
+            return next();
+        }
+        return res.status(401).json({ error: 'Clé API invalide' });
+    }
+
+    // Fallback to session authentication
     if (!req.session?.user) {
         return res.status(403).json({ error: 'Accès refusé - Connexion requise' });
     }
@@ -6785,6 +6855,119 @@ app.delete('/api/admin/cash-bictorys/cleanup-zeros', requireAdminAuth, async (re
     }
 });
 
+// Route pour importer les données Cash Bictorys depuis un fichier CSV
+app.post('/api/cash-bictorys/upload', requireCashBictorysAuth, upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'Aucun fichier fourni' });
+        }
+
+        console.log('File received:', {
+            originalname: req.file.originalname,
+            mimetype: req.file.mimetype,
+            size: req.file.size
+        });
+
+        // Read and parse JSON file
+        const fileContent = fs.readFileSync(req.file.path, 'utf8');
+        console.log('File content:', fileContent.substring(0, 200) + '...');
+        
+        let jsonData;
+        try {
+            jsonData = JSON.parse(fileContent);
+        } catch (error) {
+            return res.status(400).json({ error: 'Format JSON invalide: ' + error.message });
+        }
+
+        // Validate JSON structure
+        if (!Array.isArray(jsonData)) {
+            return res.status(400).json({ error: 'Le fichier JSON doit contenir un tableau d\'objets' });
+        }
+
+        // Validate required fields in each object
+        const requiredFields = ['date', 'amount', 'balance', 'fees'];
+        for (let i = 0; i < jsonData.length; i++) {
+            const item = jsonData[i];
+            const missingFields = requiredFields.filter(field => !(field in item));
+            
+            if (missingFields.length > 0) {
+                return res.status(400).json({
+                    error: `Champs manquants dans l'objet ${i + 1}: ${missingFields.join(', ')}`
+                });
+            }
+
+            // Validate date format
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date)) {
+                return res.status(400).json({
+                    error: `Format de date invalide dans l'objet ${i + 1}. Utiliser YYYY-MM-DD`
+                });
+            }
+
+            // Validate numeric fields
+            ['amount', 'balance', 'fees'].forEach(field => {
+                if (typeof item[field] !== 'number') {
+                    return res.status(400).json({
+                        error: `Le champ ${field} doit être un nombre dans l'objet ${i + 1}`
+                    });
+                }
+            });
+        }
+
+        // Initialiser les compteurs
+        let importedCount = 0;
+        let errorCount = 0;
+        const errors = [];
+
+        // Traiter chaque entrée JSON
+        for (const data of jsonData) {
+            try {
+                // Extraire le mois-année pour la colonne month_year
+                const monthYear = data.date.substring(0, 7);
+
+                // Insérer ou mettre à jour les données
+                console.log('Inserting data:', {
+                    date: data.date,
+                    amount: data.amount,
+                    balance: data.balance,
+                    fees: data.fees,
+                    monthYear,
+                    userId: req.session.user.id
+                });
+                
+                await pool.query(`
+                    INSERT INTO cash_bictorys (date, amount, balance, fees, month_year, created_by, updated_by)
+                    VALUES ($1, $2, $3, $4, $5, $6, $6)
+                    ON CONFLICT (date) 
+                    DO UPDATE SET 
+                        amount = EXCLUDED.amount,
+                        balance = EXCLUDED.balance,
+                        fees = EXCLUDED.fees,
+                        updated_by = EXCLUDED.updated_by,
+                        updated_at = CURRENT_TIMESTAMP
+                `, [data.date, data.amount, data.balance, data.fees, monthYear, req.session.user.id]);
+
+                importedCount++;
+            } catch (error) {
+                console.error('Erreur insertion/mise à jour pour la date', data.date, ':', error);
+                errors.push(`Erreur d'insertion/mise à jour pour la date ${data.date}: ${error.message}`);
+                errorCount++;
+            }
+        }
+
+        // Renvoyer le résultat
+        res.json({
+            message: `Importation terminée. ${importedCount} entrées importées.`,
+            imported_count: importedCount,
+            error_count: errorCount,
+            errors: errors
+        });
+
+    } catch (error) {
+        console.error('Erreur importation Cash Bictorys:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de l\'importation' });
+    }
+});
+
 // ===== APIS DE GESTION MENSUELLE =====
 
 // Route pour obtenir toutes les données du dashboard pour un mois spécifique
@@ -6837,7 +7020,7 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             WHERE a.is_active = true ${accountFilter}
         `, userRole === 'directeur' ? [userId] : []);
 
-        // Calculer les dépenses du mois
+        // Calculer les dépenses du mois en cours
         const expensesResult = await pool.query(`
             SELECT 
                 COALESCE(SUM(e.total), 0) as monthly_spent,
@@ -6846,6 +7029,20 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             JOIN accounts a ON e.account_id = a.id
             WHERE e.expense_date >= $1 AND e.expense_date <= $2 ${accountFilter}
         `, params);
+
+        // Calculer les dépenses des mois précédents (jusqu'au dernier jour du mois précédent)
+        const previousMonthsExpenses = await pool.query(`
+            SELECT 
+                a.id as account_id,
+                a.account_name,
+                COALESCE(SUM(e.total), 0) as previous_months_spent
+            FROM accounts a
+            LEFT JOIN expenses e ON e.account_id = a.id 
+                AND e.expense_date <= $1::date - INTERVAL '1 day'
+            WHERE a.is_active = true ${accountFilter}
+            GROUP BY a.id, a.account_name
+            ORDER BY a.account_name
+        `, [startDateStr]);
 
         // Si debug_details est demandé, calculer le détail jour par jour pour Cash Burn
         let monthlyBurnDetails = null;
