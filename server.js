@@ -7766,252 +7766,269 @@ app.get('/api/dashboard/snapshots/:date', requireAdminAuth, async (req, res) => 
     }
 });
 
-// ===== ENDPOINT AUDIT FLUX =====
+// ===== ENDPOINTS VISUALISATION (avec vraies données) =====
 
-// Route pour auditer les flux d'un compte spécifique
-app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
+// Route pour obtenir les données PL (Profit & Loss) depuis les snapshots sauvegardés
+app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
     try {
-        const { accountId } = req.params;
-        const { start_date, end_date } = req.query;
-        const userRole = req.session.user.role;
-        const userId = req.session.user.id;
-
-        console.log(`🔍 AUDIT: Demande d'audit pour compte ID ${accountId}, utilisateur: ${req.session.user.username}`);
-
-        // Vérifier que le compte existe et récupérer ses informations
-        let accountFilter = '';
-        let accountParams = [accountId];
+        const { start_date, end_date, period_type = 'daily' } = req.query;
         
-        if (userRole === 'directeur') {
-            accountFilter = 'AND a.user_id = $2';
-            accountParams.push(userId);
+        if (!start_date || !end_date) {
+            return res.status(400).json({ error: 'Les dates de début et fin sont requises' });
         }
 
-        const accountResult = await pool.query(`
-            SELECT 
-                a.id,
-                a.account_name,
-                a.account_type,
-                a.current_balance,
-                a.total_credited,
-                a.total_spent,
-                a.is_active,
-                u.full_name as user_name,
-                u.username
-            FROM accounts a
-            LEFT JOIN users u ON a.user_id = u.id
-            WHERE a.id = $1 AND a.is_active = true ${accountFilter}
-        `, accountParams);
-
-        if (accountResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Compte non trouvé ou accès non autorisé' });
+        let query, groupBy;
+        
+        if (period_type === 'weekly') {
+            // Grouper par semaine (lundi de chaque semaine) avec calcul correct
+            query = `
+                SELECT 
+                    DATE_TRUNC('week', snapshot_date)::date as period,
+                    AVG(cash_bictorys_amount) as cash_bictorys,
+                    AVG(creances_mois) as creances,
+                    AVG(stock_point_vente) as stock_pv,
+                    AVG(stock_vivant_variation) as ecart_stock_vivant,
+                    AVG(weekly_burn) as cash_burn_weekly,
+                    AVG(monthly_burn) as cash_burn_monthly
+                FROM dashboard_snapshots
+                WHERE snapshot_date >= $1 AND snapshot_date <= $2
+                GROUP BY DATE_TRUNC('week', snapshot_date)
+                ORDER BY period
+            `;
+        } else {
+            // Données journalières avec calcul du prorata correct
+            query = `
+                SELECT 
+                    snapshot_date as period,
+                    cash_bictorys_amount as cash_bictorys,
+                    creances_mois as creances,
+                    stock_point_vente as stock_pv,
+                    stock_vivant_variation as ecart_stock_vivant,
+                    COALESCE(livraisons_partenaires, 0) as livraisons_partenaires,
+                    monthly_burn as cash_burn,
+                    monthly_burn as cash_burn_monthly,
+                    weekly_burn as cash_burn_weekly
+                FROM dashboard_snapshots
+                WHERE snapshot_date >= $1 AND snapshot_date <= $2
+                ORDER BY snapshot_date
+            `;
         }
 
-        const account = accountResult.rows[0];
-        console.log(`✅ AUDIT: Compte trouvé: ${account.account_name} (${account.account_type})`);
-
-        // Construire la requête d'audit des flux avec filtre de dates optionnel
-        let dateFilter = '';
-        let queryParams = [account.account_name];
+        const result = await pool.query(query, [start_date, end_date]);
         
-        if (start_date && end_date) {
-            dateFilter = 'AND timestamp_tri >= $2 AND timestamp_tri <= $3';
-            queryParams.push(start_date + ' 00:00:00', end_date + ' 23:59:59');
-            console.log(`🗓️ AUDIT: Période filtrée: ${start_date} à ${end_date}`);
-        }
-
-        const auditQuery = `
-            SELECT 
-                date_operation,
-                heure_operation,
-                type_operation,
-                montant,
-                description,
-                effectue_par,
-                timestamp_tri
-            FROM (
-                -- 1. CRÉDITS RÉGULIERS (table credit_history)
-                SELECT 
-                    ch.created_at::date as date_operation,
-                    ch.created_at::time as heure_operation,
-                    'CRÉDIT' as type_operation,
-                    ch.amount as montant,
-                    COALESCE(ch.description, 'Crédit de compte') as description,
-                    COALESCE(u.full_name, 'Système') as effectue_par,
-                    ch.created_at as timestamp_tri
-                FROM credit_history ch
-                LEFT JOIN users u ON ch.credited_by = u.id
-                LEFT JOIN accounts a ON ch.account_id = a.id
-                WHERE a.account_name = $1
-                
-                UNION ALL
-                
-                -- 2. CRÉDITS SPÉCIAUX (table special_credit_history)
-                SELECT 
-                    sch.credit_date as date_operation,
-                    sch.created_at::time as heure_operation,
-                    CASE 
-                        WHEN sch.is_balance_override THEN 'CRÉDIT STATUT'
-                        ELSE 'CRÉDIT SPÉCIAL'
-                    END as type_operation,
-                    sch.amount as montant,
-                    COALESCE(sch.comment, 'Crédit spécial') as description,
-                    COALESCE(u.full_name, 'Système') as effectue_par,
-                    sch.created_at as timestamp_tri
-                FROM special_credit_history sch
-                LEFT JOIN users u ON sch.credited_by = u.id
-                LEFT JOIN accounts a ON sch.account_id = a.id
-                WHERE a.account_name = $1
-                
-                UNION ALL
-                
-                -- 3. DÉPENSES (table expenses)
-                SELECT 
-                    e.expense_date as date_operation,
-                    e.created_at::time as heure_operation,
-                    'DÉPENSE' as type_operation,
-                    -e.total as montant, -- Négatif pour les dépenses
-                    COALESCE(e.designation, e.description, 'Dépense') as description,
-                    COALESCE(u.full_name, 'Système') as effectue_par,
-                    e.created_at as timestamp_tri
-                FROM expenses e
-                LEFT JOIN users u ON e.user_id = u.id
-                LEFT JOIN accounts a ON e.account_id = a.id
-                WHERE a.account_name = $1
-                
-                UNION ALL
-                
-                -- 4. TRANSFERTS SORTANTS (table transfer_history)
-                SELECT 
-                    th.created_at::date as date_operation,
-                    th.created_at::time as heure_operation,
-                    'TRANSFERT SORTANT' as type_operation,
-                    -th.montant as montant, -- Négatif pour les sorties
-                    CONCAT('Transfert vers ', dest.account_name) as description,
-                    COALESCE(u.full_name, 'Système') as effectue_par,
-                    th.created_at as timestamp_tri
-                FROM transfer_history th
-                LEFT JOIN accounts source ON th.source_id = source.id
-                LEFT JOIN accounts dest ON th.destination_id = dest.id
-                LEFT JOIN users u ON th.transferred_by = u.id
-                WHERE source.account_name = $1
-                
-                UNION ALL
-                
-                -- 5. TRANSFERTS ENTRANTS (table transfer_history)
-                SELECT 
-                    th.created_at::date as date_operation,
-                    th.created_at::time as heure_operation,
-                    'TRANSFERT ENTRANT' as type_operation,
-                    th.montant as montant, -- Positif pour les entrées
-                    CONCAT('Transfert depuis ', source.account_name) as description,
-                    COALESCE(u.full_name, 'Système') as effectue_par,
-                    th.created_at as timestamp_tri
-                FROM transfer_history th
-                LEFT JOIN accounts source ON th.source_id = source.id
-                LEFT JOIN accounts dest ON th.destination_id = dest.id
-                LEFT JOIN users u ON th.transferred_by = u.id
-                WHERE dest.account_name = $1
-                
-                UNION ALL
-                
-                -- 6. OPÉRATIONS CRÉANCE (si le compte est de type créance)
-                SELECT 
-                    co.operation_date as date_operation,
-                    co.created_at::time as heure_operation,
-                    CASE 
-                        WHEN co.operation_type = 'credit' THEN 'CRÉDIT CRÉANCE'
-                        WHEN co.operation_type = 'debit' THEN 'DÉBIT CRÉANCE'
-                    END as type_operation,
-                    CASE 
-                        WHEN co.operation_type = 'credit' THEN co.amount
-                        WHEN co.operation_type = 'debit' THEN -co.amount
-                    END as montant,
-                    COALESCE(co.description, cc.client_name) as description,
-                    COALESCE(u.full_name, 'Système') as effectue_par,
-                    co.created_at as timestamp_tri
-                FROM creance_operations co
-                LEFT JOIN creance_clients cc ON co.client_id = cc.id
-                LEFT JOIN users u ON co.created_by = u.id
-                LEFT JOIN accounts a ON cc.account_id = a.id
-                WHERE a.account_name = $1
-                
-            ) mouvements
-            WHERE 1=1 ${dateFilter}
-            ORDER BY timestamp_tri DESC
-        `;
-
-        console.log(`🔍 AUDIT: Exécution de la requête avec ${queryParams.length} paramètres`);
-        const movementsResult = await pool.query(auditQuery, queryParams);
-        const movements = movementsResult.rows;
-
-        // Calculer les statistiques
-        let totalCredits = 0;
-        let totalDebits = 0;
-        
-        movements.forEach(movement => {
-            const montant = parseFloat(movement.montant) || 0;
-            if (montant > 0) {
-                totalCredits += montant;
-            } else {
-                totalDebits += Math.abs(montant);
+        // Lire l'estimation des charges fixes depuis le fichier JSON
+        let chargesFixesEstimation = 5850000; // Valeur par défaut
+        try {
+            const configPath = path.join(__dirname, 'financial_settings.json');
+            if (fs.existsSync(configPath)) {
+                const configData = fs.readFileSync(configPath, 'utf8');
+                const financialConfig = JSON.parse(configData);
+                chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 5850000;
             }
+        } catch (configError) {
+            console.error('Erreur lecture config financière pour visualisation PL:', configError);
+        }
+        
+        const plData = result.rows.map(row => {
+            const snapshotDate = new Date(row.period);
+            const cashBictorys = parseFloat(row.cash_bictorys) || 0;
+            const creances = parseFloat(row.creances) || 0;
+            const stockPv = parseFloat(row.stock_pv) || 0;
+            const ecartStockVivant = parseFloat(row.ecart_stock_vivant) || 0;
+            const livraisonsPartenaires = parseFloat(row.livraisons_partenaires) || 0;
+            
+            // Utiliser le cash burn approprié selon le type de période
+            let cashBurn = 0;
+            if (period_type === 'weekly') {
+                cashBurn = parseFloat(row.cash_burn_weekly) || 0;
+            } else {
+                // Pour les données journalières, toujours utiliser monthly_burn
+                cashBurn = parseFloat(row.cash_burn_monthly) || 0;
+            }
+            
+            // Calculer le prorata des charges fixes basé sur la date du snapshot
+            let chargesProrata = 0;
+            if (chargesFixesEstimation > 0) {
+                const currentDay = snapshotDate.getDate();
+                const currentMonth = snapshotDate.getMonth() + 1;
+                const currentYear = snapshotDate.getFullYear();
+                
+                // Calculer le nombre de jours ouvrables écoulés dans le mois (lundi à samedi)
+                let joursOuvrablesEcoules = 0;
+                for (let day = 1; day <= currentDay; day++) {
+                    const date = new Date(currentYear, currentMonth - 1, day);
+                    const dayOfWeek = date.getDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
+                    if (dayOfWeek !== 0) { // Exclure les dimanches
+                        joursOuvrablesEcoules++;
+                    }
+                }
+                
+                // Calculer le nombre total de jours ouvrables dans le mois
+                const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+                let totalJoursOuvrables = 0;
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const date = new Date(currentYear, currentMonth - 1, day);
+                    const dayOfWeek = date.getDay();
+                    if (dayOfWeek !== 0) { // Exclure les dimanches
+                        totalJoursOuvrables++;
+                    }
+                }
+                
+                // Calculer le prorata
+                chargesProrata = (chargesFixesEstimation * joursOuvrablesEcoules) / totalJoursOuvrables;
+            }
+            
+            // Calcul du PL final avec la formule correcte incluant les livraisons partenaires
+            const plBase = cashBictorys + creances + stockPv - cashBurn;
+            const plFinal = plBase + ecartStockVivant - chargesProrata - livraisonsPartenaires;
+            
+            return {
+                date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
+                cash_bictorys: cashBictorys,
+                creances: creances,
+                stock_pv: stockPv,
+                ecart_stock_vivant: ecartStockVivant,
+                livraisons_partenaires: livraisonsPartenaires,
+                cash_burn: cashBurn,
+                charges_estimees: Math.round(chargesProrata),
+                pl_final: Math.round(plFinal)
+            };
         });
 
-        const netBalance = totalCredits - totalDebits;
-
-        console.log(`📊 AUDIT: ${movements.length} mouvements trouvés pour ${account.account_name}`);
-        console.log(`💰 AUDIT: Total crédits: ${totalCredits}, Total débits: ${totalDebits}, Solde net: ${netBalance}`);
+        console.log(`✅ Données PL récupérées: ${plData.length} points de ${start_date} à ${end_date}`);
 
         res.json({
-            account: {
-                id: account.id,
-                name: account.account_name,
-                type: account.account_type,
-                current_balance: parseInt(account.current_balance) || 0,
-                total_credited: parseInt(account.total_credited) || 0,
-                total_spent: parseInt(account.total_spent) || 0,
-                user_name: account.user_name,
-                username: account.username
-            },
-            audit_period: {
-                start_date: start_date || 'Depuis le début',
-                end_date: end_date || 'Jusqu\'à maintenant',
-                filtered: !!(start_date && end_date)
-            },
-            statistics: {
-                total_operations: movements.length,
-                total_credits: totalCredits,
-                total_debits: totalDebits,
-                net_balance: netBalance
-            },
-            movements: movements.map(movement => ({
-                date: movement.date_operation instanceof Date ? 
-                      movement.date_operation.toISOString().split('T')[0] : 
-                      movement.date_operation,
-                time: movement.heure_operation,
-                type: movement.type_operation,
-                amount: parseFloat(movement.montant) || 0,
-                description: movement.description,
-                created_by: movement.effectue_par,
-                timestamp: movement.timestamp_tri
-            })),
-            sql_query: auditQuery,
-            sql_params: queryParams
+            period_type,
+            start_date,
+            end_date,
+            data: plData
         });
 
     } catch (error) {
-        console.error('❌ AUDIT: Erreur lors de l\'audit des flux:', error);
-        res.status(500).json({ error: 'Erreur serveur lors de l\'audit' });
+        console.error('Erreur récupération données PL:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
-// Root endpoint
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// Route pour obtenir les données Stock Vivant (vraies données)
+app.get('/api/visualisation/stock-vivant-data', requireAdminAuth, async (req, res) => {
+    try {
+        const { start_date, end_date, period_type = 'daily' } = req.query;
+        
+        if (!start_date || !end_date) {
+            return res.status(400).json({ error: 'Les dates de début et fin sont requises' });
+        }
+
+        let groupByClause, selectClause;
+        if (period_type === 'weekly') {
+            // Grouper par semaine (lundi de chaque semaine)
+            selectClause = "date_trunc('week', date_stock)::date as period";
+            groupByClause = "date_trunc('week', date_stock)";
+        } else {
+            // Grouper par jour
+            selectClause = "date_stock as period";
+            groupByClause = "date_stock";
+        }
+
+        const result = await pool.query(`
+            SELECT 
+                ${selectClause},
+                COALESCE(SUM(total), 0) as total_stock_vivant,
+                COUNT(*) as nombre_entrees,
+                COALESCE(SUM(quantite), 0) as quantite_totale
+            FROM stock_vivant
+            WHERE date_stock >= $1 AND date_stock <= $2
+            GROUP BY ${groupByClause}
+            ORDER BY period
+        `, [start_date, end_date]);
+
+        // Calculer les variations
+        const stockVivantData = result.rows.map((row, index) => {
+            const current = parseInt(row.total_stock_vivant);
+            const previous = index > 0 ? parseInt(result.rows[index - 1].total_stock_vivant) : 0;
+            const variation = current - previous;
+            
+            return {
+                date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
+                total_stock_vivant: current,
+                variation: variation,
+                nombre_entrees: parseInt(row.nombre_entrees),
+                quantite_totale: parseInt(row.quantite_totale)
+            };
+        });
+
+        res.json({
+            period_type,
+            start_date,
+            end_date,
+            data: stockVivantData
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération données Stock Vivant:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
 });
 
-// ... existing code ...
+// Route pour obtenir les données Stock Point de Vente (table stock_mata)
+app.get('/api/visualisation/stock-pv-data', requireAdminAuth, async (req, res) => {
+    try {
+        const { start_date, end_date, period_type = 'daily' } = req.query;
+        
+        if (!start_date || !end_date) {
+            return res.status(400).json({ error: 'Les dates de début et fin sont requises' });
+        }
+
+        let groupByClause, selectClause;
+        if (period_type === 'weekly') {
+            // Grouper par semaine (lundi de chaque semaine)
+            selectClause = "date_trunc('week', date)::date as period";
+            groupByClause = "date_trunc('week', date)";
+        } else {
+            // Grouper par jour
+            selectClause = "date as period";
+            groupByClause = "date";
+        }
+
+        const result = await pool.query(`
+            SELECT 
+                ${selectClause},
+                COALESCE(SUM(stock_matin + stock_soir), 0) as stock_total,
+                COUNT(DISTINCT point_de_vente) as points_vente,
+                COUNT(*) as nombre_entrees
+            FROM stock_mata
+            WHERE date >= $1 AND date <= $2
+            GROUP BY ${groupByClause}
+            ORDER BY period
+        `, [start_date, end_date]);
+
+        // Calculer les variations
+        const stockPvData = result.rows.map((row, index) => {
+            const current = Math.round(parseFloat(row.stock_total) || 0);
+            const previous = index > 0 ? Math.round(parseFloat(result.rows[index - 1].stock_total) || 0) : 0;
+            const variation = current - previous;
+            
+            return {
+                date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
+                stock_point_vente: current,
+                variation: variation,
+                points_vente: parseInt(row.points_vente),
+                nombre_entrees: parseInt(row.nombre_entrees)
+            };
+        });
+
+        res.json({
+            period_type,
+            start_date,
+            end_date,
+            data: stockPvData
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération données Stock PV:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
 
 // Route pour obtenir les données de Solde
 app.get('/api/visualisation/solde-data', requireAdminAuth, async (req, res) => {
