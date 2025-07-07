@@ -804,8 +804,11 @@
                             
                             <div class="form-group">
                                 <label for="director-credit-amount">Montant (FCFA)</label>
-                                <!-- Allow negatives for statut accounts – rely on JS/DB layer for final validation -->
-                                <input type="number" id="director-credit-amount" step="1" required>
+                                <input type="number"
+                                       id="director-credit-amount"
+                                       step="1"
+                                       min="0"
+                                       required>
                                 <small class="form-help" id="director-amount-help" style="display: none; color: #666;">
                                     ⚠️ Compte Statut : montants négatifs autorisés (le montant remplace le solde existant)
                                 </small>
@@ -935,8 +938,11 @@
                         
                         <div class="form-group">
                             <label>Montant (FCFA)</label>
-                            <!-- Allow negatives for statut accounts – rely on JS/DB layer for final validation -->
-                            <input type="number" id="creditAmount" step="1" required>
+                            <input type="number"
+                                   id="creditAmount"
+                                   step="1"
+                                   min="0"
+                                   required>
                             <small class="form-help" id="credit-amount-help" style="display: none; color: #666;">
                                 ⚠️ Compte Statut : montants négatifs autorisés (le montant remplace le solde existant)
                             </small>
@@ -2492,22 +2498,7 @@
                         </div>
                     </div>
                     
-                    <!-- Modal SQL Query -->
-                    <div id="sql-modal" class="modal">
-                        <div class="modal-content">
-                            <div class="modal-header">
-                                <h2><i class="fas fa-code"></i> Requête SQL Générée</h2>
-                                <button type="button" class="close" onclick="closeSqlModal()">&times;</button>
-                            </div>
-                            <div class="modal-body">
-                                <p>Voici la requête SQL générée pour l'audit de ce compte :</p>
-                                <pre id="sql-query-display"></pre>
-                                <button type="button" id="copy-sql-btn" class="btn">
-                                    <i class="fas fa-copy"></i> Copier la Requête
-                                </button>
-                            </div>
-                        </div>
-                    </div>
+
                 </section>
 
                 <!-- Section Transfert -->
