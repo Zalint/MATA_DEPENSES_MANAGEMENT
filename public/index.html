@@ -210,6 +210,17 @@
 
                         <div class="stat-card">
                             <div class="stat-icon">
+                                <i class="fas fa-balance-scale"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3>Somme Balance du Mois</h3>
+                                <p class="stat-value" id="monthly-balance-total">0 FCFA</p>
+                                <small class="stat-period">Total des balances mensuelles</small>
+                            </div>
+                        </div>
+
+                        <div class="stat-card">
+                            <div class="stat-icon">
                                 <i class="fas fa-handshake"></i>
                             </div>
                             <div class="stat-content">
@@ -788,6 +799,9 @@
                             <div class="form-group">
                                 <label for="director-credit-amount">Montant (FCFA)</label>
                                 <input type="number" id="director-credit-amount" min="1" required>
+                                <small class="form-help" id="director-amount-help" style="display: none; color: #666;">
+                                    ⚠️ Compte Statut : montants négatifs autorisés (le montant remplace le solde existant)
+                                </small>
                             </div>
                             
                             <div class="form-group">
@@ -796,7 +810,7 @@
                             </div>
                             
                             <div class="form-group">
-                                <label for="director-credit-comment">Commentaire</label>
+                                <label for="director-credit-comment">Commentaire (optionnel)</label>
                             <textarea id="director-credit-comment" placeholder="Ex: Budget mensuel, remboursement..."></textarea>
                             </div>
                             
@@ -915,6 +929,9 @@
                         <div class="form-group">
                             <label>Montant (FCFA)</label>
                             <input type="number" id="creditAmount" min="1" required>
+                            <small class="form-help" id="credit-amount-help" style="display: none; color: #666;">
+                                ⚠️ Compte Statut : montants négatifs autorisés (le montant remplace le solde existant)
+                            </small>
                         </div>
                         
                         <div class="form-group">
@@ -923,7 +940,7 @@
                         </div>
                         
                         <div class="form-group">
-                            <label>Commentaire</label>
+                            <label>Commentaire (optionnel)</label>
                             <textarea id="creditDescription" placeholder="Ex: Budget mensuel, remboursement..."></textarea>
                         </div>
                         
