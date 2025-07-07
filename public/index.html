@@ -83,6 +83,7 @@
                                 <i class="fas fa-handshake"></i> Suivi Partenaires
                             </a>
                         </li>
+
                     </ul>
                     <!-- 💵 GESTION FINANCIÈRE -->
                     <li class="menu-section-title collapsible" data-section-group="finance-group">
@@ -150,6 +151,11 @@
                         <li id="admin-config-menu" style="display: none;">
                             <a href="#" data-section="admin-config" class="nav-link">
                                 <i class="fas fa-cogs"></i> Config
+                            </a>
+                        </li>
+                        <li id="audit-flux-menu" style="display: none;">
+                            <a href="#" data-section="audit-flux" class="nav-link">
+                                <i class="fas fa-search-dollar"></i> Audit Flux
                             </a>
                         </li>
                     </ul>
@@ -798,7 +804,8 @@
                             
                             <div class="form-group">
                                 <label for="director-credit-amount">Montant (FCFA)</label>
-                                <input type="number" id="director-credit-amount" min="1" required>
+                                <!-- Allow negatives for statut accounts – rely on JS/DB layer for final validation -->
+                                <input type="number" id="director-credit-amount" step="1" required>
                                 <small class="form-help" id="director-amount-help" style="display: none; color: #666;">
                                     ⚠️ Compte Statut : montants négatifs autorisés (le montant remplace le solde existant)
                                 </small>
@@ -928,7 +935,8 @@
                         
                         <div class="form-group">
                             <label>Montant (FCFA)</label>
-                            <input type="number" id="creditAmount" min="1" required>
+                            <!-- Allow negatives for statut accounts – rely on JS/DB layer for final validation -->
+                            <input type="number" id="creditAmount" step="1" required>
                             <small class="form-help" id="credit-amount-help" style="display: none; color: #666;">
                                 ⚠️ Compte Statut : montants négatifs autorisés (le montant remplace le solde existant)
                             </small>
@@ -2325,6 +2333,178 @@
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Section Audit Flux -->
+                <section id="audit-flux-section" class="section">
+                    <h2><i class="fas fa-search-dollar"></i> Audit Flux de Compte</h2>
+                    
+                    <div class="audit-controls">
+                        <div class="form-group">
+                            <label for="audit-account-select">
+                                <i class="fas fa-wallet"></i> Sélectionner un compte à auditer
+                            </label>
+                            <select id="audit-account-select" class="form-control">
+                                <option value="">Choisir un compte...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="audit-date-filters">
+                            <div class="form-group">
+                                <label for="audit-start-date">Date de début</label>
+                                <input type="date" id="audit-start-date" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label for="audit-end-date">Date de fin</label>
+                                <input type="date" id="audit-end-date" class="form-control">
+                            </div>
+                            <button id="audit-filter-btn" class="btn btn-secondary">
+                                <i class="fas fa-filter"></i> Filtrer
+                            </button>
+                        </div>
+                        
+                        <button id="audit-execute-btn" class="btn btn-primary" disabled>
+                            <i class="fas fa-search"></i> Auditer le Compte
+                        </button>
+                    </div>
+                    
+                    <!-- Informations du compte -->
+                    <div id="audit-account-info" class="audit-account-info" style="display: none;">
+                        <h3><i class="fas fa-info-circle"></i> Informations du Compte</h3>
+                        <div class="account-info-grid">
+                            <div class="info-item">
+                                <span class="info-label">Nom du compte :</span>
+                                <span class="info-value" id="audit-account-name">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Type de compte :</span>
+                                <span class="info-value" id="audit-account-type">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Solde actuel :</span>
+                                <span class="info-value" id="audit-account-balance">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Total crédité :</span>
+                                <span class="info-value" id="audit-account-credited">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">Total dépensé :</span>
+                                <span class="info-value" id="audit-account-spent">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Résultats de l'audit -->
+                    <div id="audit-results" class="audit-results" style="display: none;">
+                        <div class="audit-header">
+                            <h3><i class="fas fa-list-alt"></i> Historique des Mouvements</h3>
+                            <div class="audit-stats">
+                                <span class="stat-item">
+                                    <i class="fas fa-hashtag"></i>
+                                    <span id="audit-total-operations">0</span> opérations
+                                </span>
+                                <span class="stat-item">
+                                    <i class="fas fa-calendar-alt"></i>
+                                    Période : <span id="audit-period">-</span>
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div class="audit-summary">
+                            <div class="summary-cards">
+                                <div class="summary-card positive">
+                                    <div class="card-icon">
+                                        <i class="fas fa-plus-circle"></i>
+                                    </div>
+                                    <div class="card-content">
+                                        <h4>Total Crédits</h4>
+                                        <span class="card-value" id="audit-total-credits">0 FCFA</span>
+                                    </div>
+                                </div>
+                                <div class="summary-card negative">
+                                    <div class="card-icon">
+                                        <i class="fas fa-minus-circle"></i>
+                                    </div>
+                                    <div class="card-content">
+                                        <h4>Total Débits</h4>
+                                        <span class="card-value" id="audit-total-debits">0 FCFA</span>
+                                    </div>
+                                </div>
+                                <div class="summary-card neutral">
+                                    <div class="card-icon">
+                                        <i class="fas fa-balance-scale"></i>
+                                    </div>
+                                    <div class="card-content">
+                                        <h4>Solde Net</h4>
+                                        <span class="card-value" id="audit-net-balance">0 FCFA</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="table-container">
+                            <table class="data-table" id="audit-movements-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Heure</th>
+                                        <th>Type d'Opération</th>
+                                        <th>Montant</th>
+                                        <th>Description</th>
+                                        <th>Effectué par</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="audit-movements-tbody">
+                                    <!-- Les mouvements seront ajoutés ici -->
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="audit-export">
+                            <button id="audit-export-csv" class="btn btn-secondary">
+                                <i class="fas fa-download"></i> Exporter en CSV
+                            </button>
+                            <button id="audit-export-sql" class="btn btn-info">
+                                <i class="fas fa-code"></i> Voir la Requête SQL
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Modal pour afficher la requête SQL -->
+                    <div id="sql-modal" class="modal">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h2><i class="fas fa-code"></i> Requête SQL Exécutée</h2>
+                                <span class="close" onclick="closeSqlModal()">&times;</span>
+                            </div>
+                            <div class="modal-body">
+                                <div class="sql-container">
+                                    <pre id="sql-query-display"></pre>
+                                </div>
+                                <button id="copy-sql-btn" class="btn btn-secondary">
+                                    <i class="fas fa-copy"></i> Copier la Requête
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Modal SQL Query -->
+                    <div id="sql-modal" class="modal">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h2><i class="fas fa-code"></i> Requête SQL Générée</h2>
+                                <button type="button" class="close" onclick="closeSqlModal()">&times;</button>
+                            </div>
+                            <div class="modal-body">
+                                <p>Voici la requête SQL générée pour l'audit de ce compte :</p>
+                                <pre id="sql-query-display"></pre>
+                                <button type="button" id="copy-sql-btn" class="btn">
+                                    <i class="fas fa-copy"></i> Copier la Requête
+                                </button>
                             </div>
                         </div>
                     </div>
