@@ -10,6 +10,16 @@ const pool = new Pool({
 
 (async () => {
     try {
+        // Paramètre pour éviter l'injection SQL — injectable for flexibility
+        const accountName =
+          process.argv[2]                 // e.g. `node check_history.js "Compte XYZ"`
+          || process.env.ACCOUNT_NAME     // or `ACCOUNT_NAME="Compte XYZ" node check_history.js`
+          || 'Compte Directeur Commercial';
+        
+        if (!accountName) {
+          throw new Error('Missing account name. Provide it as CLI arg or ACCOUNT_NAME env var.');
+        }
+        
         const result = await pool.query(`
             SELECT 
                 date_operation,
@@ -31,7 +41,7 @@ const pool = new Pool({
                 FROM credit_history ch
                 LEFT JOIN users u ON ch.credited_by = u.id
                 LEFT JOIN accounts a ON ch.account_id = a.id
-                WHERE a.account_name = 'Compte Directeur Commercial'
+                WHERE a.account_name = $1
                 
                 UNION ALL
                 
@@ -50,7 +60,7 @@ const pool = new Pool({
                 FROM special_credit_history sch
                 LEFT JOIN users u ON sch.credited_by = u.id
                 LEFT JOIN accounts a ON sch.account_id = a.id
-                WHERE a.account_name = 'Compte Directeur Commercial'
+                WHERE a.account_name = $1
                 
                 UNION ALL
                 
@@ -66,7 +76,7 @@ const pool = new Pool({
                 FROM expenses e
                 LEFT JOIN users u ON e.user_id = u.id
                 LEFT JOIN accounts a ON e.account_id = a.id
-                WHERE a.account_name = 'Compte Directeur Commercial'
+                WHERE a.account_name = $1
                 
                 UNION ALL
                 
@@ -89,11 +99,11 @@ const pool = new Pool({
                 LEFT JOIN creance_clients cc ON co.client_id = cc.id
                 LEFT JOIN users u ON co.created_by = u.id
                 LEFT JOIN accounts a ON cc.account_id = a.id
-                WHERE a.account_name = 'Compte Directeur Commercial'
+                WHERE a.account_name = $1
                 
             ) mouvements
             ORDER BY timestamp_tri DESC
-        `);
+        `, [accountName]);
 
         console.log('Historique des mouvements :');
         console.log('----------------------------');
@@ -110,8 +120,8 @@ const pool = new Pool({
                 total_credited as total_credite,
                 total_spent as total_depense
             FROM accounts 
-            WHERE account_name = 'Compte Directeur Commercial'
-        `);
+            WHERE account_name = $1
+        `, [accountName]);
 
         console.log('\nInformations du compte :');
         console.log('------------------------');
