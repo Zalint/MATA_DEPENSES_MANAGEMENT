@@ -386,6 +386,7 @@ async function loadInitialData() {
     setDefaultDate();
     initTransfertModule();
     await initDirectorCreditModule();
+    await initAuditFluxModule();
     // Stock vivant sera initialisé seulement quand on clique sur le menu
     console.log('ℹ️ CLIENT: Stock vivant sera initialisé à la demande');
 }
@@ -925,6 +926,19 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
         console.log('🎯 updateStatsCards: APRÈS response.json()');
         console.log('📊 updateStatsCards: Données reçues', stats);
         
+        // 🔍 LOG SPÉCIFIQUE POUR ACCOUNT_BREAKDOWN
+        if (stats.account_breakdown) {
+            console.log('🔍 CLIENT: account_breakdown trouvé avec', stats.account_breakdown.length, 'comptes');
+            const compteDirecteur = stats.account_breakdown.find(item => item.account === 'Compte Directeur Commercial');
+            if (compteDirecteur) {
+                console.log('🎯 CLIENT: Compte Directeur Commercial dans account_breakdown:', compteDirecteur);
+            } else {
+                console.log('❌ CLIENT: Compte Directeur Commercial NOT FOUND dans account_breakdown');
+            }
+        } else {
+            console.log('❌ CLIENT: account_breakdown est undefined ou null');
+        }
+        
         // Mettre à jour les valeurs des cartes
         document.getElementById('total-spent-amount').textContent = formatCurrency(stats.totalSpent || 0);
         document.getElementById('total-remaining-amount').textContent = formatCurrency(stats.totalRemaining || 0);
@@ -1114,11 +1128,13 @@ function createChart(containerId, data, type) {
     if (type === 'account') {
         headerRow = `
             <tr>
-                <th>Compte</th>
-                <th>Montant Restant</th>
-                <th>Montant Dépensé</th>
-                <th>Dépenses mois précédents</th>
-                <th>Total Crédité</th>
+                            <th>Compte</th>
+            <th>Montant Restant</th>
+            <th>Montant Dépensé</th>
+            <th>Crédit du mois</th>
+            <th>Balance du mois</th>
+            <th>Dépenses mois précédents</th>
+            <th>Total Crédité</th>
             </tr>
         `;
     } else {
@@ -1152,6 +1168,23 @@ function createChart(containerId, data, type) {
             const totalCredited = parseInt(item.total_credited) || 0;
             const remaining = parseInt(item.current_balance) || 0;
             const previousMonths = totalCredited - remaining - spent;
+            const monthlyCredits = parseInt(item.monthly_credits) || 0;
+            const monthlyTransfers = parseInt(item.net_transfers) || 0;
+            const monthlyBalance = parseInt(item.monthly_balance) || (monthlyCredits - spent + monthlyTransfers);
+            
+            // 🔍 LOGS DEBUG - Balance du mois
+            if (item.account === 'Compte Directeur Commercial') {
+                console.group('🔍 DEBUG CLIENT - Compte Directeur Commercial');
+                console.log('📊 Données reçues du serveur:', item);
+                console.log('💰 monthly_credits:', item.monthly_credits);
+                console.log('💸 spent:', spent);
+                console.log('🔄 net_transfers:', monthlyTransfers);
+                console.log('📈 monthly_balance du serveur:', item.monthly_balance);
+                console.log('📈 monthly_balance calculé côté client:', monthlyBalance);
+                console.log('📊 Formule: ' + monthlyCredits + ' - ' + spent + ' + ' + monthlyTransfers + ' = ' + monthlyBalance);
+                console.groupEnd();
+            }
+            
             row.innerHTML = `
                 <td class="label-cell">
                   <span class="clickable-account-name" onclick="showAccountExpenseDetails('${label}', ${spent}, ${remaining}, ${totalCredited})" 
@@ -1162,6 +1195,8 @@ function createChart(containerId, data, type) {
                 </td>
                 <td class="amount-cell remaining">${formatCurrency(remaining)}</td>
                 <td class="amount-cell spent">${formatCurrency(spent)}</td>
+                <td class="amount-cell monthly-credits" style="color: ${monthlyCredits > 0 ? 'green' : 'gray'}; font-weight: bold;">${formatCurrency(monthlyCredits)}</td>
+                <td class="amount-cell monthly-balance">${formatCurrency(monthlyBalance)}</td>
                 <td class="amount-cell previous">${formatCurrency(previousMonths)}</td>
                 <td class="amount-cell total">${formatCurrency(totalCredited)}</td>
             `;
@@ -3054,6 +3089,9 @@ async function loadAccountsForCredit() {
             const accountType = account.account_type || 'classique';
             const typeBadge = accountType.charAt(0).toUpperCase() + accountType.slice(1);
             option.textContent = `${account.account_name} [${typeBadge}]`;
+            // Ajouter les données nécessaires pour la logique JavaScript
+            option.dataset.accountType = accountType;
+            option.dataset.balance = account.current_balance || 0;
             accountSelect.appendChild(option);
         });
     } catch (error) {
@@ -3268,9 +3306,23 @@ document.addEventListener('DOMContentLoaded', function() {
     // Gestionnaire de formulaire de crédit de compte
     document.getElementById('creditAccountForm').addEventListener('submit', function(e) {
         e.preventDefault();
+        
+        const accountSelect = document.getElementById('creditAccountSelect');
+        const selectedOption = accountSelect.options[accountSelect.selectedIndex];
+        const accountName = selectedOption.textContent;
+        const amount = parseInt(document.getElementById('creditAmount').value);
+        const formattedAmount = amount.toLocaleString('fr-FR');
+        
+        // Popup de confirmation
+        const confirmMessage = `Êtes-vous sûr de vouloir créditer le compte "${accountName}" ?\n\nMontant: ${formattedAmount} FCFA\n\nCette action modifiera le solde du compte.`;
+        
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+        
         const formData = {
             account_id: parseInt(document.getElementById('creditAccountSelect').value),
-            amount: parseInt(document.getElementById('creditAmount').value),
+            amount: amount,
             description: document.getElementById('creditDescription').value,
             credit_date: document.getElementById('creditDate').value
         };
@@ -3638,13 +3690,35 @@ async function handleCreditAccountChange() {
     const accountId = select.value;
     const historyContainer = document.getElementById('special-credit-history-container');
     const historyBody = document.getElementById('special-credit-history-body');
+    const amountInput = document.getElementById('creditAmount');
+    const amountHelp = document.getElementById('credit-amount-help');
     
     historyContainer.style.display = 'none';
     historyBody.innerHTML = '';
     
-    if (!accountId) return;
+    if (!accountId) {
+        // Remettre la restriction par défaut
+        amountInput.setAttribute('min', '1');
+        amountHelp.style.display = 'none';
+        return;
+    }
 
     try {
+        // Récupérer le type de compte sélectionné
+        const selectedOption = select.options[select.selectedIndex];
+        const accountType = selectedOption.dataset?.accountType;
+        
+        // Adapter le formulaire selon le type de compte
+        if (accountType === 'statut') {
+            // Autoriser les montants négatifs pour les comptes statut
+            amountInput.removeAttribute('min');
+            amountHelp.style.display = 'block';
+        } else {
+            // Remettre la restriction pour les autres types
+            amountInput.setAttribute('min', '1');
+            amountHelp.style.display = 'none';
+        }
+
         const response = await fetch(`/api/accounts/${accountId}/special-history`);
         const history = await response.json();
         
@@ -4378,12 +4452,35 @@ function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCre
     let extraAmounts = `<span style='margin-right:20px;'><strong>Total Dépensé:</strong> ${formatCurrency(totalAmount)}</span>`;
     if (typeof remainingAmount !== 'undefined' && typeof totalCredited !== 'undefined') {
         extraAmounts += `<span style='margin-right:20px;'><strong>Montant Restant:</strong> ${formatCurrency(remainingAmount)}</span>`;
-        extraAmounts += `<span><strong>Total Crédité:</strong> ${formatCurrency(totalCredited)}</span>`;
+        extraAmounts += `<span style='margin-right:20px;'><strong>Total Crédité:</strong> ${formatCurrency(totalCredited)}</span>`;
+    }
+    
+    // Ajouter le crédit du mois et la balance du mois si disponibles
+    if (typeof data.monthly_credits !== 'undefined') {
+        const monthlyCredits = parseInt(data.monthly_credits) || 0;
+        extraAmounts += `<span style='margin-right:20px;'><strong>Crédit du mois:</strong> <span style='color: ${monthlyCredits > 0 ? 'green' : 'gray'}; font-weight: bold;'>${formatCurrency(monthlyCredits)}</span></span>`;
+    }
+    
+    if (typeof data.monthly_balance !== 'undefined') {
+        const monthlyBalance = parseInt(data.monthly_balance) || 0;
+        extraAmounts += `<span style='margin-right:20px;'><strong>Balance du mois:</strong> <span style='color: ${monthlyBalance >= 0 ? 'green' : 'red'}; font-weight: bold;'>${formatCurrency(monthlyBalance)}</span></span>`;
     }
     modalContent.querySelector('.total-amount').innerHTML = extraAmounts;
     // Stocker les montants pour le tableau
     window.modalRemainingAmount = remainingAmount;
     window.modalTotalCredited = totalCredited;
+    // Stocker les données financières de la modal
+    console.log('🔍 CLIENT: Données reçues pour la modal:', data);
+    console.log('🔍 CLIENT: monthly_credits:', data.monthly_credits);
+    console.log('🔍 CLIENT: monthly_balance:', data.monthly_balance);
+    
+    window.modalAccountData = {
+        monthly_credits: data.monthly_credits,
+        monthly_balance: data.monthly_balance,
+        net_transfers: data.net_transfers
+    };
+    
+    console.log('🔍 CLIENT: modalAccountData stocké:', window.modalAccountData);
     // Stocker les dépenses pour le filtrage et tri
     window.modalExpenses = data.expenses || [];
     window.modalCurrentSortField = 'expense_date';
@@ -4392,8 +4489,130 @@ function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCre
     populateModalFilterOptions(window.modalExpenses);
     // Afficher les dépenses avec tri par défaut
     applyModalFiltersAndDisplay();
+    // Afficher l'évolution jour par jour et mettre à jour la balance dans l'en-tête
+    const finalBalance = displayDailyEvolution(data.daily_evolution || []);
+    
+    // Mettre à jour la balance du mois dans l'en-tête avec la balance cumulative finale
+    if (finalBalance !== null) {
+        const totalAmountElement = modalContent.querySelector('.total-amount');
+        let currentHTML = totalAmountElement.innerHTML;
+        
+        // Remplacer la balance du mois existante par la balance cumulative finale
+        const balanceRegex = /<span style='margin-right:20px;'><strong>Balance du mois:<\/strong>.*?<\/span><\/span>/;
+        const newBalanceHTML = `<span style='margin-right:20px;'><strong>Balance du mois:</strong> <span style='color: ${finalBalance >= 0 ? 'green' : 'red'}; font-weight: bold;'>${formatCurrency(finalBalance)}</span></span>`;
+        
+        if (balanceRegex.test(currentHTML)) {
+            currentHTML = currentHTML.replace(balanceRegex, newBalanceHTML);
+        } else {
+            currentHTML += newBalanceHTML;
+        }
+        
+        totalAmountElement.innerHTML = currentHTML;
+    }
+    
     // Afficher le modal
     modal.style.display = 'block';
+}
+
+// Fonction pour afficher l'évolution jour par jour
+function displayDailyEvolution(dailyData) {
+    const tbody = document.getElementById('modal-daily-evolution-tbody');
+    if (!tbody) return null;
+    
+    tbody.innerHTML = '';
+    
+    if (!dailyData || dailyData.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" style="text-align: center; padding: 20px; color: #6c757d;">
+                    Aucune donnée disponible pour cette période
+                </td>
+            </tr>
+        `;
+        return null;
+    }
+    
+    let cumulativeBalance = 0;
+    
+    dailyData.forEach(day => {
+        const date = new Date(day.date);
+        const dailyCredits = parseInt(day.daily_credits) || 0;
+        const dailySpent = parseInt(day.daily_spent) || 0;
+        const dailyTransfers = parseInt(day.daily_transfers) || 0;
+        const dailyBalance = dailyCredits - dailySpent + dailyTransfers;
+        
+        cumulativeBalance += dailyBalance;
+        
+        const row = document.createElement('tr');
+        
+        // Couleurs conditionnelles
+        const creditColor = dailyCredits > 0 ? 'color: green; font-weight: bold;' : 'color: gray;';
+        const spentColor = dailySpent > 0 ? 'color: red; font-weight: bold;' : 'color: gray;';
+        const transferColor = dailyTransfers > 0 ? 'color: blue; font-weight: bold;' : 
+                            dailyTransfers < 0 ? 'color: orange; font-weight: bold;' : 'color: gray;';
+        const balanceColor = dailyBalance > 0 ? 'color: green; font-weight: bold;' : 
+                           dailyBalance < 0 ? 'color: red; font-weight: bold;' : 'color: gray;';
+        const cumulativeColor = cumulativeBalance > 0 ? 'color: green; font-weight: bold;' : 
+                              cumulativeBalance < 0 ? 'color: red; font-weight: bold;' : 'color: gray;';
+        
+        row.innerHTML = `
+            <td style="padding: 8px; text-align: center; border-bottom: 1px solid #dee2e6;">
+                ${date.toLocaleDateString('fr-FR')}
+            </td>
+            <td style="padding: 8px; text-align: right; border-bottom: 1px solid #dee2e6; ${creditColor}">
+                ${formatCurrency(dailyCredits)}
+            </td>
+            <td style="padding: 8px; text-align: right; border-bottom: 1px solid #dee2e6; ${spentColor}">
+                ${formatCurrency(dailySpent)}
+            </td>
+            <td style="padding: 8px; text-align: right; border-bottom: 1px solid #dee2e6; ${transferColor}">
+                ${formatCurrency(dailyTransfers)}
+            </td>
+            <td style="padding: 8px; text-align: right; border-bottom: 1px solid #dee2e6; ${balanceColor}">
+                ${formatCurrency(dailyBalance)}
+            </td>
+            <td style="padding: 8px; text-align: right; border-bottom: 1px solid #dee2e6; ${cumulativeColor}">
+                ${formatCurrency(cumulativeBalance)}
+            </td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+    
+    // Ajouter une ligne de total
+    const totalCredits = dailyData.reduce((sum, day) => sum + (parseInt(day.daily_credits) || 0), 0);
+    const totalSpent = dailyData.reduce((sum, day) => sum + (parseInt(day.daily_spent) || 0), 0);
+    const totalTransfers = dailyData.reduce((sum, day) => sum + (parseInt(day.daily_transfers) || 0), 0);
+    const totalBalance = totalCredits - totalSpent + totalTransfers;
+    
+    const totalRow = document.createElement('tr');
+    totalRow.style.backgroundColor = '#f8f9fa';
+    totalRow.style.fontWeight = 'bold';
+    totalRow.innerHTML = `
+        <td style="padding: 10px; text-align: center; border-top: 2px solid #dee2e6;">
+            <strong>TOTAL</strong>
+        </td>
+        <td style="padding: 10px; text-align: right; border-top: 2px solid #dee2e6; color: green;">
+            ${formatCurrency(totalCredits)}
+        </td>
+        <td style="padding: 10px; text-align: right; border-top: 2px solid #dee2e6; color: red;">
+            ${formatCurrency(totalSpent)}
+        </td>
+        <td style="padding: 10px; text-align: right; border-top: 2px solid #dee2e6; color: ${totalTransfers >= 0 ? 'blue' : 'orange'};">
+            ${formatCurrency(totalTransfers)}
+        </td>
+        <td style="padding: 10px; text-align: right; border-top: 2px solid #dee2e6; color: ${totalBalance >= 0 ? 'green' : 'red'};">
+            ${formatCurrency(totalBalance)}
+        </td>
+        <td style="padding: 10px; text-align: right; border-top: 2px solid #dee2e6; color: ${cumulativeBalance >= 0 ? 'green' : 'red'};">
+            ${formatCurrency(cumulativeBalance)}
+        </td>
+    `;
+    
+    tbody.appendChild(totalRow);
+    
+    // Retourner la balance cumulative finale
+    return cumulativeBalance;
 }
 
 // Fonction pour créer le modal des détails des dépenses
@@ -4605,6 +4824,39 @@ function createExpenseDetailsModal() {
                         </tbody>
                     </table>
                 </div>
+                
+                <!-- Nouveau tableau d'évolution jour par jour -->
+                <div class="daily-evolution-section" style="margin-top: 30px;">
+                    <h4 style="margin-bottom: 15px; color: #495057; font-size: 1.1rem;">
+                        <i class="fas fa-chart-line" style="margin-right: 8px;"></i>Évolution Jour par Jour - Crédits et Balance
+                    </h4>
+                    
+                    <div class="table-responsive">
+                        <table class="table table-striped" id="modal-daily-evolution-table" style="
+                            width: 100%;
+                            border-collapse: collapse;
+                            background-color: white;
+                            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                            border-radius: 8px;
+                            overflow: hidden;
+                            font-size: 0.9rem;
+                        ">
+                            <thead style="background-color: #f1f3f4; border-bottom: 2px solid #dee2e6;">
+                                <tr>
+                                    <th style="padding: 10px; text-align: center; font-weight: 600;">Date</th>
+                                    <th style="padding: 10px; text-align: right; font-weight: 600;">Crédits du Jour</th>
+                                    <th style="padding: 10px; text-align: right; font-weight: 600;">Dépenses du Jour</th>
+                                    <th style="padding: 10px; text-align: right; font-weight: 600;">Transferts du Jour</th>
+                                    <th style="padding: 10px; text-align: right; font-weight: 600;">Balance du Jour</th>
+                                    <th style="padding: 10px; text-align: right; font-weight: 600;">Balance Cumulative</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modal-daily-evolution-tbody">
+                                <!-- Les données seront générées par JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     `;
@@ -4767,6 +5019,8 @@ function applyModalFiltersAndDisplay() {
     
     // Afficher les résultats
     displayModalExpenses(sortedExpenses);
+    // Stocker les dépenses filtrées pour le calcul du total
+    window.modalFilteredExpenses = sortedExpenses;
     updateModalFilteredCount(sortedExpenses.length, window.modalExpenses.length);
 }
 
@@ -5046,8 +5300,36 @@ function updateModalFilteredCount(filtered, total) {
     if (!modal) return;
     
     const countElement = modal.querySelector('#modal-filtered-count');
+    console.log('🔍 CLIENT updateModalFilteredCount: countElement trouvé:', countElement);
     if (countElement) {
-        countElement.textContent = `Affichage de ${filtered} dépense${filtered > 1 ? 's' : ''} sur ${total} au total`;
+        // Calculer le total des dépenses filtrées
+    const filteredExpenses = window.modalFilteredExpenses || [];
+    const filteredTotal = filteredExpenses.reduce((sum, expense) => sum + (parseInt(expense.total) || 0), 0);
+    
+    // Récupérer les informations financières depuis les données de la modal
+    const modalData = window.modalAccountData || {};
+    const monthlyCredits = parseInt(modalData.monthly_credits) || 0;
+    const monthlyBalance = parseInt(modalData.monthly_balance) || 0;
+    
+    console.log('🔍 CLIENT updateModalFilteredCount: modalData:', modalData);
+    console.log('🔍 CLIENT updateModalFilteredCount: monthlyCredits:', monthlyCredits);
+    console.log('🔍 CLIENT updateModalFilteredCount: monthlyBalance:', monthlyBalance);
+    
+    // Créer le texte avec les informations financières
+    let countText = `Affichage de ${filtered} dépense${filtered > 1 ? 's' : ''} sur ${total} au total`;
+    countText += ` - Total filtré: ${formatCurrency(filteredTotal)}`;
+    
+    if (modalData.monthly_credits !== undefined) {
+        countText += ` | Crédit du mois: ${formatCurrency(monthlyCredits)}`;
+    }
+    
+    if (modalData.monthly_balance !== undefined) {
+        const balanceColor = monthlyBalance >= 0 ? 'green' : 'red';
+        countText += ` | Balance du mois: <span style="color: ${balanceColor}; font-weight: bold;">${formatCurrency(monthlyBalance)}</span>`;
+    }
+    
+    console.log('🔍 CLIENT updateModalFilteredCount: countText final:', countText);
+    countElement.innerHTML = countText;
     }
 }
 
@@ -7028,6 +7310,11 @@ async function loadDashboardData() {
         // Calculer le solde (somme des Montant Restant des comptes classique, statut, Ajustement)
         let solde = 0;
         if (Array.isArray(stats.account_breakdown)) {
+            console.log('🔍 CLIENT: Données account_breakdown reçues:', stats.account_breakdown.length, 'comptes');
+            const compteDirecteur = stats.account_breakdown.find(item => item.account === 'Compte Directeur Commercial');
+            if (compteDirecteur) {
+                console.log('🎯 CLIENT: Compte Directeur Commercial trouvé:', compteDirecteur);
+            }
             stats.account_breakdown.forEach(acc => {
                 const name = (acc.account || '').toLowerCase();
                 if (
@@ -7388,6 +7675,8 @@ async function loadDirectorCreditableAccounts() {
         // Gestionnaire de changement de compte
         accountSelect.addEventListener('change', function() {
             const helpText = document.getElementById('director-credit-help');
+            const amountHelp = document.getElementById('director-amount-help');
+            const amountInput = document.getElementById('director-credit-amount');
             const selectedOption = this.options[this.selectedIndex];
             
             if (selectedOption.value) {
@@ -7398,12 +7687,22 @@ async function loadDirectorCreditableAccounts() {
                 
                 if (accountType === 'statut') {
                     helpMessage += ' - ⚠️ Le crédit écrasera le solde existant';
+                    // Autoriser les montants négatifs pour les comptes statut
+                    amountInput.removeAttribute('min');
+                    amountHelp.style.display = 'block';
+                } else {
+                    // Remettre la restriction pour les autres types
+                    amountInput.setAttribute('min', '1');
+                    amountHelp.style.display = 'none';
                 }
                 
                 helpText.textContent = helpMessage;
                 helpText.style.display = 'block';
             } else {
                 helpText.style.display = 'none';
+                amountHelp.style.display = 'none';
+                // Remettre la restriction par défaut
+                amountInput.setAttribute('min', '1');
             }
         });
         
@@ -7580,8 +7879,20 @@ function setupDirectorCreditForm() {
         const creditDate = document.getElementById('director-credit-date').value;
         const comment = document.getElementById('director-credit-comment').value;
         
-        if (!accountId || !amount || !creditDate || !comment) {
-            showDirectorCreditNotification('Veuillez remplir tous les champs', 'error');
+        if (!accountId || !amount || !creditDate) {
+            showDirectorCreditNotification('Veuillez remplir les champs obligatoires (compte, montant, date)', 'error');
+            return;
+        }
+        
+        // Popup de confirmation
+        const accountSelect = document.getElementById('director-credit-account');
+        const selectedOption = accountSelect.options[accountSelect.selectedIndex];
+        const accountName = selectedOption.textContent.split(' [')[0]; // Enlever le badge de type
+        const formattedAmount = parseInt(amount).toLocaleString('fr-FR');
+        
+        const confirmMessage = `Êtes-vous sûr de vouloir créditer le compte "${accountName}" ?\n\nMontant: ${formattedAmount} FCFA\n\nCette action modifiera le solde du compte.`;
+        
+        if (!confirm(confirmMessage)) {
             return;
         }
         
@@ -9412,12 +9723,16 @@ async function loadMonthlySpecificData(monthYear) {
             // Mettre à jour SEULEMENT les données mensuelles (pas les soldes actuels)
             document.getElementById('monthly-burn').textContent = data.monthlyBurn || '0 FCFA';
             
+            // Mettre à jour la nouvelle carte "Somme Balance du Mois"
+            document.getElementById('monthly-balance-total').textContent = data.monthlyBalanceTotalFormatted || '0 FCFA';
+            
             // Mettre à jour les cartes de statistiques mensuelles
             document.getElementById('total-spent-amount').textContent = data.totalSpent || '0 FCFA';
             document.getElementById('total-credited-with-expenses').textContent = data.totalCreditedWithExpenses || '0 FCFA';
             
             // Mettre à jour les graphiques pour le mois sélectionné
             if (data.accountChart) {
+                console.log('✅ CLIENT: Création du tableau account-chart avec données CORRIGÉES de monthly-data');
                 createChart('account-chart', data.accountChart, 'account');
             }
             if (data.categoryChart) {
@@ -9453,6 +9768,7 @@ async function loadMonthlyDashboardData(monthYear) {
             
             // Mettre à jour les graphiques
             if (data.accountChart) {
+                console.log('✅ CLIENT: Création du tableau account-chart avec données CORRIGÉES de loadMonthlyDashboardData');
                 createChart('account-chart', data.accountChart, 'account');
             }
             if (data.categoryChart) {
@@ -9632,12 +9948,16 @@ async function loadMonthlySpecificDataWithCutoff(monthYear, cutoffDate) {
             // Mettre à jour les données mensuelles
             const monthlyBurnElement = document.getElementById('monthly-burn');
             const weeklyBurnElement = document.getElementById('weekly-burn');
+            const monthlyBalanceTotalElement = document.getElementById('monthly-balance-total');
             
             if (monthlyBurnElement) {
                 monthlyBurnElement.textContent = data.monthlyBurn || '0 FCFA';
             }
             if (weeklyBurnElement) {
                 weeklyBurnElement.textContent = data.weeklyBurn || '0 FCFA';
+            }
+            if (monthlyBalanceTotalElement) {
+                monthlyBalanceTotalElement.textContent = data.monthlyBalanceTotalFormatted || '0 FCFA';
             }
             
             // 📊 DEBUG: Logs de debug des données mensuelles (masqués en production)
@@ -13978,3 +14298,426 @@ document.addEventListener('DOMContentLoaded', function() {
         console.warn('[Delivery] ⚠️ Could not find delivery form fields for auto-calculation');
     }
 });
+
+// ===== MODULE AUDIT FLUX =====
+
+// Variables globales pour l'audit
+let currentAuditData = null;
+let currentSqlQuery = '';
+
+// Initialiser le module Audit Flux
+async function initAuditFluxModule() {
+    console.log('🔍 AUDIT: Initialisation du module Audit Flux');
+    
+    const auditMenu = document.getElementById('audit-flux-menu');
+    if (!auditMenu) return;
+    
+    // Vérifier les permissions
+    if (currentUser && ['directeur_general', 'pca', 'admin', 'directeur'].includes(currentUser.role)) {
+        auditMenu.style.display = '';
+        console.log('✅ AUDIT: Menu Audit Flux affiché pour:', currentUser.role);
+        
+        // Configurer les event listeners
+        setupAuditFluxEventListeners();
+        
+        // Charger la liste des comptes
+        await loadAuditAccountsList();
+    } else {
+        auditMenu.style.display = 'none';
+        console.log('❌ AUDIT: Menu Audit Flux masqué - permissions insuffisantes');
+    }
+}
+
+// Configurer les event listeners pour l'audit flux
+function setupAuditFluxEventListeners() {
+    console.log('🔍 AUDIT: Configuration des event listeners');
+    
+    // Sélection d'un compte
+    const accountSelect = document.getElementById('audit-account-select');
+    if (accountSelect) {
+        accountSelect.addEventListener('change', onAuditAccountChange);
+    }
+    
+    // Bouton d'audit
+    const auditBtn = document.getElementById('audit-execute-btn');
+    if (auditBtn) {
+        auditBtn.addEventListener('click', executeAccountAudit);
+    }
+    
+    // Filtres de date
+    const filterBtn = document.getElementById('audit-filter-btn');
+    if (filterBtn) {
+        filterBtn.addEventListener('click', applyAuditDateFilter);
+    }
+    
+    // Export CSV
+    const exportCsvBtn = document.getElementById('audit-export-csv');
+    if (exportCsvBtn) {
+        exportCsvBtn.addEventListener('click', exportAuditToCSV);
+    }
+    
+    // Affichage SQL
+    const showSqlBtn = document.getElementById('audit-export-sql');
+    if (showSqlBtn) {
+        showSqlBtn.addEventListener('click', showAuditSqlQuery);
+    }
+    
+    // Copier SQL
+    const copySqlBtn = document.getElementById('copy-sql-btn');
+    if (copySqlBtn) {
+        copySqlBtn.addEventListener('click', copyAuditSqlQuery);
+    }
+    
+    console.log('✅ AUDIT: Event listeners configurés');
+}
+
+// Charger la liste des comptes pour l'audit
+async function loadAuditAccountsList() {
+    try {
+        console.log('🔍 AUDIT: Chargement de la liste des comptes');
+        
+        const response = await fetch('/api/accounts');
+        if (!response.ok) {
+            throw new Error('Erreur lors du chargement des comptes');
+        }
+        
+        const accounts = await response.json();
+        const accountSelect = document.getElementById('audit-account-select');
+        
+        if (!accountSelect) return;
+        
+        accountSelect.innerHTML = '<option value="">Choisir un compte...</option>';
+        
+        accounts.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            
+            const typeBadge = account.account_type ? 
+                             account.account_type.charAt(0).toUpperCase() + account.account_type.slice(1) : 
+                             'Classique';
+            const balance = parseInt(account.current_balance || 0).toLocaleString('fr-FR');
+            
+            option.textContent = `${account.account_name} [${typeBadge}] (${balance} FCFA)`;
+            option.dataset.accountType = account.account_type || 'classique';
+            option.dataset.accountName = account.account_name;
+            
+            accountSelect.appendChild(option);
+        });
+        
+        console.log(`✅ AUDIT: ${accounts.length} comptes chargés pour l'audit`);
+        
+    } catch (error) {
+        console.error('❌ AUDIT: Erreur chargement comptes:', error);
+        showNotification('Erreur lors du chargement des comptes', 'error');
+    }
+}
+
+// Gestionnaire de changement de compte sélectionné
+function onAuditAccountChange() {
+    const accountSelect = document.getElementById('audit-account-select');
+    const auditBtn = document.getElementById('audit-execute-btn');
+    const accountInfo = document.getElementById('audit-account-info');
+    const auditResults = document.getElementById('audit-results');
+    
+    if (accountSelect.value) {
+        auditBtn.disabled = false;
+        console.log(`🔍 AUDIT: Compte sélectionné: ${accountSelect.options[accountSelect.selectedIndex].text}`);
+    } else {
+        auditBtn.disabled = true;
+        accountInfo.style.display = 'none';
+        auditResults.style.display = 'none';
+        console.log('🔍 AUDIT: Aucun compte sélectionné');
+    }
+}
+
+// Appliquer le filtre de dates
+function applyAuditDateFilter() {
+    const startDate = document.getElementById('audit-start-date').value;
+    const endDate = document.getElementById('audit-end-date').value;
+    
+    if (!startDate || !endDate) {
+        showNotification('Veuillez sélectionner les dates de début et fin', 'warning');
+        return;
+    }
+    
+    if (new Date(startDate) > new Date(endDate)) {
+        showNotification('La date de début doit être antérieure à la date de fin', 'error');
+        return;
+    }
+    
+    console.log(`🗓️ AUDIT: Filtre appliqué - Du ${startDate} au ${endDate}`);
+    showNotification(`Filtre appliqué: du ${startDate} au ${endDate}`, 'success');
+}
+
+// Exécuter l'audit du compte sélectionné
+async function executeAccountAudit() {
+    try {
+        const accountSelect = document.getElementById('audit-account-select');
+        const accountId = accountSelect.value;
+        
+        if (!accountId) {
+            showNotification('Veuillez sélectionner un compte', 'warning');
+            return;
+        }
+        
+        const startDate = document.getElementById('audit-start-date').value;
+        const endDate = document.getElementById('audit-end-date').value;
+        
+        console.log(`🔍 AUDIT: Exécution audit pour compte ID ${accountId}`);
+        
+        // Afficher un indicateur de chargement
+        const auditBtn = document.getElementById('audit-execute-btn');
+        const originalText = auditBtn.innerHTML;
+        auditBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Audit en cours...';
+        auditBtn.disabled = true;
+        
+        // Construire l'URL avec les paramètres de date
+        let url = `/api/audit/account-flux/${accountId}`;
+        const params = new URLSearchParams();
+        
+        if (startDate && endDate) {
+            params.append('start_date', startDate);
+            params.append('end_date', endDate);
+        }
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        const response = await fetch(url);
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Erreur lors de l\'audit');
+        }
+        
+        const auditData = await response.json();
+        currentAuditData = auditData;
+        currentSqlQuery = auditData.sql_query;
+        
+        console.log(`✅ AUDIT: Audit terminé - ${auditData.movements.length} mouvements trouvés`);
+        
+        // Afficher les résultats
+        displayAuditAccountInfo(auditData.account);
+        displayAuditResults(auditData);
+        
+        showNotification(`Audit terminé: ${auditData.movements.length} mouvements trouvés`, 'success');
+        
+    } catch (error) {
+        console.error('❌ AUDIT: Erreur lors de l\'audit:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    } finally {
+        // Restaurer le bouton
+        const auditBtn = document.getElementById('audit-execute-btn');
+        auditBtn.innerHTML = '<i class="fas fa-search"></i> Auditer le Compte';
+        auditBtn.disabled = false;
+    }
+}
+
+// Afficher les informations du compte audité
+function displayAuditAccountInfo(account) {
+    const accountInfo = document.getElementById('audit-account-info');
+    
+    document.getElementById('audit-account-name').textContent = account.name;
+    document.getElementById('audit-account-type').textContent = account.type.charAt(0).toUpperCase() + account.type.slice(1);
+    document.getElementById('audit-account-balance').textContent = `${account.current_balance.toLocaleString('fr-FR')} FCFA`;
+    document.getElementById('audit-account-credited').textContent = `${account.total_credited.toLocaleString('fr-FR')} FCFA`;
+    document.getElementById('audit-account-spent').textContent = `${account.total_spent.toLocaleString('fr-FR')} FCFA`;
+    
+    accountInfo.style.display = 'block';
+    
+    console.log(`✅ AUDIT: Informations du compte "${account.name}" affichées`);
+}
+
+// Afficher les résultats de l'audit
+function displayAuditResults(auditData) {
+    const auditResults = document.getElementById('audit-results');
+    const { account, audit_period, statistics, movements } = auditData;
+    
+    // Statistiques globales
+    document.getElementById('audit-total-operations').textContent = statistics.total_operations;
+    document.getElementById('audit-period').textContent = 
+        audit_period.filtered ? 
+        `${audit_period.start_date} au ${audit_period.end_date}` :
+        'Toutes les opérations';
+    
+    // Cartes de résumé
+    document.getElementById('audit-total-credits').textContent = `${statistics.total_credits.toLocaleString('fr-FR')} FCFA`;
+    document.getElementById('audit-total-debits').textContent = `${statistics.total_debits.toLocaleString('fr-FR')} FCFA`;
+    document.getElementById('audit-net-balance').textContent = `${statistics.net_balance.toLocaleString('fr-FR')} FCFA`;
+    
+    // Couleur du solde net
+    const netBalanceElement = document.getElementById('audit-net-balance');
+    if (statistics.net_balance > 0) {
+        netBalanceElement.style.color = '#4CAF50'; // Vert
+    } else if (statistics.net_balance < 0) {
+        netBalanceElement.style.color = '#f44336'; // Rouge
+    } else {
+        netBalanceElement.style.color = '#666'; // Gris
+    }
+    
+    // Tableau des mouvements
+    displayAuditMovementsTable(movements);
+    
+    auditResults.style.display = 'block';
+    
+    console.log(`✅ AUDIT: Résultats d'audit affichés pour "${account.name}"`);
+}
+
+// Afficher le tableau des mouvements
+function displayAuditMovementsTable(movements) {
+    const tbody = document.getElementById('audit-movements-tbody');
+    tbody.innerHTML = '';
+    
+    movements.forEach(movement => {
+        const row = document.createElement('tr');
+        
+        // Date
+        const dateCell = document.createElement('td');
+        const date = new Date(movement.date);
+        dateCell.textContent = date.toLocaleDateString('fr-FR');
+        row.appendChild(dateCell);
+        
+        // Heure
+        const timeCell = document.createElement('td');
+        timeCell.textContent = movement.time || '-';
+        row.appendChild(timeCell);
+        
+        // Type d'opération
+        const typeCell = document.createElement('td');
+        const span = document.createElement('span');
+        span.textContent = movement.type;
+        span.className = 'operation-type';
+        
+        // Couleur selon le type
+        if (movement.type.includes('CRÉDIT')) {
+            span.classList.add('credit');
+        } else if (movement.type.includes('DÉPENSE')) {
+            span.classList.add('expense');
+        } else if (movement.type.includes('TRANSFERT')) {
+            span.classList.add('transfer');
+        }
+        
+        typeCell.appendChild(span);
+        row.appendChild(typeCell);
+        
+        // Montant
+        const amountCell = document.createElement('td');
+        const amount = parseFloat(movement.amount) || 0;
+        amountCell.textContent = `${amount.toLocaleString('fr-FR')} FCFA`;
+        amountCell.className = amount >= 0 ? 'amount-positive' : 'amount-negative';
+        row.appendChild(amountCell);
+        
+        // Description
+        const descCell = document.createElement('td');
+        descCell.textContent = movement.description || '-';
+        descCell.className = 'description-cell';
+        row.appendChild(descCell);
+        
+        // Effectué par
+        const userCell = document.createElement('td');
+        userCell.textContent = movement.created_by || 'Système';
+        row.appendChild(userCell);
+        
+        tbody.appendChild(row);
+    });
+    
+    console.log(`✅ AUDIT: Tableau de ${movements.length} mouvements affiché`);
+}
+
+// Exporter l'audit en CSV
+function exportAuditToCSV() {
+    if (!currentAuditData) {
+        showNotification('Aucune donnée d\'audit à exporter', 'warning');
+        return;
+    }
+    
+    try {
+        const { account, movements } = currentAuditData;
+        
+        // En-têtes CSV
+        const headers = ['Date', 'Heure', 'Type d\'Opération', 'Montant (FCFA)', 'Description', 'Effectué par'];
+        
+        // Données CSV
+        const csvRows = [headers.join(',')];
+        
+        movements.forEach(movement => {
+            const row = [
+                movement.date,
+                movement.time || '',
+                `"${movement.type}"`,
+                movement.amount,
+                `"${movement.description || ''}"`,
+                `"${movement.created_by || 'Système'}"`
+            ];
+            csvRows.push(row.join(','));
+        });
+        
+        // Créer et télécharger le fichier
+        const csvContent = csvRows.join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `audit_flux_${account.name}_${new Date().toISOString().split('T')[0]}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+        
+        console.log(`✅ AUDIT: Export CSV généré pour "${account.name}"`);
+        showNotification('Export CSV téléchargé avec succès', 'success');
+        
+    } catch (error) {
+        console.error('❌ AUDIT: Erreur lors de l\'export CSV:', error);
+        showNotification('Erreur lors de l\'export CSV', 'error');
+    }
+}
+
+// Afficher la requête SQL dans une modal
+function showAuditSqlQuery() {
+    if (!currentSqlQuery) {
+        showNotification('Aucune requête SQL disponible', 'warning');
+        return;
+    }
+    
+    const sqlDisplay = document.getElementById('sql-query-display');
+    const sqlModal = document.getElementById('sql-modal');
+    
+    // Formater la requête SQL
+    const formattedSql = currentSqlQuery
+        .replace(/SELECT/g, '\nSELECT')
+        .replace(/FROM/g, '\nFROM')
+        .replace(/WHERE/g, '\nWHERE')
+        .replace(/UNION ALL/g, '\n\nUNION ALL')
+        .replace(/ORDER BY/g, '\nORDER BY');
+    
+    sqlDisplay.textContent = formattedSql;
+    sqlModal.style.display = 'block';
+    
+    console.log('✅ AUDIT: Requête SQL affichée');
+}
+
+// Copier la requête SQL
+function copyAuditSqlQuery() {
+    if (!currentSqlQuery) {
+        showNotification('Aucune requête SQL à copier', 'warning');
+        return;
+    }
+    
+    navigator.clipboard.writeText(currentSqlQuery).then(() => {
+        showNotification('Requête SQL copiée dans le presse-papiers', 'success');
+        console.log('✅ AUDIT: Requête SQL copiée');
+    }).catch(err => {
+        console.error('❌ AUDIT: Erreur lors de la copie:', err);
+        showNotification('Erreur lors de la copie', 'error');
+    });
+}
+
+// Fermer la modal SQL
+function closeSqlModal() {
+    const sqlModal = document.getElementById('sql-modal');
+    sqlModal.style.display = 'none';
+}

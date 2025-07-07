@@ -51,6 +51,30 @@ const fileFilter = (req, file, cb) => {
         fieldname: file.fieldname
     });
 
+    // Si c'est une justification de dépense, autoriser les images
+    if (file.fieldname === 'justification') {
+        const allowedImageTypes = [
+            'image/jpeg',
+            'image/jpg', 
+            'image/png',
+            'image/gif',
+            'image/webp',
+            'application/pdf' // Aussi autoriser les PDF pour les justifications
+        ];
+        
+        if (allowedImageTypes.includes(file.mimetype)) {
+            console.log('Accepting justification file:', file.mimetype, file.originalname);
+            cb(null, true);
+            return;
+        } else {
+            console.log('Rejecting justification file:', file.mimetype);
+            cb(new Error('Format de justification invalide. Images (JPEG, PNG, GIF, WebP) et PDF acceptés.'), false);
+            return;
+        }
+    }
+
+    // Pour les autres types de téléchargements (import de données), garder JSON uniquement
+    
     // Allow JSON files by extension
     if (file.originalname.toLowerCase().endsWith('.json')) {
         console.log('Accepting JSON file:', file.originalname);
@@ -58,19 +82,19 @@ const fileFilter = (req, file, cb) => {
         return;
     }
 
-    // Types de fichiers autorisés par mimetype
-    const allowedTypes = [
+    // Types de fichiers autorisés par mimetype pour les données
+    const allowedDataTypes = [
         'application/json', 
         'text/json',
         'application/octet-stream' // Allow binary stream for Windows curl
     ];
     
-    if (allowedTypes.includes(file.mimetype)) {
-        console.log('Accepting file by mimetype:', file.mimetype);
+    if (allowedDataTypes.includes(file.mimetype)) {
+        console.log('Accepting data file by mimetype:', file.mimetype);
         cb(null, true);
     } else {
-        console.log('Rejecting file:', file.mimetype);
-        cb(new Error('Format de fichier invalide. Seuls les fichiers JSON sont acceptés.'), false);
+        console.log('Rejecting data file:', file.mimetype);
+        cb(new Error('Format de fichier invalide. Seuls les fichiers JSON sont acceptés pour l\'import de données.'), false);
     }
 };
 
@@ -789,9 +813,62 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         // Dépenses par compte (période sélectionnée) avec total crédité, sauf dépôts et partenaires
         // CALCUL DYNAMIQUE DU SOLDE À LA DATE SÉLECTIONNÉE
         let accountBurnQuery = `
+            WITH monthly_credits AS (
+                SELECT 
+                    account_id,
+                    SUM(credit_amount) as monthly_credits
+                FROM (
+                    -- Crédits réguliers
+                    SELECT 
+                        ch.account_id,
+                        ch.amount as credit_amount
+                    FROM credit_history ch
+                    JOIN accounts a ON ch.account_id = a.id
+                    WHERE ch.created_at >= $1 AND ch.created_at <= $2
+                    AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
+                    
+                    UNION ALL
+                    
+                    -- Crédits spéciaux : pour les comptes "statut", prendre seulement le dernier du mois
+                    SELECT 
+                        sch.account_id,
+                        CASE 
+                            WHEN a.account_type = 'statut' THEN
+                                -- Pour les comptes statut, prendre seulement le dernier crédit du mois
+                                CASE WHEN sch.created_at = (
+                                    SELECT MAX(sch2.created_at) 
+                                    FROM special_credit_history sch2 
+                                    WHERE sch2.account_id = sch.account_id 
+                                    AND sch2.credit_date >= $1 AND sch2.credit_date <= $2
+                                ) THEN sch.amount ELSE 0 END
+                            ELSE sch.amount
+                        END as credit_amount
+                    FROM special_credit_history sch
+                    JOIN accounts a ON sch.account_id = a.id
+                    WHERE sch.credit_date >= $1 AND sch.credit_date <= $2
+                    AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
+                ) all_credits
+                WHERE credit_amount > 0 OR (credit_amount < 0 AND EXISTS (
+                    SELECT 1 FROM accounts a2 WHERE a2.id = account_id AND a2.account_type = 'statut'
+                ))
+                GROUP BY account_id
+            ),
+            monthly_transfers AS (
+                SELECT 
+                    a.id as account_id,
+                    COALESCE(SUM(CASE 
+                        WHEN th.source_id = a.id THEN -th.montant
+                        WHEN th.destination_id = a.id THEN th.montant
+                        ELSE 0
+                    END), 0) as net_transfers
+                FROM accounts a
+                LEFT JOIN transfer_history th ON (th.source_id = a.id OR th.destination_id = a.id)
+                    AND th.created_at >= $1 AND th.created_at <= $2
+                GROUP BY a.id
+            )
             SELECT 
                 a.account_name as name,
-                COALESCE(SUM(e.total), 0) as spent,
+                COALESCE(SUM(ABS(e.total)), 0) as spent,
                 a.total_credited,
                 a.current_balance,
                 -- Calculer le solde à la date de fin sélectionnée
@@ -800,23 +877,35 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                      FROM expenses e2 
                      WHERE e2.account_id = a.id 
                      AND e2.expense_date <= $2), 0)
-                ) as balance_at_end_date
+                ) as balance_at_end_date,
+                COALESCE(mc.monthly_credits, 0) as monthly_credits,
+                COALESCE(mt.net_transfers, 0) as net_transfers
             FROM accounts a
             LEFT JOIN users u ON a.user_id = u.id
             LEFT JOIN expenses e ON a.id = e.account_id 
                 AND e.expense_date >= $1 AND e.expense_date <= $2
-            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire'`;
+            LEFT JOIN monthly_credits mc ON a.id = mc.account_id
+            LEFT JOIN monthly_transfers mt ON a.id = mt.account_id
+            WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance')`;
         
         let accountParams = [startDate, endDate];
+        
+        console.log('\n🔍 PARAMÈTRES DE LA REQUÊTE:');
+        console.log(`📅 Période: du ${startDate} au ${endDate}`);
         
         if (isDirector) {
             accountBurnQuery += ' AND a.user_id = $3';
             accountParams.push(req.session.user.id);
+            console.log(`👤 Filtré pour le directeur ID: ${req.session.user.id}`);
         }
         
         accountBurnQuery += `
-            GROUP BY a.id, a.account_name, a.total_credited, a.current_balance
+            GROUP BY a.id, a.account_name, a.total_credited, a.current_balance, mc.monthly_credits, mt.net_transfers
             ORDER BY spent DESC`;
+            
+        console.log('\n📝 REQUÊTE SQL COMPLÈTE:');
+        console.log(accountBurnQuery);
+        console.log('📊 PARAMÈTRES:', accountParams);
         
         const accountBurn = await pool.query(accountBurnQuery, accountParams);
         
@@ -858,14 +947,33 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
             daily_burn: parseInt(dailyBurn.rows[0].total),
             weekly_burn: parseInt(weeklyBurn.rows[0].total),
             monthly_burn: parseInt(monthlyBurn.rows[0].total),
-            account_breakdown: accountBurn.rows.map(row => ({
+            account_breakdown: accountBurn.rows.map(row => {
+                // 🔥 LOG UNIQUE POUR CONFIRMER LA VERSION CORRIGÉE
+                console.log('🔥 SERVEUR VERSION CORRIGÉE - ACTIVE ! 🔥');
+                
+                // Logs détaillés pour chaque compte
+                console.log(`\n📊 DÉTAILS COMPTE: ${row.name}`);
+                console.log(`💰 Crédits du mois: ${row.monthly_credits || 0} FCFA`);
+                console.log(`🔄 Transferts nets: ${row.net_transfers || 0} FCFA`);
+                console.log(`💸 Dépenses du mois: ${row.spent || 0} FCFA`);
+                const netTransfers = parseInt(row.net_transfers || 0);
+                const monthlyBalance = parseInt(row.monthly_credits || 0) - parseInt(row.spent || 0) + netTransfers;
+                console.log(`📈 Balance du mois calculée: ${monthlyBalance} FCFA`);
+                console.log(`   (${row.monthly_credits || 0} - ${row.spent || 0} + ${netTransfers})`);
+                console.log('----------------------------------------');
+
+                return {
                 account: row.name,
                 spent: parseInt(row.spent),
                 total_credited: parseInt(row.total_credited || 0),
-                current_balance: parseInt(row.balance_at_end_date || 0), // Utiliser balance_at_end_date au lieu de current_balance
-                remaining: parseInt(row.balance_at_end_date || 0), // Ajouter remaining pour la compatibilité
-                amount: parseInt(row.spent) // Pour compatibilité avec le code existant
-            })),
+                    current_balance: parseInt(row.balance_at_end_date || 0),
+                    remaining: parseInt(row.balance_at_end_date || 0),
+                    amount: parseInt(row.spent),
+                                    monthly_credits: parseInt(row.monthly_credits || 0),
+                net_transfers: parseInt(row.net_transfers || 0),
+                monthly_balance: monthlyBalance
+                };
+            }),
             category_breakdown: categoryBurn.rows.map(row => ({
                 category: row.name,
                 amount: parseInt(row.total)
@@ -1876,10 +1984,170 @@ app.get('/api/accounts/:accountName/expenses', requireAuth, async (req, res) => 
         
         const result = await pool.query(query, params);
         
+        // Récupérer les informations financières du compte pour la période
+        const accountInfoQuery = `
+            WITH monthly_credits AS (
+                SELECT 
+                    account_id,
+                    SUM(credit_amount) as monthly_credits
+                FROM (
+                    -- Crédits réguliers
+                    SELECT 
+                        ch.account_id,
+                        ch.amount as credit_amount
+                    FROM credit_history ch
+                    JOIN accounts a ON ch.account_id = a.id
+                    WHERE DATE(ch.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Abidjan') >= $2::date 
+                    AND DATE(ch.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Abidjan') <= $3::date
+                    AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
+                    
+                    UNION ALL
+                    
+                    -- Crédits spéciaux : pour les comptes "statut", prendre seulement le dernier du mois
+                    SELECT 
+                        sch.account_id,
+                        CASE 
+                            WHEN a.account_type = 'statut' THEN
+                                -- Pour les comptes statut, prendre seulement le dernier crédit du mois
+                                CASE WHEN sch.created_at = (
+                                    SELECT MAX(sch2.created_at) 
+                                    FROM special_credit_history sch2 
+                                    WHERE sch2.account_id = sch.account_id 
+                                    AND sch2.credit_date >= $2 AND sch2.credit_date <= $3
+                                ) THEN sch.amount ELSE 0 END
+                            ELSE sch.amount
+                        END as credit_amount
+                    FROM special_credit_history sch
+                    JOIN accounts a ON sch.account_id = a.id
+                    WHERE sch.credit_date >= $2 AND sch.credit_date <= $3
+                    AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
+                ) all_credits
+                WHERE credit_amount > 0 OR (credit_amount < 0 AND EXISTS (
+                    SELECT 1 FROM accounts a2 WHERE a2.id = account_id AND a2.account_type = 'statut'
+                ))
+                GROUP BY account_id
+            ),
+            monthly_transfers AS (
+                SELECT 
+                    a.id as account_id,
+                    COALESCE(SUM(CASE 
+                        WHEN th.source_id = a.id THEN -th.montant
+                        WHEN th.destination_id = a.id THEN th.montant
+                        ELSE 0
+                    END), 0) as net_transfers
+                FROM accounts a
+                LEFT JOIN transfer_history th ON (th.source_id = a.id OR th.destination_id = a.id)
+                    AND DATE(th.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Abidjan') >= $2::date 
+                    AND DATE(th.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Abidjan') <= $3::date
+                GROUP BY a.id
+            )
+            SELECT 
+                a.account_name,
+                COALESCE(SUM(ABS(e.total)), 0) as monthly_spent,
+                COALESCE(mc.monthly_credits, 0) as monthly_credits,
+                COALESCE(mt.net_transfers, 0) as net_transfers
+            FROM accounts a
+            LEFT JOIN expenses e ON a.id = e.account_id 
+                AND e.expense_date >= $2 AND e.expense_date <= $3
+            LEFT JOIN monthly_credits mc ON a.id = mc.account_id
+            LEFT JOIN monthly_transfers mt ON a.id = mt.account_id
+            WHERE a.account_name = $1
+            GROUP BY a.id, a.account_name, mc.monthly_credits, mt.net_transfers
+        `;
+        
+        const accountInfoResult = await pool.query(accountInfoQuery, [accountName, startDate, endDate]);
+        
+        let accountInfo = {};
+        if (accountInfoResult.rows.length > 0) {
+            const row = accountInfoResult.rows[0];
+            const monthlyCredits = parseInt(row.monthly_credits || 0);
+            const monthlySpent = parseInt(row.monthly_spent || 0);
+            const netTransfers = parseInt(row.net_transfers || 0);
+            const monthlyBalance = monthlyCredits - monthlySpent + netTransfers;
+            
+            accountInfo = {
+                monthly_credits: monthlyCredits,
+                monthly_spent: monthlySpent,
+                net_transfers: netTransfers,
+                monthly_balance: monthlyBalance
+            };
+        }
+        
+        // Récupérer les données jour par jour pour l'évolution
+        const dailyEvolutionQuery = `
+            WITH date_series AS (
+                SELECT generate_series(
+                    $2::date,
+                    $3::date,
+                    '1 day'::interval
+                )::date as date
+            ),
+            daily_credits AS (
+                SELECT 
+                    DATE(ch.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Abidjan') as date,
+                    SUM(ch.amount) as daily_credits
+                FROM credit_history ch
+                JOIN accounts a ON ch.account_id = a.id
+                WHERE a.account_name = $1
+                AND ch.created_at >= $2 AND ch.created_at <= $3
+                GROUP BY DATE(ch.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Abidjan')
+                
+                UNION ALL
+                
+                SELECT 
+                    DATE(sch.credit_date) as date,
+                    SUM(sch.amount) as daily_credits
+                FROM special_credit_history sch
+                JOIN accounts a ON sch.account_id = a.id
+                WHERE a.account_name = $1
+                AND sch.credit_date >= $2 AND sch.credit_date <= $3
+                GROUP BY DATE(sch.credit_date)
+            ),
+            daily_expenses AS (
+                SELECT 
+                    e.expense_date as date,
+                    SUM(ABS(e.total)) as daily_spent
+                FROM expenses e
+                JOIN accounts a ON e.account_id = a.id
+                WHERE a.account_name = $1
+                AND e.expense_date >= $2 AND e.expense_date <= $3
+                GROUP BY e.expense_date
+            ),
+            daily_transfers AS (
+                SELECT 
+                    DATE(th.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Abidjan') as date,
+                    SUM(CASE 
+                        WHEN th.source_id = a.id THEN -th.montant
+                        WHEN th.destination_id = a.id THEN th.montant
+                        ELSE 0
+                    END) as daily_transfers
+                FROM transfer_history th
+                JOIN accounts a ON (th.source_id = a.id OR th.destination_id = a.id)
+                WHERE a.account_name = $1
+                AND th.created_at >= $2 AND th.created_at <= $3
+                GROUP BY DATE(th.created_at AT TIME ZONE 'UTC' AT TIME ZONE 'Africa/Abidjan')
+            )
+            SELECT 
+                ds.date,
+                COALESCE(SUM(dc.daily_credits), 0) as daily_credits,
+                COALESCE(de.daily_spent, 0) as daily_spent,
+                COALESCE(dt.daily_transfers, 0) as daily_transfers
+            FROM date_series ds
+            LEFT JOIN daily_credits dc ON ds.date = dc.date
+            LEFT JOIN daily_expenses de ON ds.date = de.date
+            LEFT JOIN daily_transfers dt ON ds.date = dt.date
+            GROUP BY ds.date, de.daily_spent, dt.daily_transfers
+            ORDER BY ds.date
+        `;
+        
+        const dailyEvolutionResult = await pool.query(dailyEvolutionQuery, [accountName, startDate, endDate]);
+        
         res.json({
             account_name: accountName,
             period: { start_date: startDate, end_date: endDate },
-            expenses: result.rows
+            expenses: result.rows,
+            daily_evolution: dailyEvolutionResult.rows,
+            ...accountInfo
         });
         
     } catch (error) {
@@ -6281,7 +6549,7 @@ app.get('/api/dashboard/total-creances', requireAuth, async (req, res) => {
         }
 
         const result = await pool.query(`
-            SELECT 
+                SELECT 
                 COALESCE(SUM(
                     cc.initial_credit + 
                     COALESCE(credits.total_credits, 0) - 
@@ -7082,18 +7350,75 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             WHERE ch.created_at >= $1 AND ch.created_at <= $2 ${accountFilter}
         `, params);
 
-        // Données par compte pour le graphique
+        // Données par compte pour le graphique (avec monthly_credits et monthly_balance)
         const accountDataResult = await pool.query(`
+            WITH monthly_credits AS (
+                SELECT 
+                    account_id,
+                    SUM(credit_amount) as monthly_credits
+                FROM (
+                    -- Crédits réguliers
+                    SELECT 
+                        ch.account_id,
+                        ch.amount as credit_amount
+                    FROM credit_history ch
+                    JOIN accounts a ON ch.account_id = a.id
+                    WHERE ch.created_at >= $1 AND ch.created_at <= $2
+                    AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
+                    
+                    UNION ALL
+                    
+                    -- Crédits spéciaux : pour les comptes "statut", prendre seulement le dernier du mois
+                    SELECT 
+                        sch.account_id,
+                        CASE 
+                            WHEN a.account_type = 'statut' THEN
+                                -- Pour les comptes statut, prendre seulement le dernier crédit du mois
+                                CASE WHEN sch.created_at = (
+                                    SELECT MAX(sch2.created_at) 
+                                    FROM special_credit_history sch2 
+                                    WHERE sch2.account_id = sch.account_id 
+                                    AND sch2.credit_date >= $1 AND sch2.credit_date <= $2
+                                ) THEN sch.amount ELSE 0 END
+                            ELSE sch.amount
+                        END as credit_amount
+                    FROM special_credit_history sch
+                    JOIN accounts a ON sch.account_id = a.id
+                    WHERE sch.credit_date >= $1 AND sch.credit_date <= $2
+                    AND a.account_type NOT IN ('depot', 'partenaire', 'creance')
+                ) all_credits
+                WHERE credit_amount > 0 OR (credit_amount < 0 AND EXISTS (
+                    SELECT 1 FROM accounts a2 WHERE a2.id = account_id AND a2.account_type = 'statut'
+                ))
+                GROUP BY account_id
+            ),
+            monthly_transfers AS (
+                SELECT 
+                    a.id as account_id,
+                    COALESCE(SUM(CASE 
+                        WHEN th.source_id = a.id THEN -th.montant
+                        WHEN th.destination_id = a.id THEN th.montant
+                        ELSE 0
+                    END), 0) as net_transfers
+                FROM accounts a
+                LEFT JOIN transfer_history th ON (th.source_id = a.id OR th.destination_id = a.id)
+                    AND th.created_at >= $1 AND th.created_at <= $2
+                GROUP BY a.id
+            )
             SELECT 
                 a.account_name as account,
-                COALESCE(SUM(e.total), 0) as spent,
+                COALESCE(SUM(ABS(e.total)), 0) as spent,
                 a.current_balance,
-                a.total_credited
+                a.total_credited,
+                COALESCE(mc.monthly_credits, 0) as monthly_credits,
+                COALESCE(mt.net_transfers, 0) as net_transfers
             FROM accounts a
             LEFT JOIN expenses e ON a.id = e.account_id 
                 AND e.expense_date >= $1 AND e.expense_date <= $2
-            WHERE a.is_active = true ${accountFilter}
-            GROUP BY a.id, a.account_name, a.current_balance, a.total_credited
+            LEFT JOIN monthly_credits mc ON a.id = mc.account_id
+            LEFT JOIN monthly_transfers mt ON a.id = mt.account_id
+            WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance') ${accountFilter}
+            GROUP BY a.id, a.account_name, a.current_balance, a.total_credited, mc.monthly_credits, mt.net_transfers
             ORDER BY spent DESC
         `, params);
 
@@ -7127,6 +7452,30 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             WHERE e.expense_date >= $1 ${accountFilter}
         `, weeklyBurnParams);
 
+        // Calculer la somme totale des balances mensuelles
+        let totalMonthlyBalance = 0;
+        const accountChartData = accountDataResult.rows.map(row => {
+            // Calculer monthly_balance pour chaque compte
+            const monthlyCredits = parseInt(row.monthly_credits || 0);
+            const spent = parseInt(row.spent || 0);
+            const netTransfers = parseInt(row.net_transfers || 0);
+            const monthlyBalance = monthlyCredits - spent + netTransfers;
+            
+            // Ajouter à la somme totale
+            totalMonthlyBalance += monthlyBalance;
+            
+            console.log(`🔥 MONTHLY-DATA: ${row.account} - Crédits: ${monthlyCredits}, Dépenses: ${spent}, Balance: ${monthlyBalance}`);
+            
+            return {
+                ...row,
+                monthly_credits: monthlyCredits,
+                net_transfers: netTransfers,
+                monthly_balance: monthlyBalance
+            };
+        });
+
+        console.log(`📈 Balance du mois calculée: ${totalMonthlyBalance} FCFA`);
+
         const responseData = {
             currentBalance: `${parseInt(balance.total_balance).toLocaleString('fr-FR')} FCFA`,
             depotBalance: `${parseInt(balance.depot_balance).toLocaleString('fr-FR')} FCFA`,
@@ -7137,7 +7486,9 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             totalRemaining: `${parseInt(balance.total_balance).toLocaleString('fr-FR')} FCFA`,
             totalCreditedWithExpenses: `${parseInt(expenses.spent_with_expenses).toLocaleString('fr-FR')} FCFA`,
             totalCreditedGeneral: `${parseInt(balance.total_credited_general).toLocaleString('fr-FR')} FCFA`,
-            accountChart: accountDataResult.rows,
+            monthlyBalanceTotal: totalMonthlyBalance,
+            monthlyBalanceTotalFormatted: `${totalMonthlyBalance.toLocaleString('fr-FR')} FCFA`,
+            accountChart: accountChartData,
             categoryChart: categoryDataResult.rows,
             monthInfo: {
                 month,
@@ -8112,5 +8463,245 @@ app.get('/api/visualisation/solde-data', requireAdminAuth, async (req, res) => {
     } catch (error) {
         console.error('Erreur récupération données Solde:', error);
         res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// ===== ENDPOINT AUDIT FLUX =====
+
+// Route pour auditer les flux d'un compte spécifique
+app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const { start_date, end_date } = req.query;
+        const userRole = req.session.user.role;
+        const userId = req.session.user.id;
+
+        console.log(`🔍 AUDIT: Demande d'audit pour compte ID ${accountId}, utilisateur: ${req.session.user.username}`);
+
+        // Vérifier que le compte existe et récupérer ses informations
+        let accountFilter = '';
+        let accountParams = [accountId];
+        
+        if (userRole === 'directeur') {
+            accountFilter = 'AND a.user_id = $2';
+            accountParams.push(userId);
+        }
+
+        const accountResult = await pool.query(`
+            SELECT 
+                a.id,
+                a.account_name,
+                a.account_type,
+                a.current_balance,
+                a.total_credited,
+                a.total_spent,
+                a.is_active,
+                u.full_name as user_name,
+                u.username
+            FROM accounts a
+            LEFT JOIN users u ON a.user_id = u.id
+            WHERE a.id = $1 AND a.is_active = true ${accountFilter}
+        `, accountParams);
+
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte non trouvé ou accès non autorisé' });
+        }
+
+        const account = accountResult.rows[0];
+        console.log(`✅ AUDIT: Compte trouvé: ${account.account_name} (${account.account_type})`);
+
+        // Construire la requête d'audit des flux avec filtre de dates optionnel
+        let dateFilter = '';
+        let queryParams = [account.account_name];
+        
+        if (start_date && end_date) {
+            dateFilter = 'AND timestamp_tri >= $2 AND timestamp_tri <= $3';
+            queryParams.push(start_date + ' 00:00:00', end_date + ' 23:59:59');
+            console.log(`🗓️ AUDIT: Période filtrée: ${start_date} à ${end_date}`);
+        }
+
+        const auditQuery = `
+            SELECT 
+                date_operation,
+                heure_operation,
+                type_operation,
+                montant,
+                description,
+                effectue_par,
+                timestamp_tri
+            FROM (
+                -- 1. CRÉDITS RÉGULIERS (table credit_history)
+                SELECT 
+                    ch.created_at::date as date_operation,
+                    ch.created_at::time as heure_operation,
+                    'CRÉDIT' as type_operation,
+                    ch.amount as montant,
+                    COALESCE(ch.description, 'Crédit de compte') as description,
+                    COALESCE(u.full_name, 'Système') as effectue_par,
+                    ch.created_at as timestamp_tri
+                FROM credit_history ch
+                LEFT JOIN users u ON ch.credited_by = u.id
+                LEFT JOIN accounts a ON ch.account_id = a.id
+                WHERE a.account_name = $1
+                
+                UNION ALL
+                
+                -- 2. CRÉDITS SPÉCIAUX (table special_credit_history)
+                SELECT 
+                    sch.credit_date as date_operation,
+                    sch.created_at::time as heure_operation,
+                    CASE 
+                        WHEN sch.is_balance_override THEN 'CRÉDIT STATUT'
+                        ELSE 'CRÉDIT SPÉCIAL'
+                    END as type_operation,
+                    sch.amount as montant,
+                    COALESCE(sch.comment, 'Crédit spécial') as description,
+                    COALESCE(u.full_name, 'Système') as effectue_par,
+                    sch.created_at as timestamp_tri
+                FROM special_credit_history sch
+                LEFT JOIN users u ON sch.credited_by = u.id
+                LEFT JOIN accounts a ON sch.account_id = a.id
+                WHERE a.account_name = $1
+                
+                UNION ALL
+                
+                -- 3. DÉPENSES (table expenses)
+                SELECT 
+                    e.expense_date as date_operation,
+                    e.created_at::time as heure_operation,
+                    'DÉPENSE' as type_operation,
+                    -e.total as montant, -- Négatif pour les dépenses
+                    COALESCE(e.designation, e.description, 'Dépense') as description,
+                    COALESCE(u.full_name, 'Système') as effectue_par,
+                    e.created_at as timestamp_tri
+                FROM expenses e
+                LEFT JOIN users u ON e.user_id = u.id
+                LEFT JOIN accounts a ON e.account_id = a.id
+                WHERE a.account_name = $1
+                
+                UNION ALL
+                
+                -- 4. TRANSFERTS SORTANTS (table transfer_history)
+                SELECT 
+                    th.created_at::date as date_operation,
+                    th.created_at::time as heure_operation,
+                    'TRANSFERT SORTANT' as type_operation,
+                    -th.montant as montant, -- Négatif pour les sorties
+                    CONCAT('Transfert vers ', dest.account_name) as description,
+                    COALESCE(u.full_name, 'Système') as effectue_par,
+                    th.created_at as timestamp_tri
+                FROM transfer_history th
+                LEFT JOIN accounts source ON th.source_id = source.id
+                LEFT JOIN accounts dest ON th.destination_id = dest.id
+                LEFT JOIN users u ON th.transferred_by = u.id
+                WHERE source.account_name = $1
+                
+                UNION ALL
+                
+                -- 5. TRANSFERTS ENTRANTS (table transfer_history)
+                SELECT 
+                    th.created_at::date as date_operation,
+                    th.created_at::time as heure_operation,
+                    'TRANSFERT ENTRANT' as type_operation,
+                    th.montant as montant, -- Positif pour les entrées
+                    CONCAT('Transfert depuis ', source.account_name) as description,
+                    COALESCE(u.full_name, 'Système') as effectue_par,
+                    th.created_at as timestamp_tri
+                FROM transfer_history th
+                LEFT JOIN accounts source ON th.source_id = source.id
+                LEFT JOIN accounts dest ON th.destination_id = dest.id
+                LEFT JOIN users u ON th.transferred_by = u.id
+                WHERE dest.account_name = $1
+                
+                UNION ALL
+                
+                -- 6. OPÉRATIONS CRÉANCE (si le compte est de type créance)
+                SELECT 
+                    co.operation_date as date_operation,
+                    co.created_at::time as heure_operation,
+                    CASE 
+                        WHEN co.operation_type = 'credit' THEN 'CRÉDIT CRÉANCE'
+                        WHEN co.operation_type = 'debit' THEN 'DÉBIT CRÉANCE'
+                    END as type_operation,
+                    CASE 
+                        WHEN co.operation_type = 'credit' THEN co.amount
+                        WHEN co.operation_type = 'debit' THEN -co.amount
+                    END as montant,
+                    COALESCE(co.description, cc.client_name) as description,
+                    COALESCE(u.full_name, 'Système') as effectue_par,
+                    co.created_at as timestamp_tri
+                FROM creance_operations co
+                LEFT JOIN creance_clients cc ON co.client_id = cc.id
+                LEFT JOIN users u ON co.created_by = u.id
+                LEFT JOIN accounts a ON cc.account_id = a.id
+                WHERE a.account_name = $1
+                
+            ) mouvements
+            WHERE 1=1 ${dateFilter}
+            ORDER BY timestamp_tri DESC
+        `;
+
+        console.log(`🔍 AUDIT: Exécution de la requête avec ${queryParams.length} paramètres`);
+        const movementsResult = await pool.query(auditQuery, queryParams);
+        const movements = movementsResult.rows;
+
+        // Calculer les statistiques
+        let totalCredits = 0;
+        let totalDebits = 0;
+        
+        movements.forEach(movement => {
+            const montant = parseFloat(movement.montant) || 0;
+            if (montant > 0) {
+                totalCredits += montant;
+            } else {
+                totalDebits += Math.abs(montant);
+            }
+        });
+
+        const netBalance = totalCredits - totalDebits;
+
+        console.log(`📊 AUDIT: ${movements.length} mouvements trouvés pour ${account.account_name}`);
+        console.log(`💰 AUDIT: Total crédits: ${totalCredits}, Total débits: ${totalDebits}, Solde net: ${netBalance}`);
+
+        res.json({
+            account: {
+                id: account.id,
+                name: account.account_name,
+                type: account.account_type,
+                current_balance: parseInt(account.current_balance) || 0,
+                total_credited: parseInt(account.total_credited) || 0,
+                total_spent: parseInt(account.total_spent) || 0,
+                user_name: account.user_name,
+                username: account.username
+            },
+            audit_period: {
+                start_date: start_date || 'Depuis le début',
+                end_date: end_date || 'Jusqu\'à maintenant',
+                filtered: !!(start_date && end_date)
+            },
+            statistics: {
+                total_operations: movements.length,
+                total_credits: totalCredits,
+                total_debits: totalDebits,
+                net_balance: netBalance
+            },
+            movements: movements.map(movement => ({
+                date: movement.date_operation instanceof Date ? 
+                      movement.date_operation.toISOString().split('T')[0] : 
+                      movement.date_operation,
+                time: movement.heure_operation,
+                type: movement.type_operation,
+                amount: parseFloat(movement.montant) || 0,
+                description: movement.description,
+                created_by: movement.effectue_par,
+                timestamp: movement.timestamp_tri
+            })),
+            sql_query: auditQuery,
+            sql_params: queryParams
+        });
+
+    } catch (error) {
+        console.error('❌ AUDIT: Erreur lors de l\'audit des flux:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de l\'audit' });
     }
 });

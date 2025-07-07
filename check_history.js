@@ -10,15 +10,8 @@ const pool = new Pool({
 
 (async () => {
     try {
-        // Paramètre pour éviter l'injection SQL — injectable for flexibility
-        const accountName =
-          process.argv[2]                 // e.g. `node check_history.js "Compte XYZ"`
-          || process.env.ACCOUNT_NAME     // or `ACCOUNT_NAME="Compte XYZ" node check_history.js`
-          || 'Compte Directeur Commercial';
-        
-        if (!accountName) {
-          throw new Error('Missing account name. Provide it as CLI arg or ACCOUNT_NAME env var.');
-        }
+        // Paramètre pour éviter l'injection SQL
+        const accountName = 'Compte Directeur Commercial';
         
         const result = await pool.query(`
             SELECT 
