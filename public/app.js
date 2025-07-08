@@ -12824,16 +12824,29 @@ async function initCashBictorysSection() {
 
 // Configurer les événements Cash Bictorys
 function setupCashBictorysEventListeners() {
+    console.log('🔧 CASH: setupCashBictorysEventListeners appelée');
+    
     // Charger le mois
     const loadBtn = document.getElementById('load-cash-bictorys-btn');
+    console.log('🔧 CASH: Bouton load trouvé:', loadBtn);
     if (loadBtn) {
         loadBtn.addEventListener('click', handleLoadCashBictorysMonth);
     }
     
     // Sauvegarder
     const saveBtn = document.getElementById('save-cash-bictorys-btn');
+    console.log('🔧 CASH: Bouton save trouvé:', saveBtn);
+    console.log('🔧 CASH: Bouton save disabled?', saveBtn ? saveBtn.disabled : 'N/A');
     if (saveBtn) {
+        console.log('✅ CASH: Attachement event listener au bouton save');
         saveBtn.addEventListener('click', handleSaveCashBictorys);
+        
+        // Test direct pour voir si le bouton répond
+        saveBtn.addEventListener('click', function() {
+            console.log('🔧 CASH: CLICK DIRECT détecté sur le bouton !');
+        });
+    } else {
+        console.error('❌ CASH: Bouton save-cash-bictorys-btn introuvable !');
     }
 }
 
@@ -12868,7 +12881,12 @@ async function loadCashBictorysMonth(monthYear) {
         const july1st = data.data.find(d => d.date === '2025-07-01');
         console.log(`🔍 CASH DEBUG: 1er juillet dans les données:`, july1st);
         
-        currentCashBictorysData = data.data;
+        // Initialiser les propriétés manquantes
+        currentCashBictorysData = data.data.map(item => ({
+            ...item,
+            balance: item.balance || 0,
+            fees: item.fees || 0
+        }));
         currentMonthYear = monthYear;
         
         // Afficher la zone principale
@@ -12887,7 +12905,9 @@ async function loadCashBictorysMonth(monthYear) {
         updateCashBictorysTotal();
         
         // Activer le bouton de sauvegarde si les permissions le permettent
-        updateSaveButtonState();
+        console.log('🔧 CASH: Avant appel updateCashBictorysSaveButtonState');
+        updateCashBictorysSaveButtonState();
+        console.log('🔧 CASH: Après appel updateCashBictorysSaveButtonState');
         
         showNotification(`Données du mois ${data.monthName} chargées`, 'success');
         
@@ -12899,9 +12919,17 @@ async function loadCashBictorysMonth(monthYear) {
 
 // Mettre à jour les informations de permissions
 function updateCashBictorysPermissions(monthYear) {
+    console.log('🔧 CASH: updateCashBictorysPermissions appelée');
+    console.log('🔧 CASH: monthYear =', monthYear);
+    console.log('🔧 CASH: currentUser =', currentUser);
+    
     const userRole = currentUser.role;
     const today = new Date();
     const currentMonth = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}`;
+    
+    console.log('🔧 CASH: userRole =', userRole);
+    console.log('🔧 CASH: currentMonth calculé =', currentMonth);
+    console.log('🔧 CASH: monthYear === currentMonth ?', monthYear === currentMonth);
     
     let permissionText = '';
     canEditCashBictorys = false;
@@ -12909,19 +12937,24 @@ function updateCashBictorysPermissions(monthYear) {
     if (userRole === 'admin') {
         canEditCashBictorys = true;
         permissionText = 'Admin : Vous pouvez modifier toutes les données';
+        console.log('✅ CASH: Permissions admin accordées');
     } else if (['directeur_general', 'pca'].includes(userRole)) {
         if (monthYear === currentMonth) {
             canEditCashBictorys = true;
             permissionText = 'Vous pouvez modifier les données du mois en cours';
+            console.log('✅ CASH: Permissions DG/PCA accordées (mois en cours)');
         } else {
             canEditCashBictorys = false;
             permissionText = 'Vous ne pouvez modifier que les données du mois en cours';
+            console.log('❌ CASH: Permissions DG/PCA refusées (pas le mois en cours)');
         }
     } else {
         canEditCashBictorys = false;
         permissionText = 'Accès en lecture seule';
+        console.log('❌ CASH: Permissions refusées (rôle insuffisant)');
     }
     
+    console.log('🔧 CASH: canEditCashBictorys final =', canEditCashBictorys);
     document.getElementById('permissions-text').textContent = permissionText;
 }
 
@@ -12968,20 +13001,20 @@ function displayCashBictorysTable(data) {
                 ${canEditCashBictorys 
                     ? `<input type="number" class="cash-amount-input" 
                          data-date="${dayData.date}" 
-                         value="${dayData.balance}" 
+                         value="${dayData.balance || 0}" 
                          min="0" step="1" 
                          onchange="updateCashBictorysValue('${dayData.date}', 'balance', this.value)">` 
-                    : `<span class="amount-display">${formatCurrency(dayData.balance)}</span>`
+                    : `<span class="amount-display">${formatCurrency(dayData.balance || 0)}</span>`
                 }
             </td>
             <td class="amount-cell">
                 ${canEditCashBictorys 
                     ? `<input type="number" class="cash-amount-input" 
                          data-date="${dayData.date}" 
-                         value="${dayData.fees}" 
+                         value="${dayData.fees || 0}" 
                          min="0" step="1" 
                          onchange="updateCashBictorysValue('${dayData.date}', 'fees', this.value)">` 
-                    : `<span class="amount-display">${formatCurrency(dayData.fees)}</span>`
+                    : `<span class="amount-display">${formatCurrency(dayData.fees || 0)}</span>`
                 }
             </td>
         `;
@@ -13059,30 +13092,45 @@ function updateCashBictorysTotal() {
     }
 }
 
-// Mettre à jour l'état du bouton de sauvegarde
-function updateSaveButtonState() {
+// Mettre à jour l'état du bouton de sauvegarde Cash Bictorys
+function updateCashBictorysSaveButtonState() {
+    console.log('🔧 CASH: updateCashBictorysSaveButtonState appelée');
+    console.log('🔧 CASH: canEditCashBictorys =', canEditCashBictorys);
+    
     const saveBtn = document.getElementById('save-cash-bictorys-btn');
     if (saveBtn) {
         saveBtn.disabled = !canEditCashBictorys;
+        console.log('🔧 CASH: Bouton disabled set to:', saveBtn.disabled);
         
         if (canEditCashBictorys) {
             saveBtn.classList.remove('btn-disabled');
             saveBtn.title = 'Sauvegarder les modifications';
+            console.log('✅ CASH: Bouton activé');
         } else {
             saveBtn.classList.add('btn-disabled');
             saveBtn.title = 'Vous n\'avez pas les permissions pour modifier';
+            console.log('❌ CASH: Bouton désactivé');
         }
+    } else {
+        console.error('❌ CASH: Bouton save introuvable dans updateCashBictorysSaveButtonState');
     }
 }
 
 // Gérer la sauvegarde
 async function handleSaveCashBictorys() {
+    console.log('🔧 CLIENT: handleSaveCashBictorys démarée');
+    console.log('🔧 CLIENT: canEditCashBictorys =', canEditCashBictorys);
+    console.log('🔧 CLIENT: currentMonthYear =', currentMonthYear);
+    console.log('🔧 CLIENT: currentCashBictorysData =', currentCashBictorysData);
+    
     if (!canEditCashBictorys) {
+        console.log('❌ CLIENT: Bloqué par permissions');
         showNotification('Vous n\'avez pas les permissions pour modifier ces données', 'error');
         return;
     }
     
     if (!currentMonthYear || currentCashBictorysData.length === 0) {
+        console.log('❌ CLIENT: Bloqué par données manquantes');
         showNotification('Aucune donnée à sauvegarder', 'error');
         return;
     }
@@ -13095,6 +13143,9 @@ async function handleSaveCashBictorys() {
             balance: parseInt(item.balance) || 0,
             fees: parseInt(item.fees) || 0
         }));
+
+        console.log('✅ CLIENT: Données préparées:', dataToSend);
+        console.log('🌐 CLIENT: Envoi requête vers:', apiUrl(`/api/cash-bictorys/${currentMonthYear}`));
 
         const response = await fetch(apiUrl(`/api/cash-bictorys/${currentMonthYear}`), {
             method: 'PUT',

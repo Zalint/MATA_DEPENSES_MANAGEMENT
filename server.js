@@ -7136,6 +7136,11 @@ app.get('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
 // Route pour mettre à jour les données Cash Bictorys d'un mois
 app.put('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, res) => {
     try {
+        console.log('🔧 SERVER: Requête PUT Cash Bictorys reçue');
+        console.log('🔧 SERVER: monthYear =', req.params.monthYear);
+        console.log('🔧 SERVER: body =', req.body);
+        console.log('🔧 SERVER: user =', req.session.user);
+        
         const { monthYear } = req.params;
         const { data } = req.body; // Array d'objets {date, amount}
         const userId = req.session.user.id;
