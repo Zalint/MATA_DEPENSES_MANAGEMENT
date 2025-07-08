@@ -868,6 +868,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
             )
             SELECT 
                 a.account_name as name,
+                a.account_type,
                 COALESCE(SUM(ABS(e.total)), 0) as spent,
                 a.total_credited,
                 a.current_balance,
@@ -879,13 +880,17 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                      AND e2.expense_date <= $2), 0)
                 ) as balance_at_end_date,
                 COALESCE(mc.monthly_credits, 0) as monthly_credits,
-                COALESCE(mt.net_transfers, 0) as net_transfers
+                COALESCE(mt.net_transfers, 0) as net_transfers,
+                COALESCE(mdm.montant, 0) as montant_debut_mois
             FROM accounts a
             LEFT JOIN users u ON a.user_id = u.id
             LEFT JOIN expenses e ON a.id = e.account_id 
                 AND e.expense_date >= $1 AND e.expense_date <= $2
             LEFT JOIN monthly_credits mc ON a.id = mc.account_id
             LEFT JOIN monthly_transfers mt ON a.id = mt.account_id
+            LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id 
+                AND mdm.year = EXTRACT(YEAR FROM DATE($1))
+                AND mdm.month = EXTRACT(MONTH FROM DATE($1))
             WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance')`;
         
         let accountParams = [startDate, endDate];
@@ -900,7 +905,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         }
         
         accountBurnQuery += `
-            GROUP BY a.id, a.account_name, a.total_credited, a.current_balance, mc.monthly_credits, mt.net_transfers
+            GROUP BY a.id, a.account_name, a.account_type, a.total_credited, a.current_balance, mc.monthly_credits, mt.net_transfers, mdm.montant
             ORDER BY spent DESC`;
             
         console.log('\n📝 REQUÊTE SQL COMPLÈTE:');
@@ -953,17 +958,31 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                 
                 // Logs détaillés pour chaque compte
                 console.log(`\n📊 DÉTAILS COMPTE: ${row.name}`);
+                console.log(`🏷️ Type de compte: ${row.account_type}`);
                 console.log(`💰 Crédits du mois: ${row.monthly_credits || 0} FCFA`);
                 console.log(`🔄 Transferts nets: ${row.net_transfers || 0} FCFA`);
                 console.log(`💸 Dépenses du mois: ${row.spent || 0} FCFA`);
+                console.log(`📅 Montant début de mois: ${row.montant_debut_mois || 0} FCFA`);
+                
                 const netTransfers = parseInt(row.net_transfers || 0);
-                const monthlyBalance = parseInt(row.monthly_credits || 0) - parseInt(row.spent || 0) + netTransfers;
-                console.log(`📈 Balance du mois calculée: ${monthlyBalance} FCFA`);
-                console.log(`   (${row.monthly_credits || 0} - ${row.spent || 0} + ${netTransfers})`);
+                const montantDebutMois = parseInt(row.montant_debut_mois || 0);
+                
+                // Pour les comptes classiques, inclure le montant début de mois dans le calcul
+                let monthlyBalance;
+                if (row.account_type === 'classique') {
+                    monthlyBalance = parseInt(row.monthly_credits || 0) - parseInt(row.spent || 0) + netTransfers + montantDebutMois;
+                    console.log(`📈 Balance du mois calculée (avec montant début): ${monthlyBalance} FCFA`);
+                    console.log(`   (${row.monthly_credits || 0} - ${row.spent || 0} + ${netTransfers} + ${montantDebutMois})`);
+                } else {
+                    monthlyBalance = parseInt(row.monthly_credits || 0) - parseInt(row.spent || 0) + netTransfers;
+                    console.log(`📈 Balance du mois calculée (standard): ${monthlyBalance} FCFA`);
+                    console.log(`   (${row.monthly_credits || 0} - ${row.spent || 0} + ${netTransfers})`);
+                }
                 console.log('----------------------------------------');
 
                 return {
                 account: row.name,
+                account_type: row.account_type,
                 spent: parseInt(row.spent),
                 total_credited: parseInt(row.total_credited || 0),
                     current_balance: parseInt(row.balance_at_end_date || 0),
@@ -971,6 +990,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                     amount: parseInt(row.spent),
                                     monthly_credits: parseInt(row.monthly_credits || 0),
                 net_transfers: parseInt(row.net_transfers || 0),
+                montant_debut_mois: parseInt(row.montant_debut_mois || 0),
                 monthly_balance: monthlyBalance
                 };
             }),
@@ -6056,6 +6076,170 @@ app.get('/api/stock-vivant/monthly-variation', requireAuth, async (req, res) => 
     }
 });
 
+// ===== GESTION MONTANT DEBUT DE MOIS =====
+
+// Route pour récupérer les portefeuilles classiques avec leurs montants de début de mois
+app.get('/api/montant-debut-mois/:year/:month', requireAdminAuth, async (req, res) => {
+    try {
+        const { year, month } = req.params;
+        
+        console.log(`[MONTANT_DEBUT] Récupération pour ${year}-${month}`);
+        
+        // Récupérer tous les portefeuilles classiques avec leurs montants de début de mois
+        const query = `
+            SELECT 
+                a.id as account_id,
+                a.account_name,
+                u.full_name as owner_name,
+                u.username as owner_username,
+                COALESCE(mdm.montant, 0) as montant_debut_mois,
+                mdm.updated_at as last_modified,
+                mdm.created_by,
+                creator.full_name as created_by_name
+            FROM accounts a
+            LEFT JOIN users u ON a.user_id = u.id
+            LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id 
+                AND mdm.year = $1 AND mdm.month = $2
+            LEFT JOIN users creator ON mdm.created_by = creator.id
+            WHERE a.account_type = 'classique' 
+                AND a.is_active = true
+            ORDER BY a.account_name
+        `;
+        
+        const result = await pool.query(query, [parseInt(year), parseInt(month)]);
+        
+        console.log(`[MONTANT_DEBUT] Trouvé ${result.rows.length} portefeuilles classiques`);
+        
+        res.json({
+            success: true,
+            data: result.rows,
+            period: { year: parseInt(year), month: parseInt(month) }
+        });
+        
+    } catch (error) {
+        console.error('[MONTANT_DEBUT] Erreur lors de la récupération:', error);
+        res.status(500).json({ error: 'Erreur lors de la récupération des données' });
+    }
+});
+
+// Route pour sauvegarder/mettre à jour les montants de début de mois
+app.post('/api/montant-debut-mois', requireAdminAuth, async (req, res) => {
+    try {
+        const { year, month, montants } = req.body;
+        const createdBy = req.session.user.id;
+        
+        console.log(`[MONTANT_DEBUT] Sauvegarde pour ${year}-${month}, ${montants.length} portefeuilles`);
+        
+        if (!year || !month || !Array.isArray(montants)) {
+            return res.status(400).json({ error: 'Paramètres invalides' });
+        }
+        
+        if (month < 1 || month > 12) {
+            return res.status(400).json({ error: 'Mois invalide (1-12)' });
+        }
+        
+        await pool.query('BEGIN');
+        
+        let updatedCount = 0;
+        let createdCount = 0;
+        
+        for (const montantData of montants) {
+            const { account_id, montant } = montantData;
+            
+            if (!account_id || montant === undefined || montant === null) {
+                continue; // Ignorer les entrées invalides
+            }
+            
+            // Vérifier que le compte existe et est de type classique
+            const accountCheck = await pool.query(
+                'SELECT id FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
+                [account_id, 'classique']
+            );
+            
+            if (accountCheck.rows.length === 0) {
+                console.log(`[MONTANT_DEBUT] Compte ${account_id} non trouvé ou non classique`);
+                continue;
+            }
+            
+            // Insérer ou mettre à jour le montant
+            const upsertResult = await pool.query(`
+                INSERT INTO montant_debut_mois (account_id, year, month, montant, created_by, updated_at)
+                VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+                ON CONFLICT (account_id, year, month) 
+                DO UPDATE SET 
+                    montant = EXCLUDED.montant,
+                    created_by = EXCLUDED.created_by,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING (xmax = 0) AS inserted
+            `, [account_id, year, month, parseInt(montant), createdBy]);
+            
+            if (upsertResult.rows[0].inserted) {
+                createdCount++;
+            } else {
+                updatedCount++;
+            }
+        }
+        
+        await pool.query('COMMIT');
+        
+        console.log(`[MONTANT_DEBUT] Sauvegarde réussie: ${createdCount} créés, ${updatedCount} mis à jour`);
+        
+        res.json({
+            success: true,
+            message: `Montants sauvegardés avec succès (${createdCount} créés, ${updatedCount} mis à jour)`,
+            statistics: {
+                created: createdCount,
+                updated: updatedCount,
+                total: createdCount + updatedCount
+            }
+        });
+        
+    } catch (error) {
+        await pool.query('ROLLBACK');
+        console.error('[MONTANT_DEBUT] Erreur lors de la sauvegarde:', error);
+        res.status(500).json({ error: 'Erreur lors de la sauvegarde des données' });
+    }
+});
+
+// Route pour obtenir les statistiques des montants de début de mois
+app.get('/api/montant-debut-mois/stats/:year/:month', requireAdminAuth, async (req, res) => {
+    try {
+        const { year, month } = req.params;
+        
+        const statsQuery = `
+            SELECT 
+                COUNT(mdm.id) as portefeuilles_configures,
+                COALESCE(SUM(mdm.montant), 0) as total_montants,
+                COUNT(CASE WHEN mdm.montant > 0 THEN 1 END) as montants_positifs,
+                COUNT(CASE WHEN mdm.montant < 0 THEN 1 END) as montants_negatifs,
+                COUNT(CASE WHEN mdm.montant = 0 THEN 1 END) as montants_zero,
+                (SELECT COUNT(*) FROM accounts WHERE account_type = 'classique' AND is_active = true) as total_portefeuilles_classiques
+            FROM montant_debut_mois mdm
+            WHERE mdm.year = $1 AND mdm.month = $2
+        `;
+        
+        const result = await pool.query(statsQuery, [parseInt(year), parseInt(month)]);
+        const stats = result.rows[0];
+        
+        res.json({
+            success: true,
+            stats: {
+                portefeuilles_configures: parseInt(stats.portefeuilles_configures),
+                total_portefeuilles_classiques: parseInt(stats.total_portefeuilles_classiques),
+                total_montants: parseInt(stats.total_montants),
+                montants_positifs: parseInt(stats.montants_positifs),
+                montants_negatifs: parseInt(stats.montants_negatifs),
+                montants_zero: parseInt(stats.montants_zero)
+            },
+            period: { year: parseInt(year), month: parseInt(month) }
+        });
+        
+    } catch (error) {
+        console.error('[MONTANT_DEBUT] Erreur lors du calcul des statistiques:', error);
+        res.status(500).json({ error: 'Erreur lors du calcul des statistiques' });
+    }
+});
+
 // ===== GESTION DES COMPTES CREANCE =====
 
 // Créer les tables pour les créances si elles n'existent pas
@@ -7350,6 +7534,7 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             WHERE ch.created_at >= $1 AND ch.created_at <= $2 ${accountFilter}
         `, params);
 
+
         // Données par compte pour le graphique (avec monthly_credits et monthly_balance)
         const accountDataResult = await pool.query(`
             WITH monthly_credits AS (
@@ -7407,18 +7592,23 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             )
             SELECT 
                 a.account_name as account,
+                a.account_type,
                 COALESCE(SUM(ABS(e.total)), 0) as spent,
                 a.current_balance,
                 a.total_credited,
                 COALESCE(mc.monthly_credits, 0) as monthly_credits,
-                COALESCE(mt.net_transfers, 0) as net_transfers
+                COALESCE(mt.net_transfers, 0) as net_transfers,
+                COALESCE(mdm.montant, 0) as montant_debut_mois
             FROM accounts a
             LEFT JOIN expenses e ON a.id = e.account_id 
                 AND e.expense_date >= $1 AND e.expense_date <= $2
             LEFT JOIN monthly_credits mc ON a.id = mc.account_id
             LEFT JOIN monthly_transfers mt ON a.id = mt.account_id
+            LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id 
+                AND mdm.year = ${startDate.getFullYear()}
+                AND mdm.month = ${startDate.getMonth() + 1}
             WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance') ${accountFilter}
-            GROUP BY a.id, a.account_name, a.current_balance, a.total_credited, mc.monthly_credits, mt.net_transfers
+            GROUP BY a.id, a.account_name, a.account_type, a.current_balance, a.total_credited, mc.monthly_credits, mt.net_transfers, mdm.montant
             ORDER BY spent DESC
         `, params);
 
@@ -7459,17 +7649,26 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             const monthlyCredits = parseInt(row.monthly_credits || 0);
             const spent = parseInt(row.spent || 0);
             const netTransfers = parseInt(row.net_transfers || 0);
-            const monthlyBalance = monthlyCredits - spent + netTransfers;
+            const montantDebutMois = parseInt(row.montant_debut_mois || 0);
+            
+            // Pour les comptes classiques, inclure le montant début de mois dans le calcul
+            let monthlyBalance;
+            if (row.account_type === 'classique') {
+                monthlyBalance = monthlyCredits - spent + netTransfers + montantDebutMois;
+                console.log(`🔥 MONTHLY-DATA (classique): ${row.account} - Crédits: ${monthlyCredits}, Dépenses: ${spent}, Transferts: ${netTransfers}, Début mois: ${montantDebutMois}, Balance: ${monthlyBalance}`);
+            } else {
+                monthlyBalance = monthlyCredits - spent + netTransfers;
+                console.log(`🔥 MONTHLY-DATA (standard): ${row.account} - Crédits: ${monthlyCredits}, Dépenses: ${spent}, Transferts: ${netTransfers}, Balance: ${monthlyBalance}`);
+            }
             
             // Ajouter à la somme totale
             totalMonthlyBalance += monthlyBalance;
-            
-            console.log(`🔥 MONTHLY-DATA: ${row.account} - Crédits: ${monthlyCredits}, Dépenses: ${spent}, Balance: ${monthlyBalance}`);
             
             return {
                 ...row,
                 monthly_credits: monthlyCredits,
                 net_transfers: netTransfers,
+                montant_debut_mois: montantDebutMois,
                 monthly_balance: monthlyBalance
             };
         });

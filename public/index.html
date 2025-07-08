@@ -120,6 +120,11 @@
                                 <i class="fas fa-money-bill-wave"></i> Cash Bictorys Mois
                             </a>
                         </li>
+                        <li id="montant-debut-mois-menu" style="display: none;">
+                            <a href="#" data-section="montant-debut-mois" class="nav-link">
+                                <i class="fas fa-calendar-alt"></i> Montant début de mois
+                            </a>
+                        </li>
                         <li id="admin-menu" style="display: none;">
                             <a href="#" data-section="manage-accounts" class="nav-link">
                                 <i class="fas fa-users-cog"></i> Gérer Comptes
@@ -448,7 +453,7 @@
 
                     <div class="charts-grid">
                         <div class="chart-card">
-                            <h3>Dépenses par Compte</h3>
+                            <h3>Détails par Compte</h3>
                             <div id="account-chart"></div>
                         </div>
                         
@@ -1524,6 +1529,236 @@
 
                     #cash-bictorys-table {
                         min-width: 800px;
+                    }
+                }
+                </style>
+
+                <!-- Section Montant Début de Mois -->
+                <section id="montant-debut-mois-section" class="section">
+                    <h2><i class="fas fa-calendar-alt"></i> Montant Début de Mois</h2>
+                    <p class="section-description">Gérez les montants de début de mois pour chaque portefeuille classique</p>
+
+                    <!-- Sélection de la période -->
+                    <div class="montant-debut-controls">
+                        <div class="form-group">
+                            <label for="montant-debut-month">Sélectionner le mois</label>
+                            <input type="month" id="montant-debut-month" class="form-control">
+                        </div>
+                        <div class="form-actions">
+                            <button id="load-montant-debut-btn" class="btn btn-primary">
+                                <i class="fas fa-search"></i> Charger les données
+                            </button>
+                            <button id="save-montant-debut-btn" class="btn btn-success" disabled>
+                                <i class="fas fa-save"></i> Sauvegarder
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Zone principale - masquée jusqu'à sélection d'un mois -->
+                    <div id="montant-debut-main-content" style="display: none;">
+                        <!-- En-tête du mois sélectionné -->
+                        <div class="montant-debut-header">
+                            <h3 id="montant-debut-month-title">Mois : [Nom du mois]</h3>
+                            <div class="month-summary">
+                                <div class="summary-stat">
+                                    <span class="stat-label">Portefeuilles configurés :</span>
+                                    <span id="montant-debut-configured-count" class="stat-value">0</span>
+                                </div>
+                                <div class="summary-stat">
+                                    <span class="stat-label">Total montants :</span>
+                                    <span id="montant-debut-total" class="stat-value">0 FCFA</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Permissions d'édition -->
+                        <div id="montant-debut-permissions-info" class="permissions-info">
+                            <i class="fas fa-info-circle"></i>
+                            <span id="montant-debut-permissions-text">Accès réservé aux Directeurs Généraux, PCA et Administrateurs</span>
+                        </div>
+
+                        <!-- Tableau des portefeuilles classiques -->
+                        <div class="montant-debut-table-section">
+                            <div class="section-card">
+                                <h4><i class="fas fa-wallet"></i> Portefeuilles Classiques</h4>
+                                
+                                <div class="table-container">
+                                    <table id="montant-debut-table" class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Portefeuille</th>
+                                                <th>Propriétaire</th>
+                                                <th>Montant Début de Mois (FCFA)</th>
+                                                <th>Dernière Modification</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="montant-debut-tbody">
+                                            <!-- Les données seront chargées ici -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <style>
+                /* Styles spécifiques pour Montant Début de Mois */
+                .montant-debut-controls {
+                    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    align-items: end;
+                    gap: 20px;
+                    flex-wrap: wrap;
+                }
+                
+                .montant-debut-header {
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    flex-wrap: wrap;
+                }
+                
+                .montant-debut-header h3 {
+                    margin: 0;
+                    font-size: 1.4em;
+                }
+                
+                .month-summary {
+                    display: flex;
+                    gap: 20px;
+                    flex-wrap: wrap;
+                }
+
+                .summary-stat {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    min-width: 200px;
+                }
+                
+                .stat-label {
+                    font-weight: 500;
+                    opacity: 0.9;
+                    white-space: nowrap;
+                }
+                
+                .stat-value {
+                    font-size: 1.2em;
+                    font-weight: bold;
+                    padding: 8px 16px;
+                    background: rgba(255, 255, 255, 0.2);
+                    border-radius: 8px;
+                    min-width: 120px;
+                    text-align: right;
+                }
+                
+                .montant-debut-input {
+                    width: 150px;
+                    padding: 8px 12px;
+                    border: 1px solid #ddd;
+                    border-radius: 6px;
+                    text-align: right;
+                    font-family: monospace;
+                    font-size: 14px;
+                }
+                
+                .montant-debut-input:focus {
+                    outline: none;
+                    border-color: #667eea;
+                    box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+                }
+                
+                .montant-debut-input:invalid {
+                    border-color: #e53e3e;
+                    box-shadow: 0 0 0 2px rgba(229, 62, 62, 0.2);
+                }
+                
+                .montant-display {
+                    font-family: monospace;
+                    font-weight: 500;
+                    min-width: 120px;
+                    display: inline-block;
+                    text-align: right;
+                }
+                
+                .montant-positive {
+                    color: #000000;
+                }
+
+                .montant-negative {
+                    color: #c53030;
+                }
+
+                .montant-neutral {
+                    color: #4a5568;
+                }
+                
+                .wallet-name {
+                    font-weight: 600;
+                    color: #2d3748;
+                }
+                
+                .owner-name {
+                    color: #4a5568;
+                    font-style: italic;
+                }
+                
+                .last-modified {
+                    color: #718096;
+                    font-size: 0.9em;
+                }
+                
+                .montant-debut-table-section .section-card {
+                    background: white;
+                    border-radius: 12px;
+                    padding: 20px;
+                    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+                }
+                
+                @media (max-width: 768px) {
+                    .montant-debut-controls {
+                        flex-direction: column;
+                        align-items: stretch;
+                    }
+                    
+                    .montant-debut-header {
+                        flex-direction: column;
+                        gap: 15px;
+                        text-align: center;
+                    }
+
+                    .month-summary {
+                        flex-direction: column;
+                        gap: 10px;
+                        width: 100%;
+                    }
+
+                    .summary-stat {
+                        width: 100%;
+                        justify-content: space-between;
+                        min-width: unset;
+                    }
+                    
+                    .montant-debut-input {
+                        width: 120px;
+                    }
+
+                    .table-container {
+                        overflow-x: auto;
+                        -webkit-overflow-scrolling: touch;
+                    }
+
+                    #montant-debut-table {
+                        min-width: 700px;
                     }
                 }
                 </style>

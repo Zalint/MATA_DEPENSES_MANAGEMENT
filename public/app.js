@@ -327,6 +327,24 @@ function initMenuVisibility() {
             creanceMenu.style.display = 'block';
         }
     }
+    
+    // Menu Montant Début de Mois pour DG, PCA, Admin uniquement
+    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        const montantDebutMoisMenu = document.getElementById('montant-debut-mois-menu');
+        if (montantDebutMoisMenu) {
+            montantDebutMoisMenu.style.display = 'block';
+            
+            // Configurer le gestionnaire de navigation
+            const navLink = montantDebutMoisMenu.querySelector('a');
+            if (navLink) {
+                navLink.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    showSection('montant-debut-mois');
+                    initMontantDebutMoisModule();
+                });
+            }
+        }
+    }
 }
 
 // Chargement des données initiales
@@ -1121,6 +1139,23 @@ function createChart(containerId, data, type) {
         container.innerHTML = '<p style="text-align: center; color: #666;">Aucune dépense pour cette période</p>';
         return;
     }
+    
+    // Ajouter le bouton toggle pour les colonnes avancées si c'est un tableau de comptes
+    if (type === 'account') {
+        const toggleAdvancedBtn = document.createElement('div');
+        toggleAdvancedBtn.style.cssText = 'margin-bottom: 15px; text-align: right;';
+        toggleAdvancedBtn.innerHTML = `
+            <button id="toggle-advanced-columns" class="btn btn-outline-secondary" style="border-radius: 10px; padding: 8px 15px; font-weight: 500; border: 2px solid #6c757d; color: #6c757d; background: white; transition: all 0.3s ease;">
+                <i class="fas fa-eye" style="margin-right: 5px;"></i>Afficher colonnes avancées
+            </button>
+        `;
+        container.appendChild(toggleAdvancedBtn);
+        
+        // Ajouter l'événement pour le toggle
+        const toggleButton = toggleAdvancedBtn.querySelector('#toggle-advanced-columns');
+        toggleButton.addEventListener('click', toggleAdvancedColumns);
+    }
+    
     const table = document.createElement('table');
     table.className = 'summary-table';
     const thead = document.createElement('thead');
@@ -1129,12 +1164,13 @@ function createChart(containerId, data, type) {
         headerRow = `
             <tr>
                             <th>Compte</th>
-            <th>Montant Restant</th>
-            <th>Montant Dépensé</th>
-            <th>Crédit du mois</th>
-            <th>Balance du mois</th>
-            <th>Dépenses mois précédents</th>
-            <th>Total Crédité</th>
+                            <th>Montant Restant</th>
+                <th>Montant Dépensé</th>
+                <th>Crédit du mois</th>
+                <th style="display: none;" class="advanced-column">Montant début mois</th>
+                <th>Balance du mois</th>
+                <th style="display: none;" class="advanced-column">Dépenses mois précédents</th>
+                <th>Total Crédité</th>
             </tr>
         `;
     } else {
@@ -1170,24 +1206,48 @@ function createChart(containerId, data, type) {
             const previousMonths = totalCredited - remaining - spent;
             const monthlyCredits = parseInt(item.monthly_credits) || 0;
             const monthlyTransfers = parseInt(item.net_transfers) || 0;
-            const monthlyBalance = parseInt(item.monthly_balance) || (monthlyCredits - spent + monthlyTransfers);
+            const montantDebutMois = parseInt(item.montant_debut_mois) || 0;
+            
+            // Calculer la balance du mois selon le type de compte
+            let monthlyBalance;
+            if (item.account_type === 'classique') {
+                monthlyBalance = parseInt(item.monthly_balance) || (monthlyCredits - spent + monthlyTransfers + montantDebutMois);
+            } else {
+                monthlyBalance = parseInt(item.monthly_balance) || (monthlyCredits - spent + monthlyTransfers);
+            }
             
             // 🔍 LOGS DEBUG - Balance du mois
             if (item.account === 'Compte Directeur Commercial') {
                 console.group('🔍 DEBUG CLIENT - Compte Directeur Commercial');
                 console.log('📊 Données reçues du serveur:', item);
+                console.log('🏷️ Type de compte:', item.account_type);
                 console.log('💰 monthly_credits:', item.monthly_credits);
                 console.log('💸 spent:', spent);
                 console.log('🔄 net_transfers:', monthlyTransfers);
+                console.log('📅 montant_debut_mois:', montantDebutMois);
                 console.log('📈 monthly_balance du serveur:', item.monthly_balance);
                 console.log('📈 monthly_balance calculé côté client:', monthlyBalance);
-                console.log('📊 Formule: ' + monthlyCredits + ' - ' + spent + ' + ' + monthlyTransfers + ' = ' + monthlyBalance);
+                if (item.account_type === 'classique') {
+                    console.log('📊 Formule (classique): ' + monthlyCredits + ' - ' + spent + ' + ' + monthlyTransfers + ' + ' + montantDebutMois + ' = ' + monthlyBalance);
+                } else {
+                    console.log('📊 Formule (standard): ' + monthlyCredits + ' - ' + spent + ' + ' + monthlyTransfers + ' = ' + monthlyBalance);
+                }
                 console.groupEnd();
             }
             
             row.innerHTML = `
                 <td class="label-cell">
-                  <span class="clickable-account-name" onclick="showAccountExpenseDetails('${label}', ${spent}, ${remaining}, ${totalCredited})" 
+                  <span class="clickable-account-name" onclick="showAccountExpenseDetails('${label}', ${spent}, ${remaining}, ${totalCredited}, {
+                    account: '${label}',
+                    account_type: '${item.account_type || ''}',
+                    totalCredited: ${totalCredited},
+                    currentBalance: ${remaining},
+                    spent: ${spent},
+                    monthly_credits: ${monthlyCredits},
+                    monthly_balance: ${monthlyBalance},
+                    net_transfers: ${monthlyTransfers},
+                    montant_debut_mois: ${montantDebutMois}
+                  })" 
                         style="cursor: pointer; color: #007bff; text-decoration: underline;" 
                         title="Cliquer pour voir les détails des dépenses">
                     ${label}
@@ -1196,8 +1256,9 @@ function createChart(containerId, data, type) {
                 <td class="amount-cell remaining">${formatCurrency(remaining)}</td>
                 <td class="amount-cell spent">${formatCurrency(spent)}</td>
                 <td class="amount-cell monthly-credits" style="color: ${monthlyCredits > 0 ? 'green' : 'gray'}; font-weight: bold;">${formatCurrency(monthlyCredits)}</td>
+                <td class="amount-cell montant-debut-mois advanced-column" style="display: none; color: ${item.account_type === 'classique' ? (montantDebutMois >= 0 ? 'green' : 'red') : 'gray'}; font-weight: ${item.account_type === 'classique' ? 'bold' : 'normal'};">${item.account_type === 'classique' ? formatCurrency(montantDebutMois) : '-'}</td>
                 <td class="amount-cell monthly-balance">${formatCurrency(monthlyBalance)}</td>
-                <td class="amount-cell previous">${formatCurrency(previousMonths)}</td>
+                <td class="amount-cell previous advanced-column" style="display: none;">${formatCurrency(previousMonths)}</td>
                 <td class="amount-cell total">${formatCurrency(totalCredited)}</td>
             `;
         } else {
@@ -1213,6 +1274,33 @@ function createChart(containerId, data, type) {
     });
     table.appendChild(tbody);
     container.appendChild(table);
+}
+
+// Fonction pour afficher/masquer les colonnes avancées du dashboard
+function toggleAdvancedColumns() {
+    const advancedColumns = document.querySelectorAll('.advanced-column');
+    const toggleButton = document.getElementById('toggle-advanced-columns');
+    
+    if (!advancedColumns.length || !toggleButton) return;
+    
+    const isHidden = advancedColumns[0].style.display === 'none';
+    
+    advancedColumns.forEach(column => {
+        column.style.display = isHidden ? 'table-cell' : 'none';
+    });
+    
+    // Mettre à jour le texte et l'icône du bouton
+    if (isHidden) {
+        toggleButton.innerHTML = '<i class="fas fa-eye-slash" style="margin-right: 5px;"></i>Masquer colonnes avancées';
+        toggleButton.style.background = '#6c757d';
+        toggleButton.style.color = 'white';
+        toggleButton.style.borderColor = '#6c757d';
+    } else {
+        toggleButton.innerHTML = '<i class="fas fa-eye" style="margin-right: 5px;"></i>Afficher colonnes avancées';
+        toggleButton.style.background = 'white';
+        toggleButton.style.color = '#6c757d';
+        toggleButton.style.borderColor = '#6c757d';
+    }
 }
 
 // Gestion des dépenses
@@ -4413,11 +4501,27 @@ function setupEditModalEventListeners() {
 }
 
 // Fonction pour afficher les détails des dépenses d'un compte
-async function showAccountExpenseDetails(accountName, totalAmount, remainingAmount, totalCredited) {
+async function showAccountExpenseDetails(accountName, totalAmount, remainingAmount, totalCredited, extendedData = {}) {
     try {
-        // Récupérer les dates du dashboard
-        const startDate = document.getElementById('dashboard-start-date').value || '2025-01-01';
-        const endDate = document.getElementById('dashboard-end-date').value || '2025-12-31';
+        // Récupérer la date de snapshot et calculer les dates pour la modal
+        const snapshotDate = document.getElementById('snapshot-date')?.value;
+        
+        let startDate, endDate;
+        
+        if (snapshotDate) {
+            // Date fin = date de snapshot choisie
+            endDate = snapshotDate;
+            
+            // Date début = 1er du mois de la date de snapshot
+            const snapshotDateObj = new Date(snapshotDate + 'T00:00:00'); // Éviter les problèmes de fuseau horaire
+            const year = snapshotDateObj.getFullYear();
+            const month = String(snapshotDateObj.getMonth() + 1).padStart(2, '0'); // +1 car getMonth() retourne 0-11
+            startDate = `${year}-${month}-01`;
+        } else {
+            // Fallback sur les dates du dashboard si pas de date de snapshot
+            startDate = document.getElementById('dashboard-start-date').value || '2025-01-01';
+            endDate = document.getElementById('dashboard-end-date').value || '2025-12-31';
+        }
         
         // Appel API pour récupérer les détails
         const response = await fetch(`/api/accounts/${encodeURIComponent(accountName)}/expenses?start_date=${startDate}&end_date=${endDate}`);
@@ -4427,7 +4531,14 @@ async function showAccountExpenseDetails(accountName, totalAmount, remainingAmou
         }
         
         const data = await response.json();
-        displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCredited);
+        
+        // Fusionner les données étendues avec les données reçues de l'API
+        const enrichedData = {
+            ...data,
+            ...extendedData
+        };
+        
+        displayExpenseDetailsModal(enrichedData, totalAmount, remainingAmount, totalCredited, { startDate, endDate });
         
     } catch (error) {
         console.error('Erreur récupération détails dépenses:', error);
@@ -4436,12 +4547,21 @@ async function showAccountExpenseDetails(accountName, totalAmount, remainingAmou
 }
 
 // Fonction pour afficher le modal avec les détails des dépenses
-function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCredited) {
+function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCredited, dateOptions = {}) {
     // Créer le modal s'il n'existe pas
     let modal = document.getElementById('expense-details-modal');
     if (!modal) {
         modal = createExpenseDetailsModal();
         document.body.appendChild(modal);
+    }
+    
+    // Pré-remplir les champs de date si fournis
+    if (dateOptions.startDate && dateOptions.endDate) {
+        const modalStartDate = modal.querySelector('#modal-start-date');
+        const modalEndDate = modal.querySelector('#modal-end-date');
+        
+        if (modalStartDate) modalStartDate.value = dateOptions.startDate;
+        if (modalEndDate) modalEndDate.value = dateOptions.endDate;
     }
     // Populer le contenu du modal
     const modalContent = modal.querySelector('.expense-details-content');
@@ -4465,6 +4585,11 @@ function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCre
         const monthlyBalance = parseInt(data.monthly_balance) || 0;
         extraAmounts += `<span style='margin-right:20px;'><strong>Balance du mois:</strong> <span style='color: ${monthlyBalance >= 0 ? 'green' : 'red'}; font-weight: bold;'>${formatCurrency(monthlyBalance)}</span></span>`;
     }
+    
+    if (typeof data.montant_debut_mois !== 'undefined' && data.account_type === 'classique') {
+        const montantDebutMois = parseInt(data.montant_debut_mois) || 0;
+        extraAmounts += `<span style='margin-right:20px;'><strong>Montant début de mois:</strong> <span style='color: ${montantDebutMois >= 0 ? 'green' : 'red'}; font-weight: bold;'>${formatCurrency(montantDebutMois)}</span></span>`;
+    }
     modalContent.querySelector('.total-amount').innerHTML = extraAmounts;
     // Stocker les montants pour le tableau
     window.modalRemainingAmount = remainingAmount;
@@ -4477,7 +4602,9 @@ function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCre
     window.modalAccountData = {
         monthly_credits: data.monthly_credits,
         monthly_balance: data.monthly_balance,
-        net_transfers: data.net_transfers
+        net_transfers: data.net_transfers,
+        montant_debut_mois: data.montant_debut_mois,
+        account_type: data.account_type
     };
     
     console.log('🔍 CLIENT: modalAccountData stocké:', window.modalAccountData);
@@ -14720,4 +14847,334 @@ function copyAuditSqlQuery() {
 function closeSqlModal() {
     const sqlModal = document.getElementById('sql-modal');
     sqlModal.style.display = 'none';
+}
+
+// ===== MODULE MONTANT DÉBUT DE MOIS =====
+
+// Variables globales pour le module
+let montantDebutMoisData = [];
+let currentMontantDebutPeriod = null;
+let hasUnsavedMontantChanges = false;
+
+// Initialiser le module Montant Début de Mois
+function initMontantDebutMoisModule() {
+    console.log('🗓️ CLIENT: Initialisation du module Montant Début de Mois');
+    
+    // Réinitialiser l'état
+    montantDebutMoisData = [];
+    currentMontantDebutPeriod = null;
+    hasUnsavedMontantChanges = false;
+    
+    // Masquer le contenu principal au départ
+    const mainContent = document.getElementById('montant-debut-main-content');
+    if (mainContent) {
+        mainContent.style.display = 'none';
+    }
+    
+    // Définir le mois actuel par défaut
+    const monthInput = document.getElementById('montant-debut-month');
+    if (monthInput) {
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        monthInput.value = currentMonth;
+    }
+    
+    // Configurer les gestionnaires d'événements
+    setupMontantDebutMoisEvents();
+    
+    console.log('✅ CLIENT: Module Montant Début de Mois initialisé');
+}
+
+// Configurer les événements pour le module
+function setupMontantDebutMoisEvents() {
+    // Bouton Charger les données
+    const loadBtn = document.getElementById('load-montant-debut-btn');
+    if (loadBtn) {
+        loadBtn.removeEventListener('click', loadMontantDebutMoisData);
+        loadBtn.addEventListener('click', loadMontantDebutMoisData);
+    }
+    
+    // Bouton Sauvegarder
+    const saveBtn = document.getElementById('save-montant-debut-btn');
+    if (saveBtn) {
+        saveBtn.removeEventListener('click', saveMontantDebutMoisData);
+        saveBtn.addEventListener('click', saveMontantDebutMoisData);
+    }
+    
+    console.log('✅ CLIENT: Événements Montant Début de Mois configurés');
+}
+
+// Charger les données pour le mois sélectionné
+async function loadMontantDebutMoisData() {
+    const monthInput = document.getElementById('montant-debut-month');
+    const loadBtn = document.getElementById('load-montant-debut-btn');
+    const mainContent = document.getElementById('montant-debut-main-content');
+    
+    if (!monthInput.value) {
+        showNotification('Veuillez sélectionner un mois', 'error');
+        return;
+    }
+    
+    // Vérifier s'il y a des changements non sauvegardés
+    if (hasUnsavedMontantChanges) {
+        if (!confirm('Vous avez des modifications non sauvegardées. Êtes-vous sûr de vouloir charger un autre mois ?')) {
+            return;
+        }
+    }
+    
+    const [year, month] = monthInput.value.split('-');
+    
+    loadBtn.disabled = true;
+    loadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Chargement...';
+    
+    try {
+        console.log(`🗓️ CLIENT: Chargement des données pour ${year}-${month}`);
+        
+        const response = await fetch(apiUrl(`/api/montant-debut-mois/${year}/${month}`));
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Erreur lors du chargement');
+        }
+        
+        montantDebutMoisData = data.data;
+        currentMontantDebutPeriod = data.period;
+        hasUnsavedMontantChanges = false;
+        
+        // Mettre à jour l'interface
+        updateMontantDebutMoisHeader();
+        displayMontantDebutMoisTable();
+        await updateMontantDebutMoisStats();
+        
+        // Afficher le contenu principal
+        mainContent.style.display = 'block';
+        
+        console.log(`✅ CLIENT: ${montantDebutMoisData.length} portefeuilles chargés`);
+        showNotification(`Données chargées pour ${getMonthName(parseInt(month))} ${year}`, 'success');
+        
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement montant début mois:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    } finally {
+        loadBtn.disabled = false;
+        loadBtn.innerHTML = '<i class="fas fa-search"></i> Charger les données';
+    }
+}
+
+// Mettre à jour l'en-tête du mois
+function updateMontantDebutMoisHeader() {
+    const monthTitle = document.getElementById('montant-debut-month-title');
+    if (monthTitle && currentMontantDebutPeriod) {
+        const monthName = getMonthName(currentMontantDebutPeriod.month);
+        monthTitle.textContent = `Mois : ${monthName} ${currentMontantDebutPeriod.year}`;
+    }
+}
+
+// Afficher le tableau des portefeuilles
+function displayMontantDebutMoisTable() {
+    const tbody = document.getElementById('montant-debut-tbody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    if (montantDebutMoisData.length === 0) {
+        const row = document.createElement('tr');
+        row.innerHTML = '<td colspan="4" style="text-align: center;">Aucun portefeuille classique trouvé</td>';
+        tbody.appendChild(row);
+        return;
+    }
+    
+    montantDebutMoisData.forEach((wallet, index) => {
+        const row = document.createElement('tr');
+        
+        // Nom du portefeuille
+        const nameCell = document.createElement('td');
+        nameCell.innerHTML = `<span class="wallet-name">${wallet.account_name}</span>`;
+        row.appendChild(nameCell);
+        
+        // Propriétaire
+        const ownerCell = document.createElement('td');
+        const ownerName = wallet.owner_name || wallet.owner_username || 'Non assigné';
+        ownerCell.innerHTML = `<span class="owner-name">${ownerName}</span>`;
+        row.appendChild(ownerCell);
+        
+        // Champ de saisie du montant
+        const amountCell = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.className = 'montant-debut-input';
+        input.value = wallet.montant_debut_mois || 0;
+        input.placeholder = '0';
+        input.setAttribute('data-account-id', wallet.account_id);
+        input.setAttribute('data-index', index);
+        
+        // Événement pour détecter les changements
+        input.addEventListener('input', function() {
+            hasUnsavedMontantChanges = true;
+            updateSaveButtonState();
+            updateMontantColor(this);
+        });
+        
+        // Couleur initiale
+        updateMontantColor(input);
+        
+        amountCell.appendChild(input);
+        row.appendChild(amountCell);
+        
+        // Dernière modification
+        const modifiedCell = document.createElement('td');
+        if (wallet.last_modified) {
+            const date = new Date(wallet.last_modified);
+            const dateStr = date.toLocaleDateString('fr-FR');
+            const timeStr = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            const createdBy = wallet.created_by_name || 'Système';
+            modifiedCell.innerHTML = `
+                <span class="last-modified">${dateStr} à ${timeStr}</span><br>
+                <small>par ${createdBy}</small>
+            `;
+        } else {
+            modifiedCell.innerHTML = '<span class="last-modified">Jamais modifié</span>';
+        }
+        row.appendChild(modifiedCell);
+        
+        tbody.appendChild(row);
+    });
+    
+    console.log(`✅ CLIENT: Tableau de ${montantDebutMoisData.length} portefeuilles affiché`);
+}
+
+// Mettre à jour la couleur du montant selon sa valeur
+function updateMontantColor(input) {
+    const value = parseFloat(input.value) || 0;
+    input.classList.remove('montant-positive', 'montant-negative', 'montant-neutral');
+    
+    if (value > 0) {
+        input.classList.add('montant-positive');
+    } else if (value < 0) {
+        input.classList.add('montant-negative');
+    } else {
+        input.classList.add('montant-neutral');
+    }
+}
+
+// Mettre à jour l'état du bouton sauvegarder
+function updateSaveButtonState() {
+    const saveBtn = document.getElementById('save-montant-debut-btn');
+    if (saveBtn) {
+        saveBtn.disabled = !hasUnsavedMontantChanges;
+        if (hasUnsavedMontantChanges) {
+            saveBtn.innerHTML = '<i class="fas fa-save"></i> Sauvegarder *';
+        } else {
+            saveBtn.innerHTML = '<i class="fas fa-save"></i> Sauvegarder';
+        }
+    }
+}
+
+// Sauvegarder les montants de début de mois
+async function saveMontantDebutMoisData() {
+    if (!currentMontantDebutPeriod) {
+        showNotification('Aucune période sélectionnée', 'error');
+        return;
+    }
+    
+    const saveBtn = document.getElementById('save-montant-debut-btn');
+    const inputs = document.querySelectorAll('.montant-debut-input');
+    
+    // Collecter les données à sauvegarder
+    const montants = [];
+    inputs.forEach(input => {
+        const accountId = parseInt(input.getAttribute('data-account-id'));
+        const montant = parseFloat(input.value) || 0;
+        
+        montants.push({
+            account_id: accountId,
+            montant: montant
+        });
+    });
+    
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sauvegarde...';
+    
+    try {
+        console.log(`🗓️ CLIENT: Sauvegarde de ${montants.length} montants`);
+        
+        const response = await fetch(apiUrl('/api/montant-debut-mois'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                year: currentMontantDebutPeriod.year,
+                month: currentMontantDebutPeriod.month,
+                montants: montants
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Erreur lors de la sauvegarde');
+        }
+        
+        hasUnsavedMontantChanges = false;
+        updateSaveButtonState();
+        
+        // Recharger les données pour mettre à jour les timestamps
+        await loadMontantDebutMoisData();
+        
+        console.log('✅ CLIENT: Montants sauvegardés avec succès');
+        showNotification(data.message, 'success');
+        
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur sauvegarde montant début mois:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    } finally {
+        updateSaveButtonState();
+    }
+}
+
+// Mettre à jour les statistiques
+async function updateMontantDebutMoisStats() {
+    if (!currentMontantDebutPeriod) return;
+    
+    try {
+        const response = await fetch(apiUrl(`/api/montant-debut-mois/stats/${currentMontantDebutPeriod.year}/${currentMontantDebutPeriod.month}`));
+        const data = await response.json();
+        
+        if (response.ok && data.stats) {
+            const configuredCount = document.getElementById('montant-debut-configured-count');
+            const totalAmount = document.getElementById('montant-debut-total');
+            
+            if (configuredCount) {
+                configuredCount.textContent = `${data.stats.portefeuilles_configures}/${data.stats.total_portefeuilles_classiques}`;
+            }
+            
+            if (totalAmount) {
+                totalAmount.textContent = `${data.stats.total_montants.toLocaleString('fr-FR')} FCFA`;
+                
+                // Couleur selon le total
+                if (data.stats.total_montants > 0) {
+                    totalAmount.classList.add('montant-positive');
+                } else if (data.stats.total_montants < 0) {
+                    totalAmount.classList.add('montant-negative');
+                } else {
+                    totalAmount.classList.add('montant-neutral');
+                }
+            }
+            
+            console.log('✅ CLIENT: Statistiques mises à jour');
+        }
+        
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur calcul statistiques:', error);
+    }
+}
+
+// Utilitaire : Obtenir le nom du mois
+function getMonthName(monthNumber) {
+    const months = [
+        'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+        'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'
+    ];
+    return months[monthNumber - 1] || 'Mois inconnu';
 }
