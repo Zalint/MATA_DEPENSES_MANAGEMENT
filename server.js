@@ -6100,7 +6100,7 @@ app.get('/api/montant-debut-mois/:year/:month', requireAdminAuth, async (req, re
             LEFT JOIN users u ON a.user_id = u.id
             LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id
                 AND mdm.year = $1::integer AND mdm.month = $2::integer
-            LEFT JOIN users creator ON mdm.created_by = creator.id
+            LEFT JOIN users creator ON mdm.created_by = creator.username
             WHERE COALESCE(a.account_type, 'classique') = 'classique'
                 AND a.is_active = true
             ORDER BY a.account_name
