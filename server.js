@@ -6086,8 +6086,8 @@ app.get('/api/montant-debut-mois/:year/:month', requireAdminAuth, async (req, re
         console.log(`[MONTANT_DEBUT] Récupération pour ${year}-${month}`);
         
         // Récupérer tous les portefeuilles classiques avec leurs montants de début de mois
-        const query = `
-            SELECT 
+                const query = `
+            SELECT
                 a.id as account_id,
                 a.account_name,
                 u.full_name as owner_name,
@@ -6098,10 +6098,10 @@ app.get('/api/montant-debut-mois/:year/:month', requireAdminAuth, async (req, re
                 creator.full_name as created_by_name
             FROM accounts a
             LEFT JOIN users u ON a.user_id = u.id
-            LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id 
-                AND mdm.year = $1 AND mdm.month = $2
+            LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id
+                AND mdm.year = $1::integer AND mdm.month = $2::integer
             LEFT JOIN users creator ON mdm.created_by = creator.id
-            WHERE a.account_type = 'classique' 
+            WHERE COALESCE(a.account_type, 'classique') = 'classique'
                 AND a.is_active = true
             ORDER BY a.account_name
         `;
