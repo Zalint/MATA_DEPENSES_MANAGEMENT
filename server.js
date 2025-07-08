@@ -7018,11 +7018,9 @@ app.delete('/api/creance/:accountId/clients/:clientId', requireStrictAdminAuth, 
 // Créer la table Cash Bictorys si elle n'existe pas
 async function createCashBictorysTableIfNotExists() {
     try {
-        // Drop the table first to ensure we have the latest schema
-        await pool.query('DROP TABLE IF EXISTS cash_bictorys');
-        
+        // Créer la table uniquement si elle n'existe pas (PRÉSERVE LES DONNÉES)
         await pool.query(`
-            CREATE TABLE cash_bictorys (
+            CREATE TABLE IF NOT EXISTS cash_bictorys (
                 id SERIAL PRIMARY KEY,
                 date DATE NOT NULL,
                 amount INTEGER DEFAULT 0,
@@ -7037,7 +7035,7 @@ async function createCashBictorysTableIfNotExists() {
             )
         `);
 
-        console.log('Table cash_bictorys créée avec succès');
+        console.log('Table cash_bictorys vérifiée/créée avec succès (données préservées)');
     } catch (error) {
         console.error('Erreur création table cash_bictorys:', error);
     }
