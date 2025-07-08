@@ -1249,7 +1249,7 @@ function createChart(containerId, data, type) {
                     montant_debut_mois: ${montantDebutMois}
                   })" 
                         style="cursor: pointer; color: #007bff; text-decoration: underline;" 
-                        title="Cliquer pour voir les détails des dépenses">
+                        title="Type: ${item.account_type || 'N/A'} • Cliquer pour voir les détails">
                     ${label}
                   </span>
                 </td>
