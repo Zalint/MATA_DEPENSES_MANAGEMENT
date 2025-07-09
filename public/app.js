@@ -214,58 +214,14 @@ async function showSection(sectionName) {
             // Rechargement complet comme la première fois
             console.log('🔄 Dashboard: Rechargement complet comme première visite');
             
-            // 1. FORCER la réinitialisation COMPLÈTE de TOUTES les dates
-            const currentDate = new Date();
-            const currentYear = currentDate.getFullYear();
-            const currentMonthNum = currentDate.getMonth() + 1;
-            const currentDay = currentDate.getDate();
-            
-            const startDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-01`;
-            const endDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-${currentDay.toString().padStart(2, '0')}`; // DATE DU JOUR
-            const currentMonth = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}`;
-            
-            // Réinitialiser TOUS les champs de date possibles
-            const dashboardStartDate = document.getElementById('dashboard-start-date');
-            const dashboardEndDate = document.getElementById('dashboard-end-date');
-            const dashboardMonth = document.getElementById('dashboard-month');
-            const snapshotDate = document.getElementById('snapshot-date');
-            
-            console.log('🔍 RECHERCHE DES CHAMPS DE DATE:');
-            console.log('dashboard-start-date trouvé:', !!dashboardStartDate);
-            console.log('dashboard-end-date trouvé:', !!dashboardEndDate);
-            console.log('dashboard-month trouvé:', !!dashboardMonth);
-            console.log('snapshot-date trouvé:', !!snapshotDate);
-            
-            if (dashboardStartDate) {
-                dashboardStartDate.value = startDate;
-                console.log('✅ dashboard-start-date défini à:', startDate);
-            }
-            
-            if (dashboardEndDate) {
-                dashboardEndDate.value = endDate;
-                console.log('✅ dashboard-end-date défini à:', endDate);
-            }
-            
-            if (dashboardMonth) {
-                dashboardMonth.value = currentMonth;
-                console.log('✅ dashboard-month défini à:', currentMonth);
-            }
-            
-            if (snapshotDate) {
-                snapshotDate.value = endDate; // Mettre snapshot à la fin du mois
-                console.log('✅ snapshot-date défini à:', endDate);
-            }
-            
-            // Réinitialiser aussi les variables globales
-            selectedMonth = currentMonth;
-            
-            console.log('🔄 TOUTES LES DATES FORCÉES:', startDate, 'à', endDate);
+            // 1. Réinitialiser les dates avec la fonction dédiée
+            resetDashboardDates();
             
             // 2. Charger toutes les données avec les nouvelles dates
             await loadDashboardData();
-            await loadStockSummary();
+            await loadStockSummary(startDate, endDate);
             await loadStockVivantTotal();
-            await loadStockVivantVariation();
+            await loadStockVivantVariation(startDate, endDate);
             await loadTotalCreances();
             await loadCreancesMois();
             await loadTransfersCard();
@@ -924,11 +880,14 @@ async function loadDashboard() {
         // 1. Vider tous les éléments du dashboard pour forcer un rechargement
         clearDashboardCache();
         
+        // 2. Réinitialiser les dates pour maintenir la cohérence
+        resetDashboardDates();
+        
         // 2. Charger toutes les données dans l'ordre (sans réinitialiser les dates)
         await loadDashboardData();
-        await loadStockSummary();
+        await loadStockSummary(startDate, endDate);
         await loadStockVivantTotal(); // Ajouter le chargement du total stock vivant
-        await loadStockVivantVariation(); // Ajouter le chargement de l'écart mensuel
+        await loadStockVivantVariation(startDate, endDate); // Ajouter le chargement de l'écart mensuel
         await loadTotalCreances(); // Charger le total des créances
         await loadCreancesMois(); // Charger les créances du mois
         await loadTransfersCard(); // Ajouter le chargement des transferts
@@ -986,17 +945,21 @@ function clearDashboardCache() {
 function resetDashboardDates() {
     console.log('📅 Réinitialisation des dates dashboard');
     
-    // Définir les dates par défaut (mois en cours)
+    // Définir les dates par défaut (du 1er du mois à la date du jour)
     const currentDate = new Date();
-    const currentMonth = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
-    const startDate = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-01`;
-    const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
-    const endDate = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${lastDayOfMonth.toString().padStart(2, '0')}`;
+    const currentYear = currentDate.getFullYear();
+    const currentMonthNum = currentDate.getMonth() + 1;
+    const currentDay = currentDate.getDate();
+    
+    const currentMonth = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}`;
+    const startDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-01`;
+    const endDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-${currentDay.toString().padStart(2, '0')}`; // DATE DU JOUR
     
     // Vérifier si les éléments existent avant de les utiliser
     const dashboardStartDate = document.getElementById('dashboard-start-date');
     const dashboardEndDate = document.getElementById('dashboard-end-date');
     const monthInput = document.getElementById('dashboard-month');
+    const snapshotDate = document.getElementById('snapshot-date');
     
     if (dashboardStartDate && dashboardEndDate) {
         dashboardStartDate.value = startDate;
@@ -1007,6 +970,12 @@ function resetDashboardDates() {
     if (monthInput) {
         monthInput.value = currentMonth;
         selectedMonth = currentMonth;
+    }
+    
+    // Synchroniser snapshot-date avec la date du jour
+    if (snapshotDate) {
+        snapshotDate.value = endDate;
+        console.log('📅 Snapshot-date synchronisé:', endDate);
     }
 }
 
@@ -1049,8 +1018,6 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
     console.log('🎯 updateStatsCards: ===== DÉBUT FONCTION =====');
     try {
         console.log('🎯 updateStatsCards: ENTRÉE dans le TRY');
-        console.log('🔄 updateStatsCards: Début mise à jour', { startDate, endDate, cutoffDate });
-        
         // Construire l'URL avec les paramètres de date
         let url = '/api/dashboard/stats-cards';
         const params = new URLSearchParams();
@@ -1063,21 +1030,13 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             url += '?' + params.toString();
         }
         
-        console.log('🌐 updateStatsCards: Appel API vers', url);
-        console.log('🎯 updateStatsCards: AVANT fetch()');
-        
         const response = await fetch(url);
-        
-        console.log('🎯 updateStatsCards: APRÈS fetch(), status:', response.status);
         
         if (!response.ok) {
             throw new Error(`Erreur HTTP ${response.status}: ${response.statusText}`);
         }
         
-        console.log('🎯 updateStatsCards: AVANT response.json()');
         const stats = await response.json();
-        console.log('🎯 updateStatsCards: APRÈS response.json()');
-        console.log('📊 updateStatsCards: Données reçues', stats);
         
         // 🔍 LOG SPÉCIFIQUE POUR ACCOUNT_BREAKDOWN
         if (stats.account_breakdown) {
@@ -1166,7 +1125,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.group('🔍 DÉTAIL CALCUL PL (sans stock + estim. charges)');
             console.log('💰 Cash Bictorys du mois:', formatCurrency(stats.plCalculationDetails.cashBictorys));
             console.log('💳 Créances du mois:', formatCurrency(stats.plCalculationDetails.creances));
-            console.log('📦 Stock Point de Vente:', formatCurrency(stats.plCalculationDetails.stockPointVente));
+            console.log('📦 Écart Stock Mata Mensuel:', formatCurrency(stats.plCalculationDetails.stockPointVente));
             console.log('💸 Cash Burn du mois:', formatCurrency(stats.plCalculationDetails.cashBurn));
             console.log('📊 PL de base =', 
                 formatCurrency(stats.plCalculationDetails.cashBictorys), '+',
@@ -7605,11 +7564,11 @@ async function loadDashboardData() {
         await updateStatsCards(startDate, endDate);
         
         // Charger les données de stock
-        await loadStockSummary();
+        await loadStockSummary(startDate, endDate);
         
         // Charger les données du stock vivant
         await loadStockVivantTotal();
-        await loadStockVivantVariation();
+        await loadStockVivantVariation(startDate, endDate);
         
     } catch (error) {
         console.error('Erreur chargement dashboard:', error);
@@ -7617,18 +7576,33 @@ async function loadDashboardData() {
 }
 
 // Fonction pour charger le résumé du stock
-async function loadStockSummary() {
+async function loadStockSummary(startDate = null, endDate = null) {
     try {
-        const response = await fetch(apiUrl('/api/dashboard/stock-summary'));
+        let url = '/api/dashboard/stock-summary';
+        const params = new URLSearchParams();
+        
+        if (startDate) params.append('start_date', startDate);
+        if (endDate) params.append('end_date', endDate);
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        const response = await fetch(apiUrl(url));
         const stockData = await response.json();
+        
+        // 📦 LOGS DÉTAILLÉS ÉCART STOCK MATA MENSUEL
+        if (stockData.isVariation && endDate) {
+            console.log(`📦 Écart Stock Mata Mensuel: ${stockData.totalStock.toLocaleString('fr-FR')} F CFA (valeur cutoff ${stockData.currentStock?.toLocaleString('fr-FR')} - valeur de ref ${stockData.previousStock?.toLocaleString('fr-FR')})`);
+        }
         
         const stockTotalElement = document.getElementById('stock-total');
         const stockDateElement = document.getElementById('stock-date');
         
         if (stockTotalElement && stockDateElement) {
-            if (stockData.totalStock > 0) {
+            if (stockData.totalStock !== 0) {
                 stockTotalElement.textContent = stockData.totalStock.toLocaleString('fr-FR');
-                stockDateElement.textContent = `(${stockData.formattedDate})`;
+                stockDateElement.textContent = `(${stockData.formattedDate || stockData.latestDate || 'Date inconnue'})`;
             } else {
                 stockTotalElement.textContent = '0';
                 stockDateElement.textContent = stockData.message || 'Aucune donnée';
@@ -7794,12 +7768,17 @@ async function loadMonthlyDashboard(monthYear) {
         
         // Puis charger SEULEMENT les données mensuelles spécifiques
         await loadMonthlySpecificData(monthYear);
-        await loadStockSummary();
+        
+        // Récupérer les dates des filtres pour le stock mata
+        const dashboardStartDate = document.getElementById('dashboard-start-date')?.value;
+        const dashboardEndDate = document.getElementById('dashboard-end-date')?.value;
+        
+        await loadStockSummary(dashboardStartDate, dashboardEndDate);
         await loadStockVivantTotal(); 
         await loadMonthlyCreances(monthYear);
         await loadMonthlyCreancesMois(monthYear);
         await loadMonthlyCashBictorys(monthYear);
-        await loadStockVivantVariation(); // Ajouter pour le mensuel
+        await loadStockVivantVariation(dashboardStartDate, dashboardEndDate); // Ajouter pour le mensuel
         await loadTransfersCard();
         
         // showNotification(`Données chargées pour ${getMonthName(monthYear)}`, 'success');
@@ -8585,7 +8564,7 @@ async function handleStockUpload(e) {
             // Recharger les données et filtres
             await Promise.all([
                 loadStockData(),
-                loadStockSummary() // Actualiser la carte du dashboard
+                loadStockSummary(document.getElementById('dashboard-start-date')?.value, document.getElementById('dashboard-end-date')?.value) // Actualiser la carte du dashboard
             ]);
             
             console.log('🔄 CLIENT: Données rechargées avec succès');
@@ -9943,34 +9922,55 @@ async function loadCreancesMois() {
 }
 
 // Fonction pour charger l'écart de stock vivant mensuel
-async function loadStockVivantVariation() {
+async function loadStockVivantVariation(startDate = null, endDate = null) {
     try {
-        const response = await fetch('/api/stock-vivant/monthly-variation');
+        // Utiliser le même endpoint que le P&L avec cutoff_date
+        let url = '/api/dashboard/stock-vivant-variation';
+        const params = new URLSearchParams();
+        
+        // Utiliser end_date comme cutoff_date (même logique que Stock Mata)
+        if (endDate) {
+            params.append('cutoff_date', endDate);
+        }
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        const response = await fetch(apiUrl(url));
         if (!response.ok) {
             throw new Error('Erreur lors de la récupération de l\'écart stock vivant');
         }
         const data = await response.json();
+        
+        // 🌱 LOGS DÉTAILLÉS ÉCART STOCK VIVANT MENSUEL
+        if (endDate && data.variation_total !== undefined) {
+            console.log(`🌱 Écart Stock Vivant Mensuel: ${data.variation_total.toLocaleString('fr-FR')} F CFA (cutoff_date: ${endDate})`);
+        }
         
         // Mettre à jour l'affichage
         const variationElement = document.getElementById('stock-vivant-variation');
         const periodElement = document.getElementById('stock-variation-period');
         
         if (variationElement && periodElement) {
+            // Utiliser les nouvelles données
+            const variation = data.variation_total || data.variation || 0;
+            
             // Formater la valeur avec couleur selon si c'est positif/négatif
-            variationElement.textContent = formatCurrency(data.variation);
+            variationElement.textContent = formatCurrency(variation);
             
             // Ajouter une classe CSS selon le signe
             variationElement.className = 'stat-value';
-            if (data.variation > 0) {
+            if (variation > 0) {
                 variationElement.classList.add('variation-positive');
-            } else if (data.variation < 0) {
+            } else if (variation < 0) {
                 variationElement.classList.add('variation-negative');
             } else {
                 variationElement.classList.add('variation-neutral');
             }
             
             // Mettre à jour la période d'information
-            periodElement.textContent = data.periodInfo || 'Variation mois actuel vs précédent';
+            periodElement.textContent = data.month_year ? `Mois: ${data.month_year}` : (data.periodInfo || 'Variation mois actuel vs précédent');
         }
     } catch (error) {
         console.error('Erreur chargement écart stock vivant:', error);
