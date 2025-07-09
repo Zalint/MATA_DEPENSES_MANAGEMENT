@@ -1325,30 +1325,51 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             let stockQuery, stockParams;
             
             if (cutoff_date) {
-                // Pour cutoff_date : récupérer la dernière valeur avant ou égale à cette date
-                stockQuery = `
-                    SELECT COALESCE(SUM(stock_soir), 0) as total_stock
+                // Récupérer la dernière date disponible <= cutoff_date
+                const availableDateQuery = `
+                    SELECT MAX(date) as latest_available_date 
                     FROM stock_mata 
-                    WHERE date = (
-                        SELECT MAX(date) 
-                        FROM stock_mata 
-                        WHERE date IS NOT NULL 
-                        AND date <= $1
-                    )
+                    WHERE date <= $1 AND date IS NOT NULL
                 `;
-                stockParams = [referenceDateStr];
-            } else {
-                // Logique actuelle
+                const availableDateResult = await pool.query(availableDateQuery, [referenceDateStr]);
+                const availableDate = availableDateResult.rows[0]?.latest_available_date;
+                
+                if (!availableDate) {
+                    console.log(`📦 STOCK POINT DE VENTE - Aucune donnée stock trouvée <= ${referenceDateStr}`);
+                    stockPointVenteValue = 0;
+                } else {
                 stockQuery = `
-                SELECT COALESCE(SUM(stock_soir), 0) as total_stock
+                        SELECT COALESCE(SUM(stock_soir), 0) as total_stock,
+                               MAX(date) as stock_date
+                    FROM stock_mata 
+                        WHERE date = $1
+                    `;
+                    stockParams = [availableDate];
+                    console.log(`📦 STOCK POINT DE VENTE - Date demandée: ${referenceDateStr}, Date trouvée: ${availableDate.toISOString().split('T')[0]}`);
+                    
+                    const stockResult = await pool.query(stockQuery, stockParams);
+                    stockPointVenteValue = parseFloat(stockResult.rows[0].total_stock) || 0;
+                    const stockDate = stockResult.rows[0].stock_date;
+                    
+                    console.log(`📦 STOCK POINT DE VENTE RÉSULTAT: ${stockPointVenteValue} FCFA (date: ${stockDate || 'N/A'})`);
+                }
+            } else {
+                // Logique actuelle : dernière date disponible
+                stockQuery = `
+                    SELECT COALESCE(SUM(stock_soir), 0) as total_stock,
+                           MAX(date) as stock_date
                 FROM stock_mata 
                 WHERE date = (SELECT MAX(date) FROM stock_mata WHERE date IS NOT NULL)
             `;
                 stockParams = [];
-            }
+                console.log(`📦 STOCK POINT DE VENTE - Dernière date disponible (pas de cutoff)`);
             
             const stockResult = await pool.query(stockQuery, stockParams);
             stockPointVenteValue = parseFloat(stockResult.rows[0].total_stock) || 0;
+                const stockDate = stockResult.rows[0].stock_date;
+                
+                console.log(`📦 STOCK POINT DE VENTE RÉSULTAT: ${stockPointVenteValue} FCFA (date: ${stockDate || 'N/A'})`);
+            }
             
             // Calculer PL = Cash Bictorys + Créances du Mois + Stock Point de Vente - Cash Burn du Mois
             plSansStockCharges = cashBictorysValue + creancesMoisValue + stockPointVenteValue - totalSpent;
@@ -1363,8 +1384,6 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         // 8. Récupérer l'écart de stock vivant mensuel
         let stockVivantVariation = 0;
         try {
-            // Utiliser la même logique que dans la route /api/stock-vivant/monthly-variation
-            // Adapter pour utiliser la cutoff_date si fournie
             const currentDate = cutoff_date ? new Date(cutoff_date) : new Date();
             const currentYear = currentDate.getFullYear();
             const currentMonth = currentDate.getMonth() + 1;
@@ -1376,46 +1395,49 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 previousYear = currentYear - 1;
             }
             
-            // Vérifier s'il y a des données pour le mois en cours
-            const hasCurrentMonthDataQuery = `
-                SELECT COUNT(*) as count
+            console.log(`🌱 CALCUL ÉCART STOCK VIVANT - Date de référence: ${referenceDateStr}`);
+            console.log(`🌱 Mois actuel: ${currentYear}-${currentMonth.toString().padStart(2, '0')}`);
+            console.log(`🌱 Mois précédent: ${previousYear}-${previousMonth.toString().padStart(2, '0')}`);
+            
+            // 1. Récupérer le stock du mois précédent (dernier jour du mois précédent)
+            const previousStockQuery = `
+                SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
+                       MAX(date_stock) as latest_date
                 FROM stock_vivant
                 WHERE date_stock >= $1::date 
-                AND date_stock < ($1::date + INTERVAL '1 month')
+                AND date_stock < $2::date
             `;
-            const hasCurrentMonthDataResult = await pool.query(hasCurrentMonthDataQuery, [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`]);
-            const hasCurrentMonthData = parseInt(hasCurrentMonthDataResult.rows[0]?.count || 0) > 0;
+            const previousStockResult = await pool.query(previousStockQuery, [
+                `${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`,
+                `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`
+            ]);
             
-            // Si pas de données pour le mois en cours, écart = 0
-            if (!hasCurrentMonthData) {
-                stockVivantVariation = 0;
-                console.log(`📊 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (pas de données pour le mois en cours)`);
-            } else {
-                // Stock du mois actuel (jusqu'à la cutoff_date si fournie)
+            // 2. Récupérer le stock le plus proche de la date de cutoff (≤ cutoff_date)
                 let currentStockQuery, currentStockParams;
                 
                 if (cutoff_date) {
-                    // Pour cutoff_date : récupérer le dernier stock avant ou égal à cette date dans le mois
+                // Stock <= à la date de cutoff (le plus proche)
                     currentStockQuery = `
-                        SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
+                           MAX(date_stock) as latest_date
                         FROM stock_vivant
-                        WHERE date_stock = (
+                    WHERE date_stock <= $1::date
+                    AND date_stock = (
                             SELECT MAX(date_stock) 
                             FROM stock_vivant 
-                            WHERE date_stock >= $1::date 
-                            AND date_stock <= $2::date
+                        WHERE date_stock <= $1::date
                         )
                     `;
-                    currentStockParams = [
-                        `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`,
-                        referenceDateStr
-                    ];
+                currentStockParams = [referenceDateStr];
                 } else {
-                    // Logique actuelle
+                // Logique actuelle pour le mois en cours
                     currentStockQuery = `
-                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
+                           MAX(date_stock) as latest_date
                     FROM stock_vivant
-                    WHERE date_stock = (
+                    WHERE date_stock >= $1::date 
+                    AND date_stock < ($1::date + INTERVAL '1 month')
+                    AND date_stock = (
                         SELECT MAX(date_stock) 
                         FROM stock_vivant 
                         WHERE date_stock >= $1::date 
@@ -1427,26 +1449,26 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 
                 const currentStockResult = await pool.query(currentStockQuery, currentStockParams);
                 
-                // Stock du mois précédent
-                const previousStockQuery = `
-                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
-                    FROM stock_vivant
-                    WHERE date_stock = (
-                        SELECT MAX(date_stock) 
-                        FROM stock_vivant 
-                        WHERE date_stock >= $1::date 
-                        AND date_stock < ($1::date + INTERVAL '1 month')
-                    )
-                `;
-                const previousStockResult = await pool.query(previousStockQuery, [`${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`]);
-                
                 const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
                 const previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
-                
-                const referenceStock = previousStock > 0 ? previousStock : currentStock;
-                stockVivantVariation = currentStock - referenceStock;
-                
-                console.log(`📊 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (${currentStock} - ${referenceStock})`);
+            const currentStockDate = currentStockResult.rows[0]?.latest_date;
+            const previousStockDate = previousStockResult.rows[0]?.latest_date;
+            
+            // 3. Calculer l'écart selon les spécifications
+            if (currentStock === 0 && previousStock === 0) {
+                stockVivantVariation = 0;
+                console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (aucune donnée)`);
+            } else if (previousStock === 0) {
+                // Pas de stock du mois précédent, écart = stock actuel
+                stockVivantVariation = currentStock;
+                console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (${currentStock} - 0, pas de données mois précédent)`);
+            } else {
+                // Écart normal = stock actuel - stock mois précédent
+                stockVivantVariation = currentStock - previousStock;
+                console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA`);
+                console.log(`   📅 Stock actuel (${currentStockDate || 'N/A'}): ${currentStock} FCFA`);
+                console.log(`   📅 Stock mois précédent (${previousStockDate || 'N/A'}): ${previousStock} FCFA`);
+                console.log(`   ➡️  Écart: ${currentStock} - ${previousStock} = ${stockVivantVariation} FCFA`);
             }
             
         } catch (error) {
@@ -1461,16 +1483,18 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             let startOfMonth, endOfMonth;
             
             if (cutoff_date) {
-                // Utiliser le mois de la cutoff_date
+                // Utiliser le mois de la cutoff_date - IMPORTANT: du 1er du mois jusqu'à cutoff_date inclus
                 const refDate = new Date(cutoff_date);
                 const year = refDate.getFullYear();
                 const month = refDate.getMonth() + 1;
                 startOfMonth = new Date(year, month - 1, 1);
                 endOfMonth = new Date(cutoff_date);
+                console.log(`🚚 CALCUL LIVRAISONS PARTENAIRES - Cutoff_date utilisée: ${cutoff_date}`);
             } else if (start_date && end_date) {
                 // Utiliser les dates de filtre
                 startOfMonth = new Date(start_date);
                 endOfMonth = new Date(end_date);
+                console.log(`🚚 CALCUL LIVRAISONS PARTENAIRES - Dates de filtre utilisées`);
             } else {
                 // Si pas de dates, utiliser le mois en cours
                 const now = new Date();
@@ -1478,14 +1502,18 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 const month = now.getMonth() + 1;
                 startOfMonth = new Date(year, month - 1, 1);
                 endOfMonth = now;
+                console.log(`🚚 CALCUL LIVRAISONS PARTENAIRES - Mois en cours utilisé`);
             }
 
             const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
             const endOfMonthStr = endOfMonth.toISOString().split('T')[0];
 
+            console.log(`🚚 Période de calcul des livraisons: ${startOfMonthStr} au ${endOfMonthStr} (INCLUS)`);
+
             // Récupérer les livraisons partenaires validées du mois
             const livraisonsQuery = `
-                SELECT COALESCE(SUM(pd.amount), 0) as total_livraisons
+                SELECT COALESCE(SUM(pd.amount), 0) as total_livraisons,
+                       COUNT(pd.id) as total_deliveries
                 FROM partner_deliveries pd
                 JOIN accounts a ON pd.account_id = a.id
                 WHERE pd.delivery_date >= $1 
@@ -1498,10 +1526,28 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
 
             const livraisonsResult = await pool.query(livraisonsQuery, [startOfMonthStr, endOfMonthStr]);
             livraisonsPartenaires = parseInt(livraisonsResult.rows[0].total_livraisons) || 0;
+            const totalDeliveries = parseInt(livraisonsResult.rows[0].total_deliveries) || 0;
             
-            console.log(`🚚 Livraisons partenaires du mois (${startOfMonthStr} au ${endOfMonthStr}): ${livraisonsPartenaires} FCFA`);
-            console.log(`🔍 Requête SQL livraisons: ${livraisonsQuery.replace(/\s+/g, ' ')}`);
-            console.log(`📅 Paramètres: startDate=${startOfMonthStr}, endDate=${endOfMonthStr}`);
+            console.log(`🚚 RÉSULTAT: ${totalDeliveries} livraisons pour un total de ${livraisonsPartenaires} FCFA`);
+            
+            // Debug: vérifier toutes les livraisons dans la période (même non validées)
+            const allDeliveriesDebugResult = await pool.query(`
+                SELECT pd.id, pd.delivery_date, pd.amount, pd.validation_status, pd.is_validated, a.account_name
+                FROM partner_deliveries pd
+                JOIN accounts a ON pd.account_id = a.id
+                WHERE pd.delivery_date >= $1 AND pd.delivery_date <= $2
+                ORDER BY pd.delivery_date DESC
+            `, [startOfMonthStr, endOfMonthStr]);
+            
+            console.log(`📦 DEBUG - Total livraisons dans la période (toutes): ${allDeliveriesDebugResult.rows.length}`);
+            if (allDeliveriesDebugResult.rows.length > 0) {
+                allDeliveriesDebugResult.rows.forEach(delivery => {
+                    const statusIcon = (delivery.validation_status === 'fully_validated' && delivery.is_validated) ? '✅' : '❌';
+                    console.log(`   ${statusIcon} ${delivery.delivery_date}: ${delivery.amount} FCFA (${delivery.validation_status}, validated: ${delivery.is_validated}) - ${delivery.account_name}`);
+                });
+            } else {
+                console.log(`📦 Aucune livraison trouvée dans la période ${startOfMonthStr} - ${endOfMonthStr}`);
+            }
             
             // Debug: vérifier les comptes partenaires
             const partnerAccountsResult = await pool.query(`
@@ -1510,22 +1556,17 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 WHERE account_type = 'partenaire' AND is_active = true
             `);
             console.log(`👥 Comptes partenaires actifs: ${partnerAccountsResult.rows.length}`);
-            partnerAccountsResult.rows.forEach(account => {
-                console.log(`   - ${account.account_name} (ID: ${account.id})`);
-            });
             
-            // Debug: vérifier les livraisons dans la période
-            const deliveriesDebugResult = await pool.query(`
-                SELECT pd.id, pd.delivery_date, pd.amount, pd.validation_status, pd.is_validated, a.account_name
+            // Debug: vérifier s'il y a des livraisons dans d'autres périodes
+            const otherPeriodsResult = await pool.query(`
+                SELECT COUNT(*) as count, MIN(delivery_date) as earliest, MAX(delivery_date) as latest
                 FROM partner_deliveries pd
                 JOIN accounts a ON pd.account_id = a.id
-                WHERE pd.delivery_date >= $1 AND pd.delivery_date <= $2
-                ORDER BY pd.delivery_date DESC
-            `, [startOfMonthStr, endOfMonthStr]);
-            console.log(`📦 Livraisons dans la période: ${deliveriesDebugResult.rows.length}`);
-            deliveriesDebugResult.rows.forEach(delivery => {
-                console.log(`   - ${delivery.delivery_date}: ${delivery.amount} FCFA (${delivery.validation_status}, validated: ${delivery.is_validated}) - ${delivery.account_name}`);
-            });
+                WHERE a.account_type = 'partenaire' AND a.is_active = true
+            `);
+            if (otherPeriodsResult.rows[0].count > 0) {
+                console.log(`📊 Total livraisons dans toute la base: ${otherPeriodsResult.rows[0].count} (du ${otherPeriodsResult.rows[0].earliest} au ${otherPeriodsResult.rows[0].latest})`);
+            }
             
         } catch (error) {
             console.error('Erreur calcul livraisons partenaires pour PL:', error);
@@ -1702,7 +1743,45 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
 // Route pour récupérer les données de stock pour le dashboard
 app.get('/api/dashboard/stock-summary', requireAuth, async (req, res) => {
     try {
-        // Récupérer la dernière date disponible dans la table stock_mata
+        const { cutoff_date } = req.query;
+        
+        console.log(`📦 SERVER: Stock summary avec cutoff_date: ${cutoff_date}`);
+        
+        let stockQuery, stockParams, latestDate;
+        
+        if (cutoff_date && /^\d{4}-\d{2}-\d{2}$/.test(cutoff_date)) {
+            // Récupérer la dernière date disponible <= cutoff_date
+            const availableDateQuery = `
+                SELECT MAX(date) as latest_available_date 
+                FROM stock_mata 
+                WHERE date <= $1 AND date IS NOT NULL
+            `;
+            const availableDateResult = await pool.query(availableDateQuery, [cutoff_date]);
+            const availableDate = availableDateResult.rows[0]?.latest_available_date;
+            
+            if (!availableDate) {
+                console.log(`📦 SERVER: Aucune donnée stock trouvée <= ${cutoff_date}`);
+                return res.json({
+                    totalStock: 0,
+                    latestDate: null,
+                    message: `Aucune donnée de stock trouvée pour la date ${cutoff_date} ou antérieure`
+                });
+            }
+            
+            stockQuery = `
+                SELECT 
+                    COALESCE(SUM(stock_soir), 0) as total_stock,
+                    COUNT(*) as total_entries,
+                    COUNT(DISTINCT point_de_vente) as total_points,
+                    COUNT(DISTINCT produit) as total_products,
+                    MAX(date) as stock_date
+                FROM stock_mata 
+                WHERE date = $1
+            `;
+            stockParams = [availableDate];
+            console.log(`📦 SERVER: Date demandée: ${cutoff_date}, Date trouvée: ${availableDate.toISOString().split('T')[0]}`);
+        } else {
+            // Logique actuelle : dernière date disponible
         const latestDateQuery = `
             SELECT MAX(date) as latest_date 
             FROM stock_mata 
@@ -1718,29 +1797,46 @@ app.get('/api/dashboard/stock-summary', requireAuth, async (req, res) => {
             });
         }
         
-        const latestDate = latestDateResult.rows[0].latest_date;
+            latestDate = latestDateResult.rows[0].latest_date;
         
-        // Calculer la somme des stocks du soir pour la dernière date
-        const stockSummaryQuery = `
+            stockQuery = `
             SELECT 
                 COALESCE(SUM(stock_soir), 0) as total_stock,
                 COUNT(*) as total_entries,
                 COUNT(DISTINCT point_de_vente) as total_points,
-                COUNT(DISTINCT produit) as total_products
+                    COUNT(DISTINCT produit) as total_products,
+                    MAX(date) as stock_date
             FROM stock_mata 
             WHERE date = $1
         `;
-        const stockSummaryResult = await pool.query(stockSummaryQuery, [latestDate]);
+            stockParams = [latestDate];
+            console.log(`📦 SERVER: Utilisation dernière date disponible: ${latestDate}`);
+        }
+        
+        const stockSummaryResult = await pool.query(stockQuery, stockParams);
+        
+        if (stockSummaryResult.rows.length === 0) {
+            console.log(`📦 SERVER: Aucune donnée stock trouvée`);
+            return res.json({
+                totalStock: 0,
+                latestDate: null,
+                message: cutoff_date ? `Aucune donnée de stock trouvée pour ${cutoff_date}` : 'Aucune donnée de stock disponible'
+            });
+        }
         
         const summary = stockSummaryResult.rows[0];
+        const stockDate = summary.stock_date;
+        
+        console.log(`📦 SERVER RÉSULTAT: Stock = ${summary.total_stock} FCFA (date: ${stockDate})`);
         
         res.json({
             totalStock: parseFloat(summary.total_stock),
-            latestDate: latestDate,
+            latestDate: stockDate,
             totalEntries: parseInt(summary.total_entries),
             totalPoints: parseInt(summary.total_points),
             totalProducts: parseInt(summary.total_products),
-            formattedDate: new Date(latestDate).toLocaleDateString('fr-FR')
+            formattedDate: new Date(stockDate).toLocaleDateString('fr-FR'),
+            cutoff_date: cutoff_date || null
         });
         
     } catch (error) {
@@ -5999,6 +6095,98 @@ app.get('/api/stock-vivant/total', requireAuth, async (req, res) => {
     }
 });
 
+// Route pour récupérer le total général du stock vivant avec cutoff_date
+app.get('/api/dashboard/stock-vivant-total', requireAuth, async (req, res) => {
+    try {
+        const { cutoff_date } = req.query;
+        
+        console.log(`🌱 SERVER: Récupération stock vivant total avec cutoff_date: ${cutoff_date}`);
+        
+        let stockQuery, stockParams, latestDate;
+        
+        if (cutoff_date && /^\d{4}-\d{2}-\d{2}$/.test(cutoff_date)) {
+            // Récupérer le stock <= à la cutoff_date (le plus proche)
+            const latestDateQuery = `
+                SELECT MAX(date_stock) as latest_date 
+                FROM stock_vivant 
+                WHERE date_stock IS NOT NULL 
+                AND date_stock <= $1::date
+            `;
+            const latestDateResult = await pool.query(latestDateQuery, [cutoff_date]);
+            latestDate = latestDateResult.rows[0]?.latest_date;
+            
+            if (!latestDate) {
+                console.log(`🌱 SERVER: Aucune donnée stock vivant trouvée <= ${cutoff_date}`);
+                return res.json({
+                    totalStock: 0,
+                    formatted: '0 FCFA',
+                    latest_date: null,
+                    cutoff_date: cutoff_date,
+                    message: `Aucune donnée de stock vivant trouvée <= ${cutoff_date}`
+                });
+            }
+            
+            stockQuery = `
+                SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                FROM stock_vivant
+                WHERE date_stock = $1
+            `;
+            stockParams = [latestDate];
+            console.log(`🌱 SERVER: Utilisation de la date ${latestDate} (≤ ${cutoff_date})`);
+        } else {
+            // Récupérer la dernière date disponible
+            const latestDateQuery = `
+                SELECT MAX(date_stock) as latest_date 
+                FROM stock_vivant 
+                WHERE date_stock IS NOT NULL
+            `;
+            const latestDateResult = await pool.query(latestDateQuery);
+            latestDate = latestDateResult.rows[0]?.latest_date;
+            
+            if (!latestDate) {
+                return res.json({
+                    totalStock: 0,
+                    formatted: '0 FCFA',
+                    latest_date: null,
+                    message: 'Aucune donnée de stock vivant disponible'
+                });
+            }
+            
+            stockQuery = `
+                SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock
+                FROM stock_vivant
+                WHERE date_stock = $1
+            `;
+            stockParams = [latestDate];
+            console.log(`🌱 SERVER: Utilisation de la dernière date disponible: ${latestDate}`);
+        }
+        
+        // Calculer la somme totale
+        const totalResult = await pool.query(stockQuery, stockParams);
+        const totalStock = Math.round(totalResult.rows[0]?.total_stock || 0);
+        
+        const formattedDate = latestDate.toLocaleDateString('fr-FR', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+        
+        console.log(`🌱 SERVER RÉSULTAT: Stock vivant total = ${totalStock} FCFA (date: ${latestDate})`);
+        
+        res.json({
+            totalStock,
+            formatted: `${totalStock.toLocaleString()} FCFA`,
+            latest_date: formattedDate,
+            cutoff_date: cutoff_date || null,
+            message: 'Total stock vivant récupéré avec succès'
+        });
+        
+    } catch (error) {
+        console.error('Erreur récupération total stock vivant avec cutoff:', error);
+        res.status(500).json({ error: 'Erreur lors de la récupération du total stock vivant' });
+    }
+});
+
 // Route pour récupérer l'écart de stock vivant mensuel
 app.get('/api/stock-vivant/monthly-variation', requireAuth, async (req, res) => {
     try {
@@ -7923,99 +8111,97 @@ app.get('/api/dashboard/stock-vivant-variation', requireAuth, async (req, res) =
             return res.status(400).json({ error: 'Format cutoff_date invalide. Utiliser YYYY-MM-DD' });
         }
 
-        // Extraire le mois de la date de cutoff
-        const date = new Date(cutoff_date);
-        const monthYear = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}`;
-        const [year, monthNum] = monthYear.split('-').map(Number);
+        // Utiliser la MÊME logique que dans stats-cards
+        const currentDate = new Date(cutoff_date);
+        const currentYear = currentDate.getFullYear();
+        const currentMonth = currentDate.getMonth() + 1;
         
-        // Calculer le début du mois
-        const startOfMonth = new Date(year, monthNum - 1, 1);
-        const startDateStr = startOfMonth.toISOString().split('T')[0];
+        let previousYear = currentYear;
+        let previousMonth = currentMonth - 1;
+        if (previousMonth === 0) {
+            previousMonth = 12;
+            previousYear = currentYear - 1;
+        }
         
-        console.log(`🌱 SERVER: Calcul variation stock vivant pour ${monthYear} jusqu'au ${cutoff_date}`);
-
-        // Récupérer la variation du stock vivant pour le mois
-        // Pour l'instant, on va simuler ou récupérer depuis une table si elle existe
-        const stockVariationResult = await pool.query(`
-            SELECT 
-                COALESCE(SUM(CASE 
-                    WHEN operation_type = 'entree' THEN amount 
-                    WHEN operation_type = 'sortie' THEN -amount 
-                    ELSE 0 
-                END), 0) as variation_totale
+        console.log(`🌱 CALCUL ÉCART STOCK VIVANT CARD - Date de référence: ${cutoff_date}`);
+        console.log(`🌱 Mois actuel: ${currentYear}-${currentMonth.toString().padStart(2, '0')}`);
+        console.log(`🌱 Mois précédent: ${previousYear}-${previousMonth.toString().padStart(2, '0')}`);
+        
+        // 1. Récupérer le stock du mois précédent (dernier jour du mois précédent)
+        const previousStockQuery = `
+            SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
+                   MAX(date_stock) as latest_date
             FROM stock_vivant 
-            WHERE operation_date >= $1 
-            AND operation_date <= $2
-        `, [startDateStr, cutoff_date]).catch(() => {
-            // Si la table n'existe pas, retourner une valeur par défaut
-            return { rows: [{ variation_totale: 325000 }] }; // Valeur exemple de vos logs
-        });
+            WHERE date_stock >= $1::date 
+            AND date_stock < $2::date
+        `;
+        const previousStockResult = await pool.query(previousStockQuery, [
+            `${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`,
+            `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`
+        ]);
+        
+        // 2. Récupérer le stock le plus proche de la date de cutoff (≤ cutoff_date)
+        const currentStockQuery = `
+            SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
+                   MAX(date_stock) as latest_date
+                FROM stock_vivant 
+            WHERE date_stock <= $1::date
+            AND date_stock = (
+                SELECT MAX(date_stock) 
+                FROM stock_vivant 
+                WHERE date_stock <= $1::date
+            )
+        `;
+        const currentStockResult = await pool.query(currentStockQuery, [cutoff_date]);
+        
+        const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
+        const previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
+        const currentStockDate = currentStockResult.rows[0]?.latest_date;
+        const previousStockDate = previousStockResult.rows[0]?.latest_date;
+        
+        // 3. Calculer l'écart selon les spécifications
+        let variationTotale = 0;
+        if (currentStock === 0 && previousStock === 0) {
+            variationTotale = 0;
+            console.log(`🌱 Écart Stock Vivant Mensuel CARD: ${variationTotale} FCFA (aucune donnée)`);
+        } else if (previousStock === 0) {
+            // Pas de stock du mois précédent, écart = stock actuel
+            variationTotale = currentStock;
+            console.log(`🌱 Écart Stock Vivant Mensuel CARD: ${variationTotale} FCFA (${currentStock} - 0, pas de données mois précédent)`);
+        } else {
+            // Écart normal = stock actuel - stock mois précédent
+            variationTotale = currentStock - previousStock;
+            console.log(`🌱 Écart Stock Vivant Mensuel CARD: ${variationTotale} FCFA`);
+            console.log(`   📅 Stock actuel (${currentStockDate || 'N/A'}): ${currentStock} FCFA`);
+            console.log(`   📅 Stock mois précédent (${previousStockDate || 'N/A'}): ${previousStock} FCFA`);
+            console.log(`   ➡️  Écart: ${currentStock} - ${previousStock} = ${variationTotale} FCFA`);
+        }
 
-        const variationTotale = parseInt(stockVariationResult.rows[0]?.variation_totale) || 325000;
-
-        // Si debug_details est demandé, calculer le détail jour par jour
+        // Si debug_details est demandé, créer des détails simplifiés basés sur les vraies données
         let stockVariationDetails = null;
         if (req.query.debug_details === 'true') {
-            // Simuler des données jour par jour pour l'écart de stock vivant
-            const dailyStockResult = await pool.query(`
-                SELECT 
-                    operation_date::date as date,
-                    SUM(CASE 
-                        WHEN operation_type = 'entree' THEN amount 
-                        WHEN operation_type = 'sortie' THEN -amount 
-                        ELSE 0 
-                    END) as daily_variation,
-                    COUNT(*) as operation_count
-                FROM stock_vivant 
-                WHERE operation_date >= $1 
-                AND operation_date <= $2
-                GROUP BY operation_date::date
-                ORDER BY operation_date::date
-            `, [startDateStr, cutoff_date]).catch(() => {
-                // Si la table n'existe pas, simuler des données
-                return { 
-                    rows: [
-                        { 
-                            date: new Date(cutoff_date), 
-                            daily_variation: variationTotale, 
-                            operation_count: 1 
-                        }
-                    ] 
-                };
-            });
-
-            // Calculer les variations cumulatives
-            let cumulativeVariation = 0;
-            let stockAmountStart = 4858000; // Valeur exemple
-            let currentStockAmount = stockAmountStart;
-
-            const dailyBreakdown = dailyStockResult.rows.map((row, index) => {
-                const dailyVar = parseInt(row.daily_variation) || 0;
-                cumulativeVariation += dailyVar;
-                currentStockAmount += dailyVar;
-                
-                return {
-                    date: row.date.toISOString().split('T')[0],
-                    stockAmount: currentStockAmount,
-                    dailyVariation: dailyVar,
-                    cumulativeVariation: cumulativeVariation,
-                    note: index === 0 ? 'Début du mois' : 
-                          dailyVar > 0 ? `Entrée de stock` : 
-                          dailyVar < 0 ? `Sortie de stock` : 'Aucun mouvement'
-                };
-            });
+            // Créer des détails basés sur les vraies données calculées
+            const monthYear = `${currentYear}-${currentMonth.toString().padStart(2, '0')}`;
+            const startDateStr = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`;
 
             stockVariationDetails = {
                 startDate: startDateStr,
                 endDate: cutoff_date,
-                totalDays: dailyBreakdown.length,
-                startStockAmount: stockAmountStart,
-                finalStockAmount: currentStockAmount,
+                totalDays: 1, // Simplifié
+                startStockAmount: previousStock,
+                finalStockAmount: currentStock,
                 totalVariation: variationTotale,
-                dailyBreakdown: dailyBreakdown
+                dailyBreakdown: [{
+                    date: cutoff_date,
+                    stockAmount: currentStock,
+                    dailyVariation: variationTotale,
+                    cumulativeVariation: variationTotale,
+                    note: 'Début du mois'
+                }]
             };
         }
 
+        const monthYear = `${currentYear}-${currentMonth.toString().padStart(2, '0')}`;
         const responseData = {
             variation_total: variationTotale,
             formatted: `${variationTotale.toLocaleString('fr-FR')} FCFA`,

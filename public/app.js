@@ -8493,9 +8493,19 @@ function openStockModal(stockId = null) {
         loadStockItemForEdit(stockId);
     } else {
         document.getElementById('stock-modal-title').textContent = 'Ajouter une entrée';
-        document.getElementById('stock-modal-form').reset();
+        document.getElementById('stock-form').reset();
         document.getElementById('stock-id').value = '';
+        
+        // Set today's date as default
+        const today = new Date().toISOString().split('T')[0];
+        document.getElementById('stock-date').value = today;
     }
+    
+    // Initialize automatic calculation when modal opens
+    setTimeout(() => {
+        initializeStockCalculation();
+        calculateVenteTheorique(); // Calculate initial value
+    }, 100);
 }
 
 function closeStockModal() {
@@ -8512,11 +8522,16 @@ async function loadStockItemForEdit(stockId) {
         const item = await response.json();
         document.getElementById('stock-id').value = item.id;
         document.getElementById('stock-date').value = new Date(item.date).toISOString().split('T')[0];
-        document.getElementById('stock-point-de-vente').value = item.point_de_vente;
+        document.getElementById('stock-point-vente').value = item.point_de_vente;
         document.getElementById('stock-produit').value = item.produit;
         document.getElementById('stock-matin').value = item.stock_matin;
-        document.getElementById('stock-soir-input').value = item.stock_soir;
+        document.getElementById('stock-soir').value = item.stock_soir;
         document.getElementById('stock-transfert').value = item.transfert;
+        
+        // Calculate theoretical sales after loading data
+        setTimeout(() => {
+            calculateVenteTheorique();
+        }, 50);
     } catch (error) {
         showStockNotification(error.message, 'error');
     }
@@ -8574,7 +8589,31 @@ async function deleteStockItem(stockId) {
     }
 }
 
-// La fonction calculateVenteTheorique a été supprimée car la colonne "Vente Théorique" n'est plus affichée
+// Function to calculate theoretical sales automatically
+function calculateVenteTheorique() {
+    const stockMatin = parseFloat(document.getElementById('stock-matin').value) || 0;
+    const stockSoir = parseFloat(document.getElementById('stock-soir').value) || 0;
+    const transfert = parseFloat(document.getElementById('stock-transfert').value) || 0;
+    
+    // Formula: Stock Matin - Stock Soir + Transfert
+    const venteTheorique = stockMatin - stockSoir + transfert;
+    
+    const venteTheoriqueField = document.getElementById('stock-vente-theorique');
+    if (venteTheoriqueField) {
+        venteTheoriqueField.value = venteTheorique.toFixed(2);
+    }
+}
+
+// Add event listeners for automatic calculation
+function initializeStockCalculation() {
+    const stockMatin = document.getElementById('stock-matin');
+    const stockSoir = document.getElementById('stock-soir');
+    const stockTransfert = document.getElementById('stock-transfert');
+    
+    if (stockMatin) stockMatin.addEventListener('input', calculateVenteTheorique);
+    if (stockSoir) stockSoir.addEventListener('input', calculateVenteTheorique);
+    if (stockTransfert) stockTransfert.addEventListener('input', calculateVenteTheorique);
+}
 
 async function toggleStockStats() {
     const statsContainer = document.getElementById('stock-stats-container');
@@ -10222,9 +10261,9 @@ async function loadStockSummaryWithCutoff(cutoffDate) {
             const stockDateElement = document.getElementById('stock-date');
             
             if (stockTotalElement && stockDateElement) {
-                stockTotalElement.textContent = data.total_value || '0';
-                stockDateElement.textContent = data.latest_date ? `(${data.latest_date})` : 'Aucune date';
-                console.log(`✅ CLIENT: Stock summary mis à jour avec cutoff ${cutoffDate}: ${data.total_value}`);
+                stockTotalElement.textContent = data.totalStock ? data.totalStock.toLocaleString('fr-FR') : '0';
+                stockDateElement.textContent = data.latestDate ? `(${data.formattedDate || data.latestDate})` : 'Aucune date';
+                console.log(`✅ CLIENT: Stock summary mis à jour avec cutoff ${cutoffDate}: ${data.totalStock} FCFA`);
             }
         } else {
             console.log(`📊 CLIENT: Stock summary avec cutoff non disponible: ${data.error}`);

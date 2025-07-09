@@ -3,7 +3,7 @@ const { Client } = require('pg');
 const client = new Client({
   host: 'localhost',
   port: 5432,
-  database: 'mata_expenses_db',
+      database: 'depenses_management',
   user: 'zalint',
   password: 'bonea2024',
 });
