@@ -1381,10 +1381,12 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             plSansStockCharges = 0;
         }
         
-        // 8. Récupérer l'écart de stock vivant mensuel
+        // 8. Récupérer l'écart de stock vivant mensuel (UTILISE LA MÊME LOGIQUE QUE LA CARTE)
         let stockVivantVariation = 0;
         try {
-            const currentDate = cutoff_date ? new Date(cutoff_date) : new Date();
+            if (cutoff_date) {
+                // Utiliser la MÊME logique que dans /api/dashboard/stock-vivant-variation
+                const currentDate = new Date(cutoff_date);
             const currentYear = currentDate.getFullYear();
             const currentMonth = currentDate.getMonth() + 1;
             
@@ -1395,80 +1397,71 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 previousYear = currentYear - 1;
             }
             
-            console.log(`🌱 CALCUL ÉCART STOCK VIVANT - Date de référence: ${referenceDateStr}`);
-            console.log(`🌱 Mois actuel: ${currentYear}-${currentMonth.toString().padStart(2, '0')}`);
-            console.log(`🌱 Mois précédent: ${previousYear}-${previousMonth.toString().padStart(2, '0')}`);
-            
-            // 1. Récupérer le stock du mois précédent (dernier jour du mois précédent)
-            const previousStockQuery = `
-                SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
-                       MAX(date_stock) as latest_date
-                FROM stock_vivant
-                WHERE date_stock >= $1::date 
-                AND date_stock < $2::date
-            `;
-            const previousStockResult = await pool.query(previousStockQuery, [
-                `${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`,
-                `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`
-            ]);
-            
-            // 2. Récupérer le stock le plus proche de la date de cutoff (≤ cutoff_date)
-                let currentStockQuery, currentStockParams;
+                console.log(`🌱 CALCUL ÉCART STOCK VIVANT PL - Date de référence: ${cutoff_date}`);
+                console.log(`🌱 Mois actuel: ${currentYear}-${currentMonth.toString().padStart(2, '0')}`);
+                console.log(`🌱 Mois précédent: ${previousYear}-${previousMonth.toString().padStart(2, '0')}`);
                 
-                if (cutoff_date) {
-                // Stock <= à la date de cutoff (le plus proche)
-                    currentStockQuery = `
-                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
-                           MAX(date_stock) as latest_date
+                // 1. Récupérer le stock de la dernière date disponible AVANT le mois actuel
+                let previousStock = 0;
+                let previousStockDate = null;
+                
+                const firstDayOfCurrentMonth = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`;
+                
+                // Chercher la dernière date disponible avant le mois actuel
+                const lastDateBeforeCurrentMonth = await pool.query(`
+                    SELECT MAX(date_stock) as last_date
                         FROM stock_vivant
-                    WHERE date_stock <= $1::date
-                    AND date_stock = (
-                            SELECT MAX(date_stock) 
+                    WHERE date_stock < $1::date
+                `, [firstDayOfCurrentMonth]);
+                
+                if (lastDateBeforeCurrentMonth.rows[0]?.last_date) {
+                    // Il y a des données avant le mois actuel, récupérer le stock pour cette date
+                    const previousStockResult = await pool.query(`
+                        SELECT SUM(quantite * prix_unitaire * (1 - COALESCE(decote, 0))) as total_stock,
+                               date_stock as latest_date
                             FROM stock_vivant 
-                        WHERE date_stock <= $1::date
-                        )
-                    `;
-                currentStockParams = [referenceDateStr];
+                        WHERE date_stock = $1
+                    `, [lastDateBeforeCurrentMonth.rows[0].last_date]);
+                    
+                    previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
+                    previousStockDate = previousStockResult.rows[0]?.latest_date;
+                    
+                    console.log(`🌱 Stock mois précédent trouvé (${previousStockDate?.toISOString().split('T')[0]}): ${previousStock.toLocaleString()} FCFA`);
                 } else {
-                // Logique actuelle pour le mois en cours
-                    currentStockQuery = `
-                    SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
+                    // Aucune donnée avant le mois actuel
+                    previousStock = 0;
+                    previousStockDate = null;
+                    console.log(`🌱 Aucune donnée stock vivant trouvée avant ${firstDayOfCurrentMonth} → Stock précédent = 0 FCFA`);
+                }
+                
+                // 2. Récupérer le stock le plus proche de la date de cutoff (≤ cutoff_date)
+                const currentStockQuery = `
+                    SELECT SUM(quantite * prix_unitaire * (1 - COALESCE(decote, 0))) as total_stock,
                            MAX(date_stock) as latest_date
                     FROM stock_vivant
-                    WHERE date_stock >= $1::date 
-                    AND date_stock < ($1::date + INTERVAL '1 month')
+                    WHERE date_stock <= $1::date
                     AND date_stock = (
                         SELECT MAX(date_stock) 
                         FROM stock_vivant 
-                        WHERE date_stock >= $1::date 
-                        AND date_stock < ($1::date + INTERVAL '1 month')
+                        WHERE date_stock <= $1::date
                     )
                 `;
-                    currentStockParams = [`${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`];
-                }
-                
-                const currentStockResult = await pool.query(currentStockQuery, currentStockParams);
+                const currentStockResult = await pool.query(currentStockQuery, [cutoff_date]);
                 
                 const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
-                const previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
-            const currentStockDate = currentStockResult.rows[0]?.latest_date;
-            const previousStockDate = previousStockResult.rows[0]?.latest_date;
-            
-            // 3. Calculer l'écart selon les spécifications
-            if (currentStock === 0 && previousStock === 0) {
-                stockVivantVariation = 0;
-                console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (aucune donnée)`);
-            } else if (previousStock === 0) {
-                // Pas de stock du mois précédent, écart = stock actuel
-                stockVivantVariation = currentStock;
-                console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA (${currentStock} - 0, pas de données mois précédent)`);
-            } else {
-                // Écart normal = stock actuel - stock mois précédent
+                const currentStockDate = currentStockResult.rows[0]?.latest_date;
+                
+                // 3. Calculer l'écart : stock actuel - stock précédent
                 stockVivantVariation = currentStock - previousStock;
-                console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA`);
-                console.log(`   📅 Stock actuel (${currentStockDate || 'N/A'}): ${currentStock} FCFA`);
-                console.log(`   📅 Stock mois précédent (${previousStockDate || 'N/A'}): ${previousStock} FCFA`);
-                console.log(`   ➡️  Écart: ${currentStock} - ${previousStock} = ${stockVivantVariation} FCFA`);
+                
+                console.log(`🌱 Écart Stock Vivant Mensuel PL: ${stockVivantVariation.toLocaleString()} FCFA`);
+                console.log(`   📅 Stock actuel (${currentStockDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStock.toLocaleString()} FCFA`);
+                console.log(`   📅 Stock précédent (${previousStockDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStock.toLocaleString()} FCFA`);
+                console.log(`   ➡️  Écart: ${currentStock.toLocaleString()} - ${previousStock.toLocaleString()} = ${stockVivantVariation.toLocaleString()} FCFA`);
+            } else {
+                // Si pas de cutoff_date, utiliser 0 (logique par défaut)
+                stockVivantVariation = 0;
+                console.log(`🌱 Écart Stock Vivant Mensuel PL: ${stockVivantVariation} FCFA (pas de cutoff_date)`);
             }
             
         } catch (error) {
@@ -8127,22 +8120,42 @@ app.get('/api/dashboard/stock-vivant-variation', requireAuth, async (req, res) =
         console.log(`🌱 Mois actuel: ${currentYear}-${currentMonth.toString().padStart(2, '0')}`);
         console.log(`🌱 Mois précédent: ${previousYear}-${previousMonth.toString().padStart(2, '0')}`);
         
-        // 1. Récupérer le stock du mois précédent (dernier jour du mois précédent)
-        const previousStockQuery = `
-            SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
-                   MAX(date_stock) as latest_date
-            FROM stock_vivant 
-            WHERE date_stock >= $1::date 
-            AND date_stock < $2::date
-        `;
-        const previousStockResult = await pool.query(previousStockQuery, [
-            `${previousYear}-${previousMonth.toString().padStart(2, '0')}-01`,
-            `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`
-        ]);
+        // 1. Récupérer le stock de la dernière date disponible AVANT le mois actuel
+        let previousStock = 0;
+        let previousStockDate = null;
+        
+        const firstDayOfCurrentMonth = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`;
+        
+        // Chercher la dernière date disponible avant le mois actuel
+        const lastDateBeforeCurrentMonth = await pool.query(`
+            SELECT MAX(date_stock) as last_date
+                FROM stock_vivant 
+            WHERE date_stock < $1::date
+        `, [firstDayOfCurrentMonth]);
+        
+        if (lastDateBeforeCurrentMonth.rows[0]?.last_date) {
+            // Il y a des données avant le mois actuel, récupérer le stock pour cette date
+            const previousStockResult = await pool.query(`
+                SELECT SUM(quantite * prix_unitaire * (1 - COALESCE(decote, 0))) as total_stock,
+                       date_stock as latest_date
+                FROM stock_vivant 
+                WHERE date_stock = $1
+            `, [lastDateBeforeCurrentMonth.rows[0].last_date]);
+            
+            previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
+            previousStockDate = previousStockResult.rows[0]?.latest_date;
+            
+            console.log(`🌱 CARD Stock mois précédent trouvé (${previousStockDate?.toISOString().split('T')[0]}): ${previousStock.toLocaleString()} FCFA`);
+        } else {
+            // Aucune donnée avant le mois actuel
+            previousStock = 0;
+            previousStockDate = null;
+            console.log(`🌱 CARD Aucune donnée stock vivant trouvée avant ${firstDayOfCurrentMonth} → Stock précédent = 0 FCFA`);
+        }
         
         // 2. Récupérer le stock le plus proche de la date de cutoff (≤ cutoff_date)
         const currentStockQuery = `
-            SELECT SUM(quantite * prix_unitaire * (1 - decote)) as total_stock,
+            SELECT SUM(quantite * prix_unitaire * (1 - COALESCE(decote, 0))) as total_stock,
                    MAX(date_stock) as latest_date
                 FROM stock_vivant 
             WHERE date_stock <= $1::date
@@ -8155,27 +8168,15 @@ app.get('/api/dashboard/stock-vivant-variation', requireAuth, async (req, res) =
         const currentStockResult = await pool.query(currentStockQuery, [cutoff_date]);
         
         const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
-        const previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
         const currentStockDate = currentStockResult.rows[0]?.latest_date;
-        const previousStockDate = previousStockResult.rows[0]?.latest_date;
         
-        // 3. Calculer l'écart selon les spécifications
-        let variationTotale = 0;
-        if (currentStock === 0 && previousStock === 0) {
-            variationTotale = 0;
-            console.log(`🌱 Écart Stock Vivant Mensuel CARD: ${variationTotale} FCFA (aucune donnée)`);
-        } else if (previousStock === 0) {
-            // Pas de stock du mois précédent, écart = stock actuel
-            variationTotale = currentStock;
-            console.log(`🌱 Écart Stock Vivant Mensuel CARD: ${variationTotale} FCFA (${currentStock} - 0, pas de données mois précédent)`);
-        } else {
-            // Écart normal = stock actuel - stock mois précédent
-            variationTotale = currentStock - previousStock;
-            console.log(`🌱 Écart Stock Vivant Mensuel CARD: ${variationTotale} FCFA`);
-            console.log(`   📅 Stock actuel (${currentStockDate || 'N/A'}): ${currentStock} FCFA`);
-            console.log(`   📅 Stock mois précédent (${previousStockDate || 'N/A'}): ${previousStock} FCFA`);
-            console.log(`   ➡️  Écart: ${currentStock} - ${previousStock} = ${variationTotale} FCFA`);
-        }
+        // 3. Calculer l'écart : stock actuel - stock précédent
+        let variationTotale = currentStock - previousStock;
+        
+        console.log(`🌱 Écart Stock Vivant Mensuel CARD: ${variationTotale.toLocaleString()} FCFA`);
+        console.log(`   📅 Stock actuel (${currentStockDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStock.toLocaleString()} FCFA`);
+        console.log(`   📅 Stock précédent (${previousStockDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStock.toLocaleString()} FCFA`);
+        console.log(`   ➡️  Écart: ${currentStock.toLocaleString()} - ${previousStock.toLocaleString()} = ${variationTotale.toLocaleString()} FCFA`);
 
         // Si debug_details est demandé, créer des détails simplifiés basés sur les vraies données
         let stockVariationDetails = null;

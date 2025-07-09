@@ -211,7 +211,64 @@ async function showSection(sectionName) {
     // Charger les données spécifiques à la section
     switch (sectionName) {
         case 'dashboard':
-            loadDashboard();
+            // Rechargement complet comme la première fois
+            console.log('🔄 Dashboard: Rechargement complet comme première visite');
+            
+            // 1. FORCER la réinitialisation COMPLÈTE de TOUTES les dates
+            const currentDate = new Date();
+            const currentYear = currentDate.getFullYear();
+            const currentMonthNum = currentDate.getMonth() + 1;
+            const currentDay = currentDate.getDate();
+            
+            const startDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-01`;
+            const endDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-${currentDay.toString().padStart(2, '0')}`; // DATE DU JOUR
+            const currentMonth = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}`;
+            
+            // Réinitialiser TOUS les champs de date possibles
+            const dashboardStartDate = document.getElementById('dashboard-start-date');
+            const dashboardEndDate = document.getElementById('dashboard-end-date');
+            const dashboardMonth = document.getElementById('dashboard-month');
+            const snapshotDate = document.getElementById('snapshot-date');
+            
+            console.log('🔍 RECHERCHE DES CHAMPS DE DATE:');
+            console.log('dashboard-start-date trouvé:', !!dashboardStartDate);
+            console.log('dashboard-end-date trouvé:', !!dashboardEndDate);
+            console.log('dashboard-month trouvé:', !!dashboardMonth);
+            console.log('snapshot-date trouvé:', !!snapshotDate);
+            
+            if (dashboardStartDate) {
+                dashboardStartDate.value = startDate;
+                console.log('✅ dashboard-start-date défini à:', startDate);
+            }
+            
+            if (dashboardEndDate) {
+                dashboardEndDate.value = endDate;
+                console.log('✅ dashboard-end-date défini à:', endDate);
+            }
+            
+            if (dashboardMonth) {
+                dashboardMonth.value = currentMonth;
+                console.log('✅ dashboard-month défini à:', currentMonth);
+            }
+            
+            if (snapshotDate) {
+                snapshotDate.value = endDate; // Mettre snapshot à la fin du mois
+                console.log('✅ snapshot-date défini à:', endDate);
+            }
+            
+            // Réinitialiser aussi les variables globales
+            selectedMonth = currentMonth;
+            
+            console.log('🔄 TOUTES LES DATES FORCÉES:', startDate, 'à', endDate);
+            
+            // 2. Charger toutes les données avec les nouvelles dates
+            await loadDashboardData();
+            await loadStockSummary();
+            await loadStockVivantTotal();
+            await loadStockVivantVariation();
+            await loadTotalCreances();
+            await loadCreancesMois();
+            await loadTransfersCard();
             break;
         case 'expenses':
             loadExpenses();
@@ -862,6 +919,12 @@ async function loadUsers() {
 // Dashboard
 async function loadDashboard() {
     try {
+        console.log('🔄 DASHBOARD: Rafraîchissement complet - comme une première visite');
+        
+        // 1. Vider tous les éléments du dashboard pour forcer un rechargement
+        clearDashboardCache();
+        
+        // 2. Charger toutes les données dans l'ordre (sans réinitialiser les dates)
         await loadDashboardData();
         await loadStockSummary();
         await loadStockVivantTotal(); // Ajouter le chargement du total stock vivant
@@ -869,9 +932,81 @@ async function loadDashboard() {
         await loadTotalCreances(); // Charger le total des créances
         await loadCreancesMois(); // Charger les créances du mois
         await loadTransfersCard(); // Ajouter le chargement des transferts
+        
+        console.log('✅ DASHBOARD: Rafraîchissement complet terminé');
     } catch (error) {
         console.error('Erreur lors du chargement du dashboard:', error);
         showAlert('Erreur lors du chargement du dashboard', 'danger');
+    }
+}
+
+// Fonction pour vider le cache du dashboard
+function clearDashboardCache() {
+    console.log('🧹 Nettoyage du cache dashboard');
+    
+    // Réinitialiser les variables globales
+    selectedMonth = null;
+    
+    // Vider les valeurs des cartes principales
+    const elementsToReset = [
+        'solde-amount',
+        'total-spent-amount', 
+        'total-remaining-amount',
+        'total-credited-with-expenses',
+        'total-credited-general',
+        'total-depot-balance',
+        'total-partner-balance',
+        'pl-sans-stock-charges',
+        'pl-estim-charges',
+        'pl-brut',
+        'weekly-burn',
+        'monthly-burn',
+        'stock-total',
+        'stock-date'
+    ];
+    
+    elementsToReset.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = 'Chargement...';
+        }
+    });
+    
+    // Vider les graphiques existants
+    const chartElements = ['account-chart', 'category-chart'];
+    chartElements.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.innerHTML = '';
+        }
+    });
+}
+
+// Fonction pour réinitialiser les dates du dashboard
+function resetDashboardDates() {
+    console.log('📅 Réinitialisation des dates dashboard');
+    
+    // Définir les dates par défaut (mois en cours)
+    const currentDate = new Date();
+    const currentMonth = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+    const startDate = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-01`;
+    const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+    const endDate = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}-${lastDayOfMonth.toString().padStart(2, '0')}`;
+    
+    // Vérifier si les éléments existent avant de les utiliser
+    const dashboardStartDate = document.getElementById('dashboard-start-date');
+    const dashboardEndDate = document.getElementById('dashboard-end-date');
+    const monthInput = document.getElementById('dashboard-month');
+    
+    if (dashboardStartDate && dashboardEndDate) {
+        dashboardStartDate.value = startDate;
+        dashboardEndDate.value = endDate;
+        console.log('📅 Dates réinitialisées:', startDate, 'à', endDate);
+    }
+    
+    if (monthInput) {
+        monthInput.value = currentMonth;
+        selectedMonth = currentMonth;
     }
 }
 
