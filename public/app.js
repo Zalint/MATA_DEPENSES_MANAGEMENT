@@ -217,7 +217,14 @@ async function showSection(sectionName) {
             // 1. Réinitialiser les dates avec la fonction dédiée
             resetDashboardDates();
             
-            // 2. Charger toutes les données avec les nouvelles dates
+            // 2. Récupérer les dates depuis les éléments du dashboard
+            const dashboardStartDate = document.getElementById('dashboard-start-date');
+            const dashboardEndDate = document.getElementById('dashboard-end-date');
+            
+            const startDate = dashboardStartDate ? dashboardStartDate.value : '2025-01-01';
+            const endDate = dashboardEndDate ? dashboardEndDate.value : '2025-12-31';
+            
+            // 3. Charger toutes les données avec les nouvelles dates
             await loadDashboardData();
             await loadStockSummary(startDate, endDate);
             await loadStockVivantTotal();
@@ -883,7 +890,14 @@ async function loadDashboard() {
         // 2. Réinitialiser les dates pour maintenir la cohérence
         resetDashboardDates();
         
-        // 2. Charger toutes les données dans l'ordre (sans réinitialiser les dates)
+        // 2. Récupérer les dates depuis les éléments du dashboard
+        const dashboardStartDate = document.getElementById('dashboard-start-date');
+        const dashboardEndDate = document.getElementById('dashboard-end-date');
+        
+        const startDate = dashboardStartDate ? dashboardStartDate.value : '2025-01-01';
+        const endDate = dashboardEndDate ? dashboardEndDate.value : '2025-12-31';
+        
+        // 3. Charger toutes les données dans l'ordre (sans réinitialiser les dates)
         await loadDashboardData();
         await loadStockSummary(startDate, endDate);
         await loadStockVivantTotal(); // Ajouter le chargement du total stock vivant
