@@ -12368,10 +12368,37 @@ function updateClientsSummaryTable(clients) {
     const tbody = document.getElementById('clients-summary-tbody');
     if (!tbody) return;
     
+    // Stocker les données originales pour le filtrage
+    window.originalClientsData = clients;
+    
+    // Calculer la somme totale des soldes
+    const totalBalance = clients.reduce((sum, client) => sum + parseInt(client.balance || 0), 0);
+    
+    // Mettre à jour le titre du compte avec le solde total
+    const accountTitle = document.getElementById('creance-account-title');
+    if (accountTitle && currentCreanceAccount) {
+        accountTitle.innerHTML = `Compte : ${currentCreanceAccount.name} <span style="margin-left: 15px; font-size: 0.9em; color: ${totalBalance >= 0 ? 'green' : 'red'};">(Solde total : ${formatCurrency(totalBalance)})</span>`;
+    }
+    
     tbody.innerHTML = '';
     
     if (clients.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">Aucun client trouvé</td></tr>';
+        return;
+    }
+    
+    displayFilteredClients(clients);
+}
+
+// Fonction pour afficher les clients filtrés
+function displayFilteredClients(clients) {
+    const tbody = document.getElementById('clients-summary-tbody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    if (clients.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">Aucun résultat trouvé</td></tr>';
         return;
     }
     
@@ -12399,6 +12426,37 @@ function updateClientsSummaryTable(clients) {
         tbody.appendChild(row);
     });
 }
+
+// Fonction pour filtrer les clients
+function filterClients() {
+    if (!window.originalClientsData) return;
+    
+    const clientFilter = document.getElementById('client-filter').value.toLowerCase();
+    const phoneFilter = document.getElementById('phone-filter').value.toLowerCase();
+    
+    const filteredClients = window.originalClientsData.filter(client => {
+        const clientName = (client.client_name || '').toLowerCase();
+        const clientPhone = (client.client_phone || '').toLowerCase();
+        
+        const matchesClient = clientName.includes(clientFilter);
+        const matchesPhone = clientPhone.includes(phoneFilter);
+        
+        return matchesClient && matchesPhone;
+    });
+    
+    displayFilteredClients(filteredClients);
+}
+
+// Ajouter les écouteurs d'événements pour le filtrage
+document.addEventListener('DOMContentLoaded', function() {
+    const clientFilter = document.getElementById('client-filter');
+    const phoneFilter = document.getElementById('phone-filter');
+    
+    if (clientFilter && phoneFilter) {
+        clientFilter.addEventListener('input', filterClients);
+        phoneFilter.addEventListener('input', filterClients);
+    }
+});
 
 // Générer les boutons d'actions pour un client créance
 function generateCreanceClientActions(client) {

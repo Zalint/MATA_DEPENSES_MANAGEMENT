@@ -1230,6 +1230,16 @@
                             <div class="section-card">
                                 <h4><i class="fas fa-table"></i> Récapitulatif par Client</h4>
                                 
+                                <!-- Ajout des filtres -->
+                                <div class="filters-container" style="margin-bottom: 15px; display: flex; gap: 10px;">
+                                    <div class="filter-group" style="flex: 1;">
+                                        <input type="text" id="client-filter" class="form-control" placeholder="Filtrer par client...">
+                                    </div>
+                                    <div class="filter-group" style="flex: 1;">
+                                        <input type="text" id="phone-filter" class="form-control" placeholder="Filtrer par téléphone...">
+                                    </div>
+                                </div>
+
                                 <div class="table-container">
                                     <table id="clients-summary-table" class="data-table">
                                         <thead>
