@@ -1175,7 +1175,14 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         
         // 6. Solde des comptes partenaire
         let partnerBalanceQuery = `
-            SELECT COALESCE(SUM(a.current_balance), 0) as total 
+            SELECT COALESCE(SUM(
+                a.total_credited - COALESCE(
+                    (SELECT SUM(pd.amount)
+                     FROM partner_deliveries pd
+                     WHERE pd.account_id = a.id
+                     AND pd.validation_status = 'fully_validated'
+                     AND pd.is_validated = true), 0)
+            ), 0) as total 
             FROM accounts a 
             WHERE a.is_active = true AND a.account_type = 'partenaire'
         `;
