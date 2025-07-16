@@ -397,6 +397,16 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
             total_credited: account.total_credited,
             user_id: account.user_id
         });
+        // Logique de validation automatique pour les comptes classiques
+    let requiresValidation = true;
+    let validationStatus = 'pending';
+    if (account.account_type === 'classique') {
+        requiresValidation = false;
+        validationStatus = 'fully_validated';
+        console.log('✅ Validation automatique: Compte classique. Statut mis à "approved".');
+    } else {
+        console.log('⏳ Dépense nécessite une validation manuelle.');
+    }
         
         // Vérifier l'autorisation pour les directeurs
         if (req.session.user.role === 'directeur' && account.user_id !== user_id) {
@@ -460,21 +470,23 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
         console.log('📝 Préparation des données pour insertion:');
         const insertParams = [
             user_id, account_id, expense_type, category, subcategory, social_network_detail,
-            designation, supplier, parseFloat(quantity), parseInt(unit_price), parseInt(total), predictable,
+            designation, supplier, parseFloat(quantity) || null, parseInt(unit_price) || null, parseInt(total) || null, predictable,
             justificationFilename, justificationPath,
-            finalAmount, description, expense_date, false
+            finalAmount, description, expense_date, false, // selected_for_invoice
+            requiresValidation, validationStatus // Ajoutez ces deux à la fin
         ];
         console.log('📋 Paramètres d\'insertion:', insertParams);
         
         // Insérer la dépense avec tous les nouveaux champs
         const expenseResult = await pool.query(`
             INSERT INTO expenses (
-                user_id, account_id, expense_type, category, subcategory, social_network_detail,
-                designation, supplier, quantity, unit_price, total, predictable,
-                justification_filename, justification_path,
-                amount, description, expense_date, selected_for_invoice
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18) 
-            RETURNING *`,
+        user_id, account_id, expense_type, category, subcategory, social_network_detail,
+        designation, supplier, quantity, unit_price, total, predictable,
+        justification_filename, justification_path,
+        amount, description, expense_date, selected_for_invoice,
+        requires_validation, validation_status  -- Ajoutez ces deux
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) -- Le dernier paramètre va jusqu'à $20
+    RETURNING *`,
             insertParams
         );
         
@@ -689,7 +701,11 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
         console.log('📋 GET EXPENSES: Dates - Start:', start_date, 'End:', end_date);
         
         let query = `
-            SELECT e.*, u.full_name as user_name, u.username, a.account_name,
+            SELECT e.*, 
+                   u.full_name as user_name, 
+                   u.username, 
+                   u.role as user_role, -- <<< CORRECTION APPLIQUÉE ICI
+                   a.account_name,
                    CASE 
                        WHEN e.expense_type IS NOT NULL THEN 
                            CONCAT(e.expense_type, ' > ', e.category, ' > ', e.subcategory,
@@ -710,7 +726,6 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
         let params = [];
         
         if (req.session.user.role === 'directeur') {
-            // Les directeurs voient leurs propres dépenses ET les dépenses faites par le DG sur leurs comptes
             query += ` WHERE (e.user_id = $1 OR (a.user_id = $1 AND e.user_id IN (
                 SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin')
             )))`;
@@ -724,26 +739,16 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
         if (start_date) {
             params.push(start_date);
             query += ` AND e.expense_date >= $${params.length}`;
-            console.log('📋 GET EXPENSES: Filtre date début ajouté:', start_date);
         }
         
         if (end_date) {
             params.push(end_date);
             query += ` AND e.expense_date <= $${params.length}`;
-            console.log('📋 GET EXPENSES: Filtre date fin ajouté:', end_date);
         }
         
         query += ' ORDER BY e.expense_date DESC, e.created_at DESC';
         
-        console.log('📋 GET EXPENSES: Requête finale:', query);
-        console.log('📋 GET EXPENSES: Paramètres:', params);
-        
         const result = await pool.query(query, params);
-        
-        console.log('📋 GET EXPENSES: Nombre de dépenses récupérées:', result.rows.length);
-        result.rows.forEach(expense => {
-            console.log(`📋 GET EXPENSES: ID ${expense.id} - ${expense.designation} - Sélectionnée: ${expense.selected_for_invoice}`);
-        });
         
         res.json(result.rows);
     } catch (error) {
@@ -2525,15 +2530,19 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
         
         // Récupérer les dépenses sélectionnées
         let query = `
-                         SELECT e.*, u.full_name as user_name, u.username, a.account_name,
-                    CASE 
-                        WHEN e.expense_type IS NOT NULL THEN 
-                            CONCAT(e.expense_type, ' > ', e.category, ' > ', e.subcategory,
-                                   CASE WHEN e.social_network_detail IS NOT NULL AND e.social_network_detail != '' 
-                                        THEN CONCAT(' (', e.social_network_detail, ')') 
-                                        ELSE '' END)
-                        ELSE 'Catégorie non définie'
-                    END as category_name
+                        SELECT e.*, 
+                   u.full_name as user_name, 
+                   u.username, 
+                   u.role as user_role, -- <<< CORRECTION APPLIQUÉE ICI
+                   a.account_name,
+                   CASE 
+                       WHEN e.expense_type IS NOT NULL THEN 
+                           CONCAT(e.expense_type, ' > ', e.category, ' > ', e.subcategory,
+                                  CASE WHEN e.social_network_detail IS NOT NULL AND e.social_network_detail != '' 
+                                       THEN CONCAT(' (', e.social_network_detail, ')') 
+                                       ELSE '' END)
+                       ELSE 'Catégorie non définie'
+                   END as category_name
             FROM expenses e
             JOIN users u ON e.user_id = u.id
             LEFT JOIN accounts a ON e.account_id = a.id
@@ -2868,14 +2877,19 @@ app.get('/api/expenses/:id', requireAuth, async (req, res) => {
 });
 
 // Route pour modifier une dépense
-app.put('/api/expenses/:id', requireAuth, async (req, res) => {
+app.put('/api/expenses/:id', requireAuth, upload.single('justification'), async (req, res) => {
     try {
+        console.log('🔄️ ===== DÉBUT MODIFICATION DÉPENSE =====');
+        console.log('👤 Utilisateur:', req.session.user.username, '- Rôle:', req.session.user.role);
+        console.log('📝 Body reçu:', JSON.stringify(req.body, null, 2));
+        console.log('📎 Fichier uploadé:', req.file ? req.file.originalname : 'Aucun');
+
         const expenseId = req.params.id;
         const userId = req.session.user.id;
         const {
             account_id, expense_type, category, subcategory, social_network_detail,
             designation, supplier, quantity, unit_price, total, predictable,
-            description, expense_date
+            description, expense_date, remove_justification
         } = req.body;
         
         // Vérifier que la dépense existe et appartient à l'utilisateur (pour les directeurs)
@@ -2887,120 +2901,156 @@ app.put('/api/expenses/:id', requireAuth, async (req, res) => {
             checkParams.push(userId);
         }
         
-        const existingExpense = await pool.query(checkQuery, checkParams);
+        const existingExpenseResult = await pool.query(checkQuery, checkParams);
         
-        if (existingExpense.rows.length === 0) {
+        if (existingExpenseResult.rows.length === 0) {
+            console.log(`❌ ERREUR 404: Dépense ${expenseId} non trouvée ou non autorisée pour l'utilisateur ${userId}`);
             return res.status(404).json({ error: 'Dépense non trouvée ou non autorisée' });
         }
         
+        const existingExpense = existingExpenseResult.rows[0];
+
         // Vérifier la restriction de 48 heures pour les directeurs réguliers (pas pour admin, DG, PCA)
         if (req.session.user.role === 'directeur') {
-            const expenseCreatedAt = new Date(existingExpense.rows[0].created_at);
+            const expenseCreatedAt = new Date(existingExpense.created_at);
             const now = new Date();
             const hoursDifference = (now - expenseCreatedAt) / (1000 * 60 * 60);
             
             if (hoursDifference > 48) {
+                console.log(`❌ ERREUR 403: Tentative de modification de la dépense ${expenseId} après ${hoursDifference.toFixed(2)} heures par le directeur ${userId}`);
                 return res.status(403).json({ 
-                    error: `Modification non autorisée. Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures. Les directeurs ne peuvent modifier une dépense que dans les 48 heures suivant sa création.` 
+                    error: `Modification non autorisée. Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures.`
                 });
             }
         }
         
-        const newAmount = parseInt(total) || 0;
+        const newAmount = parseFloat(total) || 0;
+        console.log(`💰 Montant total extrait du body: "${total}", converti en: ${newAmount}`);
         
         if (newAmount <= 0) {
+            console.log(`❌ ERREUR 400: Montant invalide: ${newAmount}`);
             return res.status(400).json({ error: 'Le montant doit être supérieur à zéro' });
         }
         
+        // Gérer le justificatif
+        let justificationFilename = existingExpense.justification_filename;
+        let justificationPath = existingExpense.justification_path;
+
+        if (req.file) {
+            // Un nouveau fichier a été uploadé, on supprime l'ancien s'il existe
+            if (justificationPath) {
+                try {
+                    const fullPath = path.join(__dirname, justificationPath);
+                    if (fs.existsSync(fullPath)) {
+                        fs.unlinkSync(fullPath);
+                        console.log(`🗑️ Ancien justificatif supprimé: ${justificationPath}`);
+                    }
+                } catch (err) {
+                    console.error(`⚠️ Erreur lors de la suppression de l'ancien justificatif: ${err.message}`);
+                }
+            }
+            justificationFilename = req.file.originalname;
+            justificationPath = req.file.path;
+            console.log(`📎 Nouveau justificatif sauvegardé: ${justificationFilename} (${justificationPath})`);
+        } else if (remove_justification === 'true') {
+            // L'utilisateur a demandé à supprimer le justificatif existant
+             if (justificationPath) {
+                try {
+                    const fullPath = path.join(__dirname, justificationPath);
+                     if (fs.existsSync(fullPath)) {
+                        fs.unlinkSync(fullPath);
+                        console.log(`🗑️ Justificatif existant supprimé sur demande: ${justificationPath}`);
+                    }
+                } catch (err) {
+                    console.error(`⚠️ Erreur lors de la suppression du justificatif sur demande: ${err.message}`);
+                }
+            }
+            justificationFilename = null;
+            justificationPath = null;
+        }
+
         // Vérifier que le compte existe et est actif
         let account = null;
         if (account_id) {
             const accountResult = await pool.query(
-                'SELECT current_balance, total_credited, account_name, user_id FROM accounts WHERE id = $1 AND is_active = true',
+                'SELECT id, current_balance, total_credited, account_name, user_id, is_active FROM accounts WHERE id = $1',
                 [account_id]
             );
             
             if (accountResult.rows.length === 0) {
-                return res.status(400).json({ error: 'Compte non trouvé ou inactif' });
+                console.log(`❌ ERREUR 400: Compte ${account_id} non trouvé`);
+                return res.status(400).json({ error: 'Compte non trouvé' });
+            }
+            
+            if (!accountResult.rows[0].is_active) {
+                console.log(`❌ ERREUR 400: Compte ${account_id} inactif`);
+                return res.status(400).json({ error: 'Le compte sélectionné est inactif' });
             }
             
             account = accountResult.rows[0];
             
-            // Vérifier l'autorisation pour les directeurs (admin, DG, PCA peuvent modifier sur tous les comptes)
             if (req.session.user.role === 'directeur' && account.user_id !== userId) {
+                 console.log(`❌ ERREUR 403: Le directeur ${userId} n'est pas autorisé sur le compte ${account_id} (appartient à ${account.user_id})`);
                 return res.status(403).json({ error: 'Vous ne pouvez pas dépenser sur ce compte' });
             }
         }
         
+        console.log('🚀 Début de la transaction pour la modification');
         await pool.query('BEGIN');
         
-        // Calculer la différence de montant pour ajuster le solde du compte
-        const oldAmount = parseInt(existingExpense.rows[0].total) || 0;
+        const oldAmount = parseFloat(existingExpense.total) || 0;
         const difference = newAmount - oldAmount;
-        
-        // Vérification du solde pour la modification
-        if (account && difference > 0) {
-            // Si on augmente le montant, vérifier le solde disponible
-            if (account.current_balance < difference) {
-                await pool.query('ROLLBACK');
-                return res.status(400).json({ 
-                    error: `Solde insuffisant pour cette modification. Solde disponible: ${account.current_balance.toLocaleString()} FCFA, Augmentation demandée: ${difference.toLocaleString()} FCFA` 
-                });
-            }
-            
-            // Vérifier que le total ne dépasse pas le budget alloué
-            if (account.total_credited > 0) {
-                const totalSpentResult = await pool.query(
-                    'SELECT COALESCE(SUM(total), 0) as total_spent FROM expenses WHERE account_id = $1 AND id != $2',
-                    [account_id, expenseId]
+        console.log(`📊 Calcul de la différence de montant: Nouveau=${newAmount}, Ancien=${oldAmount}, Différence=${difference}`);
+
+        const oldAccountId = existingExpense.account_id;
+        const newAccountId = account ? account.id : null;
+
+        if (oldAccountId !== newAccountId) {
+            console.log(`🔄 Changement de compte détecté: de ${oldAccountId || 'aucun'} à ${newAccountId || 'aucun'}`);
+            if (oldAccountId) {
+                await pool.query(
+                    `UPDATE accounts SET 
+                        current_balance = current_balance + $1,
+                        total_spent = total_spent - $1
+                    WHERE id = $2`,
+                    [oldAmount, oldAccountId]
                 );
-                
-                const currentTotalSpent = parseInt(totalSpentResult.rows[0].total_spent);
-                const newTotalSpent = currentTotalSpent + newAmount;
-                
-                if (newTotalSpent > account.total_credited) {
-                    await pool.query('ROLLBACK');
-                    return res.status(400).json({ 
-                        error: `Cette modification dépasserait le budget total. Budget total: ${account.total_credited.toLocaleString()} FCFA, Déjà dépensé (autres dépenses): ${currentTotalSpent.toLocaleString()} FCFA, Nouveau montant: ${newAmount.toLocaleString()} FCFA` 
-                    });
-                }
             }
-        }
-        
-        // Mettre à jour la dépense
-        const updateResult = await pool.query(`
-            UPDATE expenses SET
-                account_id = $1,
-                expense_type = $2,
-                category = $3,
-                subcategory = $4,
-                social_network_detail = $5,
-                designation = $6,
-                supplier = $7,
-                quantity = $8,
-                unit_price = $9,
-                total = $10,
-                predictable = $11,
-                description = $12,
-                expense_date = $13
-            WHERE id = $14
-            RETURNING *
-        `, [
-            account_id, expense_type, category, subcategory, social_network_detail,
-            designation, supplier, parseFloat(quantity), parseInt(unit_price), 
-            newAmount, predictable, description, expense_date, expenseId
-        ]);
-        
-        // Ajuster le solde du compte si nécessaire
-        if (difference !== 0 && account_id) {
+            if (newAccountId) {
+                await pool.query(
+                    `UPDATE accounts SET 
+                        current_balance = current_balance - $1,
+                        total_spent = total_spent + $1
+                    WHERE id = $2`,
+                    [newAmount, newAccountId]
+                );
+            }
+        } else if (difference !== 0 && newAccountId) {
             await pool.query(
                 `UPDATE accounts SET 
                     current_balance = current_balance - $1,
                     total_spent = total_spent + $1
                 WHERE id = $2`,
-                [difference, account_id]
+                [difference, newAccountId]
             );
         }
+        
+        const updateResult = await pool.query(`
+            UPDATE expenses SET
+                account_id = $1, expense_type = $2, category = $3, subcategory = $4,
+                social_network_detail = $5, designation = $6, supplier = $7,
+                quantity = $8, unit_price = $9, total = $10, predictable = $11,
+                description = $12, expense_date = $13,
+                justification_filename = $14, justification_path = $15
+            WHERE id = $16
+            RETURNING *
+        `, [
+            newAccountId, expense_type, category, subcategory, social_network_detail,
+            designation, supplier, parseFloat(quantity) || null, parseInt(unit_price) || null, 
+            newAmount, predictable, description, expense_date,
+            justificationFilename, justificationPath,
+            expenseId
+        ]);
         
         await pool.query('COMMIT');
         
@@ -3012,7 +3062,7 @@ app.put('/api/expenses/:id', requireAuth, async (req, res) => {
     } catch (error) {
         await pool.query('ROLLBACK');
         console.error('Erreur modification dépense:', error);
-        res.status(500).json({ error: 'Erreur serveur' });
+        res.status(500).json({ error: 'Erreur serveur lors de la modification de la dépense' });
     }
 });
 

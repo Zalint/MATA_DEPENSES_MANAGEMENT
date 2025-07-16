@@ -1437,25 +1437,58 @@ function displayExpenses(expenses) {
         return;
     }
     
-    // Afficher l'état de sélection de chaque dépense
-    expenses.forEach(expense => {
-        console.log(`🎯 DISPLAY EXPENSES: Dépense ID ${expense.id} - ${expense.designation} - Sélectionnée: ${expense.selected_for_invoice}`);
-    });
-    
     expenses.forEach(expense => {
         const row = document.createElement('tr');
         row.className = 'expense-row';
         row.dataset.expenseId = expense.id;
         
-        // Déterminer si c'est une dépense faite par le DG sur le compte d'un directeur
-        const isDGExpenseOnDirectorAccount = ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) && 
-                                             expense.username !== currentUser.username;
+        // Qui peut modifier quoi ?
+        const isCreator = expense.username === currentUser.username;
+        const viewerIsPowerUser = ['directeur_general', 'pca', 'admin'].includes(currentUser.role);
+        // Assurez-vous que l'API renvoie bien `expense.user_role`
+        const expenseIsFromPowerUser = ['directeur_general', 'pca', 'admin'].includes(expense.user_role);
+
+        let canEdit = false;
+        let cantEditReason = "";
+
+        if (viewerIsPowerUser) {
+            // Un super-utilisateur (DG/PCA/Admin) peut modifier...
+            if (isCreator) {
+                canEdit = true; // ...ses propres dépenses.
+            } else if (expenseIsFromPowerUser) {
+                canEdit = false; // ...mais PAS celles d'un autre super-utilisateur.
+                cantEditReason = "Vous ne pouvez pas modifier la dépense d'un autre administrateur/DG/PCA.";
+            } else {
+                canEdit = true; // ...les dépenses des utilisateurs standards (directeurs).
+            }
+        } else if (currentUser.role === 'directeur') {
+            // Un directeur...
+            if (isCreator) {
+                 // ...peut modifier ses propres dépenses, mais avec une limite de temps.
+                 const expenseDate = new Date(expense.created_at);
+                 const now = new Date();
+                 const hoursDifference = (now - expenseDate) / (1000 * 60 * 60);
+                 if (hoursDifference > 48) {
+                     canEdit = false;
+                     cantEditReason = "Modification non autorisée - Plus de 48 heures écoulées.";
+                 } else {
+                     canEdit = true;
+                 }
+            } else {
+                // ...ne peut PAS modifier les dépenses des autres.
+                canEdit = false; 
+                cantEditReason = "Vous ne pouvez modifier que vos propres dépenses.";
+            }
+        }
         
-        // Ajouter une classe CSS ou un style pour les dépenses du DG
+        // Déterminer si la dépense a été créée par un "power user" pour l'affichage
+        const isDGExpenseOnDirectorAccount = expenseIsFromPowerUser && !isCreator;
+
+        // Ajouter un style pour les dépenses faites par un autre utilisateur (souvent DG/Admin)
         if (isDGExpenseOnDirectorAccount) {
             row.style.fontStyle = 'italic';
             row.style.opacity = '0.8';
-            row.title = 'Dépense effectuée par le Directeur Général sur votre compte';
+            row.title = `Dépense effectuée par ${expense.username} (${expense.user_role})`;
         }
         
         // Bouton pour télécharger le justificatif
@@ -1465,44 +1498,36 @@ function displayExpenses(expenses) {
             </button>` : 
             '<span style="color: #999;">Aucun</span>';
         
-        // Bouton pour modifier la dépense avec vérification des restrictions
+        // Bouton pour modifier la dépense avec la nouvelle logique
         let editButton = '';
-        
-        if (isDGExpenseOnDirectorAccount && ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
-            // Dépense du DG sur compte directeur - pas d'édition
-            editButton = '<span style="color: #999;" title="Seul le Directeur Général peut modifier cette dépense"><i class="fas fa-lock"></i></span>';
-        } else if (['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
-            // Vérifier la restriction de 48 heures pour les directeurs
-            const expenseDate = new Date(expense.created_at);
-            const now = new Date();
-            const hoursDifference = (now - expenseDate) / (1000 * 60 * 60);
-            
-            if (hoursDifference > 48) {
-                editButton = '<span style="color: #dc3545;" title="Modification non autorisée - Plus de 48 heures écoulées"><i class="fas fa-clock"></i></span>';
-            } else {
+        if (canEdit) {
+            if (currentUser.role === 'directeur') {
+                const expenseDate = new Date(expense.created_at);
+                const now = new Date();
+                const hoursDifference = (now - expenseDate) / (1000 * 60 * 60);
                 const remainingHours = 48 - hoursDifference;
+
                 if (remainingHours <= 12) {
-                    // Avertissement - proche de la limite
                     editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="⚠️ Il reste ${Math.floor(remainingHours)}h${Math.floor((remainingHours % 1) * 60)}min pour modifier">
                         <i class="fas fa-edit"></i> <i class="fas fa-exclamation-triangle" style="font-size: 0.7em;"></i>
                     </button>`;
                 } else {
-                    // Modification normale
                     editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="Modifier la dépense (${Math.floor(remainingHours)}h restantes)">
-                <i class="fas fa-edit"></i>
+                        <i class="fas fa-edit"></i>
                     </button>`;
                 }
+            } else {
+                 editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="Modifier la dépense">
+                    <i class="fas fa-edit"></i>
+                </button>`;
             }
-        } else if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
-            // DG, PCA et Admin peuvent toujours modifier
-            editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="Modifier la dépense">
-                <i class="fas fa-edit"></i>
-            </button>`;
+        } else {
+            // Afficher une icône de verrouillage avec la raison
+            editButton = `<span style="color: #999;" title="${cantEditReason}"><i class="fas fa-lock"></i></span>`;
         }
         
         // Checkbox cochée selon l'état selected_for_invoice
         const isChecked = expense.selected_for_invoice ? 'checked' : '';
-        console.log(`🎯 DISPLAY EXPENSES: Checkbox pour dépense ${expense.id} sera ${isChecked ? 'COCHÉE' : 'NON COCHÉE'}`);
         
         row.innerHTML = `
             <td>
@@ -1523,7 +1548,7 @@ function displayExpenses(expenses) {
             </td>
             <td>${justificationButton}</td>
             <td title="${expense.account_name || ''}">${expense.account_name ? (expense.account_name.length > 15 ? expense.account_name.substring(0, 15) + '...' : expense.account_name) : '-'}</td>
-            <td>${expense.username || '-'}${isDGExpenseOnDirectorAccount ? ' <small style="color: #007bff;">(DG)</small>' : ''}</td>
+            <td>${expense.username || '-'}${isDGExpenseOnDirectorAccount ? ` <small style="color: #007bff;">(${expense.user_role})</small>` : ''}</td>
             ${['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) ? `<td>${expense.user_name}</td>` : ''}
             <td>
                 <div class="action-buttons">
@@ -1533,7 +1558,6 @@ function displayExpenses(expenses) {
             </td>
         `;
         
-        // Marquer la ligne comme sélectionnée si la dépense est sélectionnée
         if (expense.selected_for_invoice) {
             row.classList.add('selected');
         }
@@ -1541,17 +1565,14 @@ function displayExpenses(expenses) {
         tbody.appendChild(row);
     });
     
-    // Ajouter les event listeners pour les checkboxes
     document.querySelectorAll('.expense-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', function() {
             const expenseId = this.dataset.expenseId;
             const isSelected = this.checked;
-            console.log(`📋 CHECKBOX CHANGE: Dépense ${expenseId} ${isSelected ? 'cochée' : 'décochée'}`);
             toggleExpenseSelection(expenseId, isSelected);
         });
     });
     
-    // Mettre à jour le compteur de sélection
     updateSelectedCount();
     
     console.log('🎯 DISPLAY EXPENSES: Affichage terminé');
@@ -4125,105 +4146,77 @@ function showAllExpenseFields() {
 // Fonctions pour la modification des dépenses
 async function openEditModal(expenseId) {
     try {
-        // Récupérer les détails de la dépense
         const response = await fetch(`/api/expenses/${expenseId}`);
-        if (!response.ok) {
-            throw new Error('Erreur lors de la récupération de la dépense');
-        }
-        
+        if (!response.ok) throw new Error('Erreur récupération de la dépense');
         const expense = await response.json();
         
-        // Vérifier les restrictions de modification pour les directeurs réguliers
+        console.log('DEBUG: Données de la dépense reçues par le modal:', expense);
+
         if (currentUser.role === 'directeur') {
-            const expenseDate = new Date(expense.created_at);
-            const now = new Date();
-            const hoursDifference = (now - expenseDate) / (1000 * 60 * 60); // Différence en heures
-            
+            const hoursDifference = (new Date() - new Date(expense.created_at)) / 36e5;
             if (hoursDifference > 48) {
-                const confirmMessage = `⚠️ RESTRICTION DE MODIFICATION ⚠️\n\n` +
-                    `Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures.\n\n` +
-                    `En tant que Directeur, vous ne pouvez modifier une dépense que dans les 48 heures suivant sa création.\n\n` +
-                    `Seuls le Directeur Général et le PCA peuvent modifier les dépenses après 48 heures.\n\n` +
-                    `Voulez-vous contacter un administrateur pour cette modification ?`;
-                
-                if (confirm(confirmMessage)) {
-                    showNotification('Veuillez contacter le Directeur Général ou le PCA pour modifier cette dépense.', 'info');
-                }
-                return; // Empêcher l'ouverture du modal
-            } else {
-                // Afficher un avertissement si proche de la limite
-                const remainingHours = 48 - hoursDifference;
-                if (remainingHours <= 12) {
-                    const warningMessage = `⏰ ATTENTION ⏰\n\n` +
-                        `Il vous reste ${Math.floor(remainingHours)} heures et ${Math.floor((remainingHours % 1) * 60)} minutes ` +
-                        `pour modifier cette dépense.\n\n` +
-                        `Après 48 heures, seuls le DG et le PCA pourront la modifier.\n\n` +
-                        `Voulez-vous continuer la modification ?`;
-                    
-                    if (!confirm(warningMessage)) {
-                        return; // L'utilisateur a choisi d'annuler
-                    }
-                }
+                alert(`Modification non autorisée. La dépense a été créée il y a plus de 48 heures.`);
+                return;
             }
         }
         
-        // Charger les catégories dans le modal
         await loadEditCategories();
-        
-        // Charger les comptes dans le modal  
         await loadEditAccounts();
         
-        // Remplir le formulaire avec les données existantes
         document.getElementById('edit-expense-id').value = expense.id;
         document.getElementById('edit-expense-account').value = expense.account_id || '';
-        
-        // Formater la date correctement pour l'input date HTML
         if (expense.expense_date) {
-            const date = new Date(expense.expense_date);
-            const formattedDate = date.toISOString().split('T')[0];
-            document.getElementById('edit-expense-date').value = formattedDate;
+            document.getElementById('edit-expense-date').value = new Date(expense.expense_date).toISOString().split('T')[0];
         }
-        
         document.getElementById('edit-expense-designation').value = expense.designation || '';
         document.getElementById('edit-expense-supplier').value = expense.supplier || '';
         document.getElementById('edit-expense-quantity').value = expense.quantity || '';
         document.getElementById('edit-expense-unit-price').value = expense.unit_price || '';
         document.getElementById('edit-expense-total').value = expense.total || expense.amount || '';
-        document.getElementById('edit-expense-predictable').value = expense.predictable || '';
         document.getElementById('edit-expense-description').value = expense.description || '';
         
-        // Gérer les catégories hiérarchiques
+        // <<< CORRECTION ICI >>>
+        // Cible un champ texte, et non une case à cocher.
+        const predictableField = document.getElementById('edit-expense-predictable');
+        if (predictableField) {
+             predictableField.value = (expense.predictable === true || String(expense.predictable).toLowerCase() === 'oui') ? 'Oui' : 'Non';
+        }
+
+        const fileTextSpan = document.getElementById('edit-file-input-text');
+        const downloadBtn = document.getElementById('download-existing-justification');
+        const removeContainer = document.getElementById('remove-justification-container');
+
+        if (expense.justification_filename) {
+            fileTextSpan.textContent = expense.justification_filename;
+            downloadBtn.style.display = 'inline-block';
+            downloadBtn.onclick = () => window.open(expense.justification_path, '_blank');
+            if(removeContainer) removeContainer.style.display = 'block';
+        } else {
+            fileTextSpan.textContent = 'Choisir un fichier';
+            downloadBtn.style.display = 'none';
+            if(removeContainer) removeContainer.style.display = 'none';
+        }
+
+        document.getElementById('edit-expense-justification').value = '';
+        
         if (expense.expense_type) {
             document.getElementById('edit-expense-type').value = expense.expense_type;
             loadEditCategoriesByType(expense.expense_type);
-            
             setTimeout(() => {
                 if (expense.category) {
                     document.getElementById('edit-expense-category').value = expense.category;
                     loadEditSubcategoriesByCategory(expense.expense_type, expense.category);
-                    
                     setTimeout(() => {
-                        if (expense.subcategory) {
-                            document.getElementById('edit-expense-subcategory').value = expense.subcategory;
-                            handleEditSubcategoryChange(expense.subcategory);
-                            
-                            setTimeout(() => {
-                                if (expense.social_network_detail) {
-                                    document.getElementById('edit-social-network-detail').value = expense.social_network_detail;
-                                }
-                            }, 100);
-                        }
+                        if (expense.subcategory) document.getElementById('edit-expense-subcategory').value = expense.subcategory;
                     }, 100);
                 }
             }, 100);
         }
         
-        // Afficher le modal
         document.getElementById('edit-expense-modal').style.display = 'block';
-        
     } catch (error) {
         console.error('Erreur ouverture modal:', error);
-        showNotification(`Erreur: ${error.message}`, 'error');
+        showNotification(error.message, 'error');
     }
 }
 
@@ -4376,10 +4369,38 @@ function calculateEditTotal() {
     const quantity = parseFloat(document.getElementById('edit-expense-quantity').value) || 0;
     const unitPrice = parseFloat(document.getElementById('edit-expense-unit-price').value) || 0;
     const totalField = document.getElementById('edit-expense-total');
+    const submitButton = document.querySelector('#edit-expense-form button[type="submit"]');
     
     if (!totalField.dataset.manuallyEdited && quantity && unitPrice) {
         const total = Math.round(quantity * unitPrice);
         totalField.value = total;
+    }
+    
+    // Désactiver le bouton si le total est 0 ou invalide
+    const currentTotal = parseFloat(totalField.value) || 0;
+    if (currentTotal <= 0) {
+        submitButton.disabled = true;
+        submitButton.style.opacity = '0.5';
+        
+        // Afficher un message d'erreur
+        let errorDiv = document.getElementById('edit-total-error');
+        if (!errorDiv) {
+            errorDiv = document.createElement('div');
+            errorDiv.id = 'edit-total-error';
+            errorDiv.style.color = '#dc3545';
+            errorDiv.style.marginTop = '5px';
+            totalField.parentNode.appendChild(errorDiv);
+        }
+        errorDiv.textContent = 'Le montant total doit être supérieur à zéro';
+    } else {
+        submitButton.disabled = false;
+        submitButton.style.opacity = '1';
+        
+        // Supprimer le message d'erreur s'il existe
+        const errorDiv = document.getElementById('edit-total-error');
+        if (errorDiv) {
+            errorDiv.remove();
+        }
     }
     
     // Valider le solde après calcul
@@ -4525,6 +4546,27 @@ function setupEditModalEventListeners() {
         loadEditCategoriesByType(typeId);
     });
     
+    // Gestionnaire pour le changement de fichier dans le formulaire d'édition
+    document.getElementById('edit-expense-justification').addEventListener('change', function() {
+        const fileText = document.getElementById('edit-file-input-text');
+        if (this.files.length > 0) {
+            const file = this.files[0];
+            // Vérifier la taille du fichier (5MB max)
+            if (file.size > 5 * 1024 * 1024) {
+                showNotification('Le fichier est trop volumineux. Taille maximum : 5MB', 'error');
+                this.value = '';
+                fileText.textContent = 'Aucun fichier sélectionné';
+                fileText.classList.remove('has-file');
+                return;
+            }
+            fileText.textContent = file.name;
+            fileText.classList.add('has-file');
+        } else {
+            fileText.textContent = 'Aucun fichier sélectionné';
+            fileText.classList.remove('has-file');
+        }
+    });
+    
     document.getElementById('edit-expense-category').addEventListener('change', function() {
         const typeId = document.getElementById('edit-expense-type').value;
         const categoryId = this.value;
@@ -4560,28 +4602,60 @@ function setupEditModalEventListeners() {
     // Soumission du formulaire de modification
     document.getElementById('edit-expense-form').addEventListener('submit', async function(e) {
         e.preventDefault();
-        
-        const formData = new FormData(this);
-        const expenseData = Object.fromEntries(formData.entries());
-        
         try {
-            const response = await fetch(`/api/expenses/${expenseData.expense_id}`, {
+            const formData = new FormData(this);
+            const expenseData = new FormData();
+            
+            // Récupérer les données manuellement pour s'assurer de leur exactitude
+            const accountId = document.getElementById('edit-expense-account').value;
+            
+            // Ajout des champs au FormData
+            expenseData.append('expense_id', formData.get('expense_id'));
+            expenseData.append('account_id', accountId || '');
+            expenseData.append('expense_type', document.getElementById('edit-expense-type').value);
+            expenseData.append('category', document.getElementById('edit-expense-category').value);
+            expenseData.append('subcategory', document.getElementById('edit-expense-subcategory').value || '');
+            expenseData.append('description', document.getElementById('edit-expense-description').value);
+            expenseData.append('quantity', parseFloat(document.getElementById('edit-expense-quantity').value) || 0);
+            expenseData.append('unit_price', parseFloat(document.getElementById('edit-expense-unit-price').value) || 0);
+            expenseData.append('total', parseFloat(document.getElementById('edit-expense-total').value) || 0);
+            expenseData.append('expense_date', document.getElementById('edit-expense-date').value);
+            expenseData.append('supplier', document.getElementById('edit-expense-supplier').value || '');
+            expenseData.append('designation', document.getElementById('edit-expense-designation').value || '');
+          
+            // Lit la valeur du champ texte pour "Prévisible"
+            const predictableField = document.getElementById('edit-expense-predictable');
+            if (predictableField) {
+                expenseData.append('predictable', predictableField.value || 'Oui');
+            }
+
+            const fileInput = document.getElementById('edit-expense-justification');
+            if (fileInput.files[0]) {
+                expenseData.append('justification', fileInput.files[0]);
+            } else {
+                const removeCheckbox = document.getElementById('remove-existing-justification');
+                if (removeCheckbox && removeCheckbox.checked) {
+                    expenseData.append('remove_justification', 'true');
+                }
+            }
+            
+            const response = await fetch(`/api/expenses/${formData.get('expense_id')}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(expenseData)
+                body: expenseData
             });
             
-            if (response.ok) {
-                showNotification('Dépense modifiée avec succès !', 'success');
-                closeEditModal();
-                await loadExpenses(); // Recharger la liste des dépenses
-            } else {
-                const error = await response.json();
-                throw new Error(error.error);
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Erreur lors de la modification');
             }
+            
+            const result = await response.json();
+            closeEditModal();
+            await loadExpenses();
+            showNotification(result.message || 'Dépense modifiée avec succès', 'success');
         } catch (error) {
             console.error('Erreur modification dépense:', error);
-            showNotification(`Erreur: ${error.message}`, 'error');
+            showNotification(error.message, 'error');
         }
     });
     

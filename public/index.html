@@ -2902,15 +2902,15 @@
                 <div class="form-row">
                     <div class="form-group">
                         <label for="edit-expense-category">Catégorie</label>
-                        <select id="edit-expense-category" name="category" required disabled>
-                            <option value="">Sélectionner d'abord un type</option>
+                        <select id="edit-expense-category" name="category" required>
+                            <option value="">Sélectionner une catégorie</option>
                         </select>
                     </div>
                     
                     <div class="form-group">
                         <label for="edit-expense-subcategory">Sous-catégorie</label>
-                        <select id="edit-expense-subcategory" name="subcategory" required disabled>
-                            <option value="">Sélectionner d'abord une catégorie</option>
+                        <select id="edit-expense-subcategory" name="subcategory">
+                            <option value="">Sélectionner une sous-catégorie</option>
                         </select>
                     </div>
                 </div>
@@ -2978,9 +2978,29 @@
                     <textarea id="edit-expense-description" name="description" placeholder="Informations complémentaires..."></textarea>
                 </div>
                 
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeEditModal()">Annuler</button>
-                    <button type="submit" class="btn btn-primary">Modifier la Dépense</button>
+                <div class="form-group">
+                    <label for="edit-expense-justification">Justificatif (Optionnel)</label>
+                    <div class="file-input-wrapper">
+                        <input type="file" id="edit-expense-justification" name="justification" 
+                               accept=".jpg,.jpeg,.png,.pdf,.doc,.docx,.xls,.xlsx"
+                               style="display: none;">
+                        <button type="button" class="file-input-button" onclick="document.getElementById('edit-expense-justification').click();">
+                            <i class="fas fa-upload"></i> <span id="edit-file-input-text">Choisir un fichier</span>
+                        </button>
+                        <button type="button" id="download-existing-justification" class="download-button" style="display: none;">
+                            <i class="fas fa-download"></i> Télécharger
+                        </button>
+                    </div>
+                    <small id="edit-file-format-info">Formats: JPG, PNG, PDF, Word, Excel (Max: 5MB)</small>
+                    <div id="remove-justification-container" style="display: none; margin-top: 10px;">
+                        <input type="checkbox" id="remove-existing-justification" name="remove_justification">
+                        <label for="remove-existing-justification">Supprimer le justificatif existant</label>
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="cancel-btn" onclick="closeEditModal()">Annuler</button>
+                    <button type="submit">Modifier la Dépense</button>
                 </div>
             </form>
         </div>
