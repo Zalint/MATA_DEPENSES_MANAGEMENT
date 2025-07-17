@@ -179,6 +179,11 @@ async function showApp() {
         document.getElementById('stock-vivant-menu').style.display = 'block';
         document.getElementById('user-column').style.display = 'table-cell';
         
+        // Afficher les cartes de dashboard réservées
+        document.getElementById('pl-estim-charges-card').style.display = 'block';
+        document.getElementById('pl-brut-card').style.display = 'block';
+        document.getElementById('cash-bictorys-card').style.display = 'block';
+
         // Section de sauvegarde du tableau de bord initialisée dans loadInitialData()
     }
     
@@ -3640,8 +3645,16 @@ document.addEventListener('DOMContentLoaded', function() {
             } else {
                 // Afficher les cartes additionnelles
                 additionalCards.forEach(card => {
-                    card.style.display = 'block';
-                    card.classList.add('show');
+                    // Vérifier les permissions pour les cartes restreintes
+                    if (card.id === 'pl-sans-stock-charges-card' || card.id === 'total-depot-balance-card') {
+                        if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+                            card.style.display = 'block';
+                            card.classList.add('show');
+                        }
+                    } else {
+                        card.style.display = 'block';
+                        card.classList.add('show');
+                    }
                 });
                 this.innerHTML = '<i class="fas fa-eye-slash"></i> Masquer les cartes additionnelles';
                 showingAll = true;
