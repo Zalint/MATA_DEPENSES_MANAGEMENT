@@ -15115,6 +15115,16 @@ function displayAuditMovementsTable(movements) {
         userCell.textContent = movement.created_by || 'Système';
         row.appendChild(userCell);
         
+        // Date de création
+        const creationDateCell = document.createElement('td');
+        if (movement.date_creation) {
+            const creationDate = new Date(movement.date_creation);
+            creationDateCell.textContent = creationDate.toLocaleDateString('fr-FR');
+        } else {
+            creationDateCell.textContent = '-';
+        }
+        row.appendChild(creationDateCell);
+        
         tbody.appendChild(row);
     });
     
@@ -15132,7 +15142,7 @@ function exportAuditToCSV() {
         const { account, movements } = currentAuditData;
         
         // En-têtes CSV
-        const headers = ['Date', 'Heure', 'Type d\'Opération', 'Montant (FCFA)', 'Description', 'Effectué par'];
+        const headers = ['Date', 'Heure', 'Type d\'Opération', 'Montant (FCFA)', 'Description', 'Effectué par', 'Date de création'];
         
         // Données CSV
         const csvRows = [headers.join(',')];
@@ -15144,7 +15154,8 @@ function exportAuditToCSV() {
                 `"${movement.type}"`,
                 movement.amount,
                 `"${movement.description || ''}"`,
-                `"${movement.created_by || 'Système'}"`
+                `"${movement.created_by || 'Système'}"`,
+                movement.date_creation || ''
             ];
             csvRows.push(row.join(','));
         });

@@ -9048,6 +9048,7 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                 montant,
                 description,
                 effectue_par,
+                date_creation,
                 timestamp_tri
             FROM (
                 -- 1. CRÉDITS RÉGULIERS (table credit_history)
@@ -9058,6 +9059,7 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                     ch.amount as montant,
                     COALESCE(ch.description, 'Crédit de compte') as description,
                     COALESCE(u.full_name, 'Système') as effectue_par,
+                    ch.created_at::date as date_creation,
                     ch.created_at as timestamp_tri
                 FROM credit_history ch
                 LEFT JOIN users u ON ch.credited_by = u.id
@@ -9077,6 +9079,7 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                     sch.amount as montant,
                     COALESCE(sch.comment, 'Crédit spécial') as description,
                     COALESCE(u.full_name, 'Système') as effectue_par,
+                    sch.created_at::date as date_creation,
                     sch.created_at as timestamp_tri
                 FROM special_credit_history sch
                 LEFT JOIN users u ON sch.credited_by = u.id
@@ -9093,6 +9096,7 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                     -e.total as montant, -- Négatif pour les dépenses
                     COALESCE(e.designation, e.description, 'Dépense') as description,
                     COALESCE(u.full_name, 'Système') as effectue_par,
+                    e.created_at::date as date_creation,
                     e.created_at as timestamp_tri
                 FROM expenses e
                 LEFT JOIN users u ON e.user_id = u.id
@@ -9109,6 +9113,7 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                     -th.montant as montant, -- Négatif pour les sorties
                     CONCAT('Transfert vers ', dest.account_name) as description,
                     COALESCE(u.full_name, 'Système') as effectue_par,
+                    th.created_at::date as date_creation,
                     th.created_at as timestamp_tri
                 FROM transfer_history th
                 LEFT JOIN accounts source ON th.source_id = source.id
@@ -9126,6 +9131,7 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                     th.montant as montant, -- Positif pour les entrées
                     CONCAT('Transfert depuis ', source.account_name) as description,
                     COALESCE(u.full_name, 'Système') as effectue_par,
+                    th.created_at::date as date_creation,
                     th.created_at as timestamp_tri
                 FROM transfer_history th
                 LEFT JOIN accounts source ON th.source_id = source.id
@@ -9149,6 +9155,7 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                     END as montant,
                     COALESCE(co.description, cc.client_name) as description,
                     COALESCE(u.full_name, 'Système') as effectue_par,
+                    co.created_at::date as date_creation,
                     co.created_at as timestamp_tri
                 FROM creance_operations co
                 LEFT JOIN creance_clients cc ON co.client_id = cc.id
@@ -9164,6 +9171,8 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
         console.log(`🔍 AUDIT: Exécution de la requête avec ${queryParams.length} paramètres`);
         const movementsResult = await pool.query(auditQuery, queryParams);
         const movements = movementsResult.rows;
+        
+
 
         // Calculer les statistiques
         let totalCredits = 0;
@@ -9214,6 +9223,9 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                 amount: parseFloat(movement.montant) || 0,
                 description: movement.description,
                 created_by: movement.effectue_par,
+                date_creation: movement.date_creation instanceof Date ? 
+                               movement.date_creation.toISOString().split('T')[0] : 
+                               movement.date_creation,
                 timestamp: movement.timestamp_tri
             })),
             sql_query: auditQuery,
