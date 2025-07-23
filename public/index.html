@@ -183,6 +183,7 @@
                         <button id="load-month-data" class="btn btn-primary">
                             <i class="fas fa-refresh"></i> Charger le mois
                         </button>
+                      
                         <div class="month-info">
                             <span id="current-month-display"></span>
                         </div>
@@ -2758,27 +2759,128 @@
                 <!-- Section Transfert -->
                 <section id="transfert-section" class="section">
                     <h2>Transfert de Solde</h2>
-                    <form id="transfert-form" class="account-form" style="max-width: 500px; margin: 0 auto;">
-                        <div class="form-group">
-                            <label for="transfert-source">Compte source</label>
-                            <select id="transfert-source" required>
-                                <option value="">Sélectionner un compte</option>
-                            </select>
-                            <small id="solde-source-info" class="form-help" style="font-size: 12px; color: #666; display: none;"></small>
+                    
+                    <!-- Formulaire de transfert -->
+                    <div class="transfert-container">
+                        <div class="transfert-form-section">
+                            <h3><i class="fas fa-exchange-alt"></i> Nouveau Transfert</h3>
+                            <form id="transfert-form" class="account-form" style="max-width: 500px; margin: 0 auto;">
+                                <div class="form-group">
+                                    <label for="transfert-source">Compte source</label>
+                                    <select id="transfert-source" required>
+                                        <option value="">Sélectionner un compte</option>
+                                    </select>
+                                    <small id="solde-source-info" class="form-help" style="font-size: 12px; color: #666; display: none;"></small>
+                                </div>
+                                <div class="form-group">
+                                    <label for="transfert-destination">Compte destination</label>
+                                    <select id="transfert-destination" required>
+                                        <option value="">Sélectionner un compte</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label for="transfert-montant">Montant à transférer</label>
+                                    <input type="number" id="transfert-montant" min="1" step="1" required placeholder="Montant en FCFA">
+                                </div>
+                                <button type="submit" class="btn btn-primary">Transférer</button>
+                                <div id="transfert-notification" class="notification" style="display:none;"></div>
+                            </form>
                         </div>
-                        <div class="form-group">
-                            <label for="transfert-destination">Compte destination</label>
-                            <select id="transfert-destination" required>
-                                <option value="">Sélectionner un compte</option>
-                            </select>
+                        
+                        <!-- Section historique des transferts -->
+                        <div class="transfert-history-section">
+                            <div class="section-card">
+                                <h3><i class="fas fa-history"></i> Historique des Transferts</h3>
+                                
+                                <!-- Sélecteur de compte pour l'historique -->
+                                <div class="history-controls">
+                                    <div class="form-group">
+                                        <label for="transfert-history-account">Compte à consulter</label>
+                                        <select id="transfert-history-account">
+                                            <option value="">Sélectionner un compte</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="transfert-history-start-date">Date de début</label>
+                                        <input type="date" id="transfert-history-start-date">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="transfert-history-end-date">Date de fin</label>
+                                        <input type="date" id="transfert-history-end-date">
+                                    </div>
+                                    <button id="load-transfert-history" class="btn btn-secondary">
+                                        <i class="fas fa-search"></i> Charger l'historique
+                                    </button>
+                                </div>
+                                
+                                <!-- Tableau des transferts -->
+                                <div class="table-container">
+                                    <div id="transfert-history-list">
+                                        <p class="text-muted text-center">Sélectionnez un compte pour voir son historique de transferts</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Modal de confirmation de suppression -->
+                                <div id="delete-transfert-modal" class="modal">
+                                    <div class="modal-content">
+                                        <div class="modal-header">
+                                            <h2><i class="fas fa-exclamation-triangle"></i> Confirmer la suppression</h2>
+                                            <span class="close" onclick="closeDeleteTransfertModal()">&times;</span>
+                                        </div>
+                                        <div class="modal-body">
+                                            <div class="delete-confirmation">
+                                                <p class="warning-text">
+                                                    <i class="fas fa-exclamation-triangle"></i>
+                                                    <strong>Attention !</strong> Cette action est irréversible.
+                                                </p>
+                                                <div class="transfer-details">
+                                                    <h4>Détails du transfert à supprimer :</h4>
+                                                    <div class="detail-grid">
+                                                        <div class="detail-row">
+                                                            <span class="detail-label">Montant :</span>
+                                                            <span class="detail-value" id="delete-transfert-montant"></span>
+                                                        </div>
+                                                        <div class="detail-row">
+                                                            <span class="detail-label">De :</span>
+                                                            <span class="detail-value" id="delete-transfert-source"></span>
+                                                        </div>
+                                                        <div class="detail-row">
+                                                            <span class="detail-label">Vers :</span>
+                                                            <span class="detail-value" id="delete-transfert-destination"></span>
+                                                        </div>
+                                                        <div class="detail-row">
+                                                            <span class="detail-label">Date :</span>
+                                                            <span class="detail-value" id="delete-transfert-date"></span>
+                                                        </div>
+                                                        <div class="detail-row">
+                                                            <span class="detail-label">Par :</span>
+                                                            <span class="detail-value" id="delete-transfert-user"></span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="impact-warning">
+                                                    <p><strong>Impact de la suppression :</strong></p>
+                                                    <ul>
+                                                        <li>Le montant sera remboursé au compte source</li>
+                                                        <li>Le montant sera débité du compte destination</li>
+                                                        <li>Le transfert sera définitivement supprimé de l'historique</li>
+                                                    </ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button id="confirm-delete-transfert" class="btn btn-danger">
+                                                <i class="fas fa-trash-alt"></i> Supprimer définitivement
+                                            </button>
+                                            <button onclick="closeDeleteTransfertModal()" class="btn btn-secondary">
+                                                <i class="fas fa-times"></i> Annuler
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="form-group">
-                            <label for="transfert-montant">Montant à transférer</label>
-                            <input type="number" id="transfert-montant" min="1" step="1" required placeholder="Montant en FCFA">
-                        </div>
-                        <button type="submit" class="btn btn-primary">Transférer</button>
-                        <div id="transfert-notification" class="notification" style="display:none;"></div>
-                    </form>
+                    </div>
                 </section>
             </main>
         </div>

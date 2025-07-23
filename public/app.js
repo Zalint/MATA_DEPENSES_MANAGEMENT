@@ -4,6 +4,9 @@ let categories = [];
 let users = [];
 let stockVivantConfig = null;
 
+// Variables globales pour les dates du dashboard
+let startDate, endDate;
+
 // Décote par défaut (20%)
 const DEFAULT_DISCOUNT = 0.20;
 
@@ -222,14 +225,22 @@ async function showSection(sectionName) {
             // 1. Réinitialiser les dates avec la fonction dédiée
             resetDashboardDates();
             
-            // 2. Charger toutes les données avec les nouvelles dates
-            await loadDashboardData();
-            await loadStockSummary(startDate, endDate);
-            await loadStockVivantTotal();
-            await loadStockVivantVariation(startDate, endDate);
-            await loadTotalCreances();
-            await loadCreancesMois();
-            await loadTransfersCard();
+            // 2. Appeler automatiquement "Charger le mois" pour recharger les données
+            const loadButton = document.getElementById('load-month-data');
+            if (loadButton) {
+                console.log('🔄 Dashboard: Appel automatique du bouton "Charger le mois"');
+                loadButton.click();
+            } else {
+                // Fallback si le bouton n'existe pas
+                console.log('🔄 Dashboard: Fallback - chargement direct des données');
+                await loadDashboardData();
+                await loadStockSummary(startDate, endDate);
+                await loadStockVivantTotal();
+                await loadStockVivantVariation(startDate, endDate);
+                await loadTotalCreances();
+                await loadCreancesMois();
+                await loadTransfersCard();
+            }
             break;
         case 'expenses':
             loadExpenses();
@@ -383,8 +394,12 @@ async function loadInitialData() {
     
     // Définir les dates par défaut AVANT de charger le dashboard
     // Utiliser une plage de dates élargie pour inclure toutes les dépenses existantes
-    const startDate = '2025-01-01'; // Début de l'année pour capturer toutes les dépenses
-    const endDate = '2025-12-31';   // Fin de l'année pour capturer toutes les dépenses
+    const defaultStartDate = '2025-01-01'; // Début de l'année pour capturer toutes les dépenses
+    const defaultEndDate = '2025-12-31';   // Fin de l'année pour capturer toutes les dépenses
+    
+    // Initialiser les variables globales
+    startDate = defaultStartDate;
+    endDate = defaultEndDate;
     
     // Vérifier si les éléments existent avant de les utiliser
     const dashboardStartDate = document.getElementById('dashboard-start-date');
@@ -957,8 +972,12 @@ function resetDashboardDates() {
     const currentDay = currentDate.getDate();
     
     const currentMonth = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}`;
-    const startDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-01`;
-    const endDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-${currentDay.toString().padStart(2, '0')}`; // DATE DU JOUR
+    const localStartDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-01`;
+    const localEndDate = `${currentYear}-${currentMonthNum.toString().padStart(2, '0')}-${currentDay.toString().padStart(2, '0')}`; // DATE DU JOUR
+    
+    // Mettre à jour les variables globales
+    startDate = localStartDate;
+    endDate = localEndDate;
     
     // Vérifier si les éléments existent avant de les utiliser
     const dashboardStartDate = document.getElementById('dashboard-start-date');
@@ -7405,9 +7424,19 @@ async function handleTransfertSubmit(e) {
             await loadTransfertAccounts();
             
             // Mettre à jour le dashboard si affiché
-            const dashboardSection = document.getElementById('dashboard-section');
-            if (dashboardSection && dashboardSection.classList.contains('active') && typeof loadDashboard === 'function') {
-                await loadDashboard();
+            await reloadDashboardIfActive();
+            
+            // Attendre un peu pour s'assurer que toutes les données sont mises à jour
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Rechargement final pour s'assurer de la cohérence
+            await reloadDashboardIfActive();
+            
+            // Rechargement forcé des comptes dans la section de gestion des comptes
+            const accountsSection = document.getElementById('manage-accounts-section');
+            if (accountsSection && accountsSection.classList.contains('active')) {
+                console.log('[Transfert] Rechargement forcé des comptes...');
+                await loadAccounts();
             }
             
             // Mettre à jour la liste des comptes si affichée
@@ -7416,6 +7445,12 @@ async function handleTransfertSubmit(e) {
                 if (accountsSection && accountsSection.classList.contains('active')) {
                     await loadAccounts();
                 }
+            }
+            
+            // Recharger l'historique des transferts si un compte est sélectionné
+            const historyAccountSelect = document.getElementById('transfert-history-account');
+            if (historyAccountSelect && historyAccountSelect.value) {
+                await loadTransfertHistory();
             }
         } else {
             notif.textContent = data.error || 'Erreur lors du transfert.';
@@ -7479,9 +7514,404 @@ async function loadTransfertAccounts() {
             const soldeInfo = document.getElementById('solde-source-info');
             if (soldeInfo) soldeInfo.style.display = 'block';
         });
+        
+        // Charger les comptes pour l'historique
+        await loadTransfertHistoryAccounts();
+        
+        // Attacher les événements pour l'historique
+        attachTransfertHistoryEvents();
+        
     } catch (e) {
         console.error('[Transfert] Erreur chargement comptes transfert:', e);
     }
+}
+
+// Fonction pour charger les comptes dans le sélecteur d'historique
+async function loadTransfertHistoryAccounts() {
+    const historyAccountSelect = document.getElementById('transfert-history-account');
+    if (!historyAccountSelect) return;
+    
+    try {
+        const resp = await fetch('/api/accounts');
+        const accounts = await resp.json();
+        
+        // Vider le sélecteur
+        historyAccountSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
+        
+        // Filtrer les comptes autorisés (même logique que pour les transferts)
+        const allowedTypes = ['classique', 'statut', 'Ajustement'];
+        const filtered = accounts.filter(acc => allowedTypes.includes(acc.account_type) && acc.is_active);
+        
+        filtered.forEach(acc => {
+            const opt = document.createElement('option');
+            opt.value = acc.id;
+            opt.textContent = acc.account_name + ' (' + parseInt(acc.current_balance).toLocaleString() + ' FCFA)';
+            historyAccountSelect.appendChild(opt);
+        });
+        
+        console.log('[Transfert History] Comptes chargés:', filtered.length);
+    } catch (e) {
+        console.error('[Transfert History] Erreur chargement comptes:', e);
+    }
+}
+
+// Fonction pour attacher les événements de l'historique
+function attachTransfertHistoryEvents() {
+    const loadHistoryBtn = document.getElementById('load-transfert-history');
+    if (loadHistoryBtn) {
+        loadHistoryBtn.addEventListener('click', loadTransfertHistory);
+    }
+    
+    // Charger automatiquement l'historique quand on change de compte
+    const historyAccountSelect = document.getElementById('transfert-history-account');
+    if (historyAccountSelect) {
+        historyAccountSelect.addEventListener('change', function() {
+            if (this.value) {
+                loadTransfertHistory();
+            } else {
+                // Réinitialiser l'affichage
+                const historyList = document.getElementById('transfert-history-list');
+                if (historyList) {
+                    historyList.innerHTML = '<p class="text-muted text-center">Sélectionnez un compte pour voir son historique de transferts</p>';
+                }
+            }
+        });
+    }
+}
+
+// Fonction pour charger l'historique des transferts d'un compte
+async function loadTransfertHistory() {
+    const accountSelect = document.getElementById('transfert-history-account');
+    const startDateInput = document.getElementById('transfert-history-start-date');
+    const endDateInput = document.getElementById('transfert-history-end-date');
+    const historyList = document.getElementById('transfert-history-list');
+    const loadBtn = document.getElementById('load-transfert-history');
+    
+    if (!accountSelect || !historyList) return;
+    
+    const accountId = accountSelect.value;
+    if (!accountId) {
+        historyList.innerHTML = '<p class="text-muted text-center">Sélectionnez un compte pour voir son historique de transferts</p>';
+        return;
+    }
+    
+    // Afficher le chargement
+    loadBtn.disabled = true;
+    loadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Chargement...';
+    historyList.innerHTML = '<p class="text-muted text-center">Chargement de l\'historique...</p>';
+    
+    try {
+        // Construire l'URL avec les paramètres
+        let url = `/api/transfers/account/${accountId}`;
+        const params = new URLSearchParams();
+        
+        if (startDateInput && startDateInput.value) {
+            params.append('start_date', startDateInput.value);
+        }
+        if (endDateInput && endDateInput.value) {
+            params.append('end_date', endDateInput.value);
+        }
+        
+        if (params.toString()) {
+            url += '?' + params.toString();
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Erreur lors du chargement de l\'historique');
+        }
+        
+        // Afficher l'historique
+        displayTransfertHistory(data);
+        
+    } catch (error) {
+        console.error('[Transfert History] Erreur:', error);
+        historyList.innerHTML = `
+            <div class="alert alert-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                Erreur lors du chargement de l'historique: ${error.message}
+            </div>
+        `;
+    } finally {
+        // Réinitialiser le bouton
+        loadBtn.disabled = false;
+        loadBtn.innerHTML = '<i class="fas fa-search"></i> Charger l\'historique';
+    }
+}
+
+// Fonction pour afficher l'historique des transferts
+function displayTransfertHistory(data) {
+    const historyList = document.getElementById('transfert-history-list');
+    if (!historyList) return;
+    
+    if (!data.transfers || data.transfers.length === 0) {
+        historyList.innerHTML = `
+            <div class="text-center">
+                <p class="text-muted">
+                    <i class="fas fa-info-circle"></i>
+                    Aucun transfert trouvé pour ce compte
+                    ${data.account_name ? `(${data.account_name})` : ''}
+                </p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Créer le tableau
+    let html = `
+        <div class="table-responsive">
+            <table class="transfert-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Type</th>
+                        <th>Compte</th>
+                        <th>Montant</th>
+                        <th>Par</th>
+                        <th class="transfert-actions-column">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+    
+    data.transfers.forEach(transfer => {
+        const date = new Date(transfer.created_at).toLocaleDateString('fr-FR');
+        const time = new Date(transfer.created_at).toLocaleTimeString('fr-FR', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+        const montant = Number(transfer.montant).toLocaleString('fr-FR') + ' FCFA';
+        
+        // Déterminer le type et le compte concerné
+        const isSortant = transfer.transfer_type === 'SORTANT';
+        const otherAccount = isSortant ? transfer.destination_account : transfer.source_account;
+        
+        // Vérifier si l'utilisateur peut supprimer des transferts
+        const canDelete = ['directeur_general', 'pca', 'admin'].includes(currentUser.role);
+        
+        html += `
+            <tr>
+                <td class="transfert-date">${date}<br><small>${time}</small></td>
+                <td>
+                    <span class="transfert-type ${isSortant ? 'sortant' : 'entrant'}">
+                        ${isSortant ? 'Sortant' : 'Entrant'}
+                    </span>
+                </td>
+                <td class="transfert-user">${otherAccount}</td>
+                <td class="transfert-amount ${isSortant ? 'negative' : 'positive'}">
+                    ${isSortant ? '-' : '+'}${montant}
+                </td>
+                <td class="transfert-user">${transfer.transferred_by}</td>
+                <td class="transfert-actions ${canDelete ? '' : 'hidden'}">
+                    <button class="btn-delete-transfert" onclick="showDeleteTransfertModal(${transfer.id}, '${transfer.source_account}', '${transfer.destination_account}', ${transfer.montant}, '${transfer.created_at}', '${transfer.transferred_by}')" title="Supprimer ce transfert">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += `
+                </tbody>
+            </table>
+        </div>
+        <div class="mt-3">
+            <small class="text-muted">
+                <i class="fas fa-info-circle"></i>
+                ${data.transfers.length} transfert(s) trouvé(s)
+                ${data.account_name ? `pour ${data.account_name}` : ''}
+            </small>
+        </div>
+    `;
+    
+    historyList.innerHTML = html;
+}
+
+// Variables globales pour la suppression de transfert
+let currentTransferToDelete = null;
+
+// Fonction pour afficher la modal de suppression de transfert
+function showDeleteTransfertModal(transferId, sourceAccount, destinationAccount, montant, createdAt, transferredBy) {
+    currentTransferToDelete = transferId;
+    
+    // Remplir les détails dans la modal
+    document.getElementById('delete-transfert-montant').textContent = Number(montant).toLocaleString('fr-FR') + ' FCFA';
+    document.getElementById('delete-transfert-source').textContent = sourceAccount;
+    document.getElementById('delete-transfert-destination').textContent = destinationAccount;
+    document.getElementById('delete-transfert-date').textContent = new Date(createdAt).toLocaleDateString('fr-FR') + ' ' + new Date(createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('delete-transfert-user').textContent = transferredBy;
+    
+    // Afficher la modal
+    const modal = document.getElementById('delete-transfert-modal');
+    modal.style.display = 'block';
+    
+    // Attacher l'événement de confirmation
+    const confirmBtn = document.getElementById('confirm-delete-transfert');
+    confirmBtn.onclick = deleteTransfert;
+}
+
+// Fonction pour fermer la modal de suppression
+function closeDeleteTransfertModal() {
+    const modal = document.getElementById('delete-transfert-modal');
+    modal.style.display = 'none';
+    currentTransferToDelete = null;
+}
+
+// Fonction pour supprimer un transfert
+async function deleteTransfert() {
+    if (!currentTransferToDelete) return;
+    
+    const confirmBtn = document.getElementById('confirm-delete-transfert');
+    const originalText = confirmBtn.innerHTML;
+    
+    // Afficher le chargement
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Suppression...';
+    
+    try {
+        const response = await fetch(`/api/transfers/${currentTransferToDelete}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            // Fermer la modal
+            closeDeleteTransfertModal();
+            
+            // Afficher une notification de succès
+            showNotification(data.message, 'success');
+            
+            // Recharger l'historique
+            await loadTransfertHistory();
+            
+            // Recharger les comptes de transfert pour mettre à jour les soldes
+            await loadTransfertAccounts();
+            
+            // Mettre à jour le dashboard si il est affiché
+            await reloadDashboardIfActive();
+            
+        } else {
+            throw new Error(data.error || 'Erreur lors de la suppression');
+        }
+        
+    } catch (error) {
+        console.error('[Suppression Transfert] Erreur:', error);
+        showNotification('Erreur lors de la suppression: ' + error.message, 'error');
+    } finally {
+        // Réinitialiser le bouton
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = originalText;
+    }
+}
+
+// Fermer la modal si on clique en dehors
+window.onclick = function(event) {
+    const modal = document.getElementById('delete-transfert-modal');
+    if (event.target === modal) {
+        closeDeleteTransfertModal();
+    }
+}
+
+// Fonction utilitaire pour recharger le dashboard
+async function reloadDashboardIfActive() {
+    const dashboardSection = document.getElementById('dashboard-section');
+    if (dashboardSection && dashboardSection.classList.contains('active')) {
+        console.log('[Dashboard] Rechargement automatique...');
+        
+        try {
+            // Récupérer les dates actuelles du dashboard
+            const currentStartDate = document.getElementById('dashboard-start-date')?.value || 
+                                   document.getElementById('filter-start-date')?.value || 
+                                   new Date().toISOString().split('T')[0].substring(0, 7) + '-01';
+            const currentEndDate = document.getElementById('dashboard-end-date')?.value || 
+                                 document.getElementById('filter-end-date')?.value || 
+                                 new Date().toISOString().split('T')[0];
+            
+            console.log('[Dashboard] Dates utilisées:', { currentStartDate, currentEndDate });
+            
+            // Recharger toutes les données du dashboard
+            await loadDashboardData();
+            await loadStockSummary(currentStartDate, currentEndDate);
+            await loadStockVivantTotal();
+            await loadStockVivantVariation(currentStartDate, currentEndDate);
+            await loadTotalCreances();
+            await loadCreancesMois();
+            await loadTransfersCard();
+            
+            // Forcer la mise à jour des éléments d'affichage
+            updateDashboardDisplay();
+            
+            console.log('[Dashboard] Rechargement terminé avec succès');
+        } catch (error) {
+            console.error('[Dashboard] Erreur lors du rechargement:', error);
+        }
+    }
+}
+
+
+
+// Fonction pour forcer la mise à jour de l'affichage du dashboard
+function updateDashboardDisplay() {
+    console.log('[Dashboard] Début de la mise à jour visuelle...');
+    
+    // Animation sur le conteneur principal du dashboard
+    const dashboardSection = document.getElementById('dashboard-section');
+    if (dashboardSection) {
+        dashboardSection.classList.add('dashboard-updating');
+        setTimeout(() => {
+            dashboardSection.classList.remove('dashboard-updating');
+        }, 1000);
+    }
+    
+    // Animation sur les cartes de statistiques
+    const statCards = document.querySelectorAll('.stat-card');
+    statCards.forEach((card, index) => {
+        setTimeout(() => {
+            card.classList.add('updating');
+            setTimeout(() => {
+                card.classList.remove('updating');
+            }, 800);
+        }, index * 100);
+    });
+    
+    // Animation sur les tableaux
+    const tables = document.querySelectorAll('.table-responsive');
+    tables.forEach(table => {
+        table.classList.add('table-updating');
+        setTimeout(() => {
+            table.classList.remove('table-updating');
+        }, 500);
+    });
+    
+    // Forcer le re-rendu des éléments
+    const elementsToUpdate = [
+        '#solde-amount',
+        '#monthly-balance-total',
+        '#total-partner-balance',
+        '#monthly-burn',
+        '#cash-bictorys-latest',
+        '#pl-estim-charges',
+        '#pl-brut'
+    ];
+    
+    elementsToUpdate.forEach(selector => {
+        const element = document.querySelector(selector);
+        if (element) {
+            element.style.transform = 'scale(1.05)';
+            element.style.transition = 'transform 0.3s ease';
+            setTimeout(() => {
+                element.style.transform = 'scale(1)';
+            }, 300);
+        }
+    });
+    
+    console.log('[Dashboard] Mise à jour visuelle terminée');
 }
 
 // Fonction pour charger les données de transferts (DG/PCA uniquement)

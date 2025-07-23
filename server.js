@@ -5774,6 +5774,177 @@ app.get('/api/transfers', requireAuth, async (req, res) => {
     }
 });
 
+// Route pour récupérer l'historique des transferts d'un compte spécifique
+app.get('/api/transfers/account/:accountId', requireAuth, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        const { start_date, end_date } = req.query;
+        
+        // Vérifier que le compte existe
+        const accountCheck = await pool.query('SELECT id, account_name FROM accounts WHERE id = $1', [accountId]);
+        if (accountCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte non trouvé' });
+        }
+        
+        const accountName = accountCheck.rows[0].account_name;
+        
+        // Construire la requête pour récupérer tous les transferts impliquant ce compte
+        let query, queryParams = [];
+        
+        if (start_date && end_date) {
+            query = `
+                SELECT 
+                    th.id,
+                    th.montant,
+                    th.created_at,
+                    a_source.account_name as source_account,
+                    a_dest.account_name as destination_account,
+                    u.full_name as transferred_by,
+                    CASE 
+                        WHEN th.source_id = $1 THEN 'SORTANT'
+                        WHEN th.destination_id = $1 THEN 'ENTRANT'
+                    END as transfer_type
+                FROM transfer_history th
+                JOIN accounts a_source ON th.source_id = a_source.id
+                JOIN accounts a_dest ON th.destination_id = a_dest.id
+                JOIN users u ON th.transferred_by = u.id
+                WHERE (th.source_id = $1 OR th.destination_id = $1)
+                AND DATE(th.created_at) >= $2 AND DATE(th.created_at) <= $3
+                ORDER BY th.created_at DESC
+                LIMIT 50
+            `;
+            queryParams = [accountId, start_date, end_date];
+        } else {
+            query = `
+                SELECT 
+                    th.id,
+                    th.montant,
+                    th.created_at,
+                    a_source.account_name as source_account,
+                    a_dest.account_name as destination_account,
+                    u.full_name as transferred_by,
+                    CASE 
+                        WHEN th.source_id = $1 THEN 'SORTANT'
+                        WHEN th.destination_id = $1 THEN 'ENTRANT'
+                    END as transfer_type
+                FROM transfer_history th
+                JOIN accounts a_source ON th.source_id = a_source.id
+                JOIN accounts a_dest ON th.destination_id = a_dest.id
+                JOIN users u ON th.transferred_by = u.id
+                WHERE (th.source_id = $1 OR th.destination_id = $1)
+                ORDER BY th.created_at DESC
+                LIMIT 50
+            `;
+            queryParams = [accountId];
+        }
+        
+        const result = await pool.query(query, queryParams);
+        
+        res.json({
+            transfers: result.rows,
+            account_name: accountName,
+            period: { start_date: start_date || null, end_date: end_date || null }
+        });
+    } catch (error) {
+        console.error('Erreur récupération transferts du compte:', error);
+        res.status(500).json({ error: 'Erreur serveur: ' + error.message });
+    }
+});
+
+// Route pour supprimer un transfert (DG/PCA/Admin uniquement)
+app.delete('/api/transfers/:transferId', requireSuperAdmin, async (req, res) => {
+    try {
+        const { transferId } = req.params;
+        
+        // Vérifier que le transfert existe et récupérer ses détails
+        const transferCheck = await pool.query(`
+            SELECT 
+                th.id,
+                th.montant,
+                th.source_id,
+                th.destination_id,
+                a_source.account_name as source_account,
+                a_dest.account_name as destination_account,
+                th.created_at
+            FROM transfer_history th
+            JOIN accounts a_source ON th.source_id = a_source.id
+            JOIN accounts a_dest ON th.destination_id = a_dest.id
+            WHERE th.id = $1
+        `, [transferId]);
+        
+        if (transferCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Transfert non trouvé' });
+        }
+        
+        const transfer = transferCheck.rows[0];
+        
+        // Vérifier que les comptes existent toujours
+        const accountsCheck = await pool.query('SELECT id, current_balance FROM accounts WHERE id = ANY($1)', [[transfer.source_id, transfer.destination_id]]);
+        if (accountsCheck.rows.length !== 2) {
+            return res.status(400).json({ error: 'Un ou plusieurs comptes du transfert n\'existent plus' });
+        }
+        
+        const sourceAccount = accountsCheck.rows.find(a => a.id == transfer.source_id);
+        const destAccount = accountsCheck.rows.find(a => a.id == transfer.destination_id);
+        
+        // Vérifier que les comptes ont suffisamment de solde pour annuler le transfert
+        if (sourceAccount.current_balance < transfer.montant) {
+            return res.status(400).json({ 
+                error: `Solde insuffisant sur le compte source (${sourceAccount.current_balance} FCFA) pour annuler le transfert de ${transfer.montant} FCFA` 
+            });
+        }
+        
+        // Début transaction
+        await pool.query('BEGIN');
+        
+        try {
+            // Annuler le transfert : rembourser le compte source et débiter le compte destination
+            await pool.query('UPDATE accounts SET current_balance = current_balance + $1, total_spent = total_spent - $1 WHERE id = $2', [transfer.montant, transfer.source_id]);
+            await pool.query('UPDATE accounts SET current_balance = current_balance - $1, total_credited = total_credited - $1 WHERE id = $2', [transfer.montant, transfer.destination_id]);
+            
+            // Supprimer le transfert de l'historique
+            await pool.query('DELETE FROM transfer_history WHERE id = $1', [transferId]);
+            
+            // Vérifier les soldes après annulation
+            const sourceAfter = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [transfer.source_id]);
+            const destAfter = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [transfer.destination_id]);
+            
+            console.log('[Suppression Transfert] Transfert supprimé:', {
+                id: transferId,
+                montant: transfer.montant,
+                source: transfer.source_account,
+                destination: transfer.destination_account,
+                soldes_apres: {
+                    source: sourceAfter.rows[0].current_balance,
+                    destination: destAfter.rows[0].current_balance
+                },
+                supprime_par: req.session.user.username
+            });
+            
+            await pool.query('COMMIT');
+            
+            res.json({ 
+                success: true,
+                message: `Transfert de ${transfer.montant.toLocaleString('fr-FR')} FCFA supprimé avec succès`,
+                transfer_details: {
+                    montant: transfer.montant,
+                    source_account: transfer.source_account,
+                    destination_account: transfer.destination_account,
+                    date: transfer.created_at
+                }
+            });
+            
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+        
+    } catch (error) {
+        console.error('Erreur suppression transfert:', error);
+        res.status(500).json({ error: 'Erreur serveur: ' + error.message });
+    }
+});
+
 // =====================================================
 // STOCK VIVANT ROUTES
 // =====================================================
