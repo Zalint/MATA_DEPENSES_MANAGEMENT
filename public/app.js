@@ -4783,7 +4783,7 @@ function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCre
     
     if (typeof data.monthly_balance !== 'undefined') {
         const monthlyBalance = parseInt(data.monthly_balance) || 0;
-        extraAmounts += `<span style='margin-right:20px;'><strong>Balance du mois:</strong> <span style='color: ${monthlyBalance >= 0 ? 'green' : 'red'}; font-weight: bold;'>${formatCurrency(monthlyBalance)}</span></span>`;
+        extraAmounts += `<span style='margin-right:20px;'><strong>Balance du mois brut</strong> <span style='color: ${monthlyBalance >= 0 ? 'green' : 'red'}; font-weight: bold;'>${formatCurrency(monthlyBalance)}</span></span>`;
     }
     
     if (typeof data.montant_debut_mois !== 'undefined' && data.account_type === 'classique') {
@@ -4825,8 +4825,8 @@ function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCre
         let currentHTML = totalAmountElement.innerHTML;
         
         // Remplacer la balance du mois existante par la balance cumulative finale
-        const balanceRegex = /<span style='margin-right:20px;'><strong>Balance du mois:<\/strong>.*?<\/span><\/span>/;
-        const newBalanceHTML = `<span style='margin-right:20px;'><strong>Balance du mois:</strong> <span style='color: ${finalBalance >= 0 ? 'green' : 'red'}; font-weight: bold;'>${formatCurrency(finalBalance)}</span></span>`;
+        const balanceRegex = /<span style='margin-right:20px;'><strong>Balance du mois: brut<\/strong>.*?<\/span><\/span>/;
+        const newBalanceHTML = `<span style='margin-right:20px;'><strong>Balance du mois net</strong> <span style='color: ${finalBalance >= 0 ? 'green' : 'red'}; font-weight: bold;'>${formatCurrency(finalBalance)}</span></span>`;
         
         if (balanceRegex.test(currentHTML)) {
             currentHTML = currentHTML.replace(balanceRegex, newBalanceHTML);
@@ -5637,10 +5637,12 @@ function updateModalFilteredCount(filtered, total) {
     const modalData = window.modalAccountData || {};
     const monthlyCredits = parseInt(modalData.monthly_credits) || 0;
     const monthlyBalance = parseInt(modalData.monthly_balance) || 0;
+    const montantDebutMois = parseInt(modalData.montant_debut_mois) || 0;
     
     console.log('🔍 CLIENT updateModalFilteredCount: modalData:', modalData);
     console.log('🔍 CLIENT updateModalFilteredCount: monthlyCredits:', monthlyCredits);
     console.log('🔍 CLIENT updateModalFilteredCount: monthlyBalance:', monthlyBalance);
+    console.log('🔍 CLIENT updateModalFilteredCount: montantDebutMois:', montantDebutMois);
     
     // Créer le texte avec les informations financières
     let countText = `Affichage de ${filtered} dépense${filtered > 1 ? 's' : ''} sur ${total} au total`;
@@ -5652,7 +5654,19 @@ function updateModalFilteredCount(filtered, total) {
     
     if (modalData.monthly_balance !== undefined) {
         const balanceColor = monthlyBalance >= 0 ? 'green' : 'red';
-        countText += ` | Balance du mois: <span style="color: ${balanceColor}; font-weight: bold;">${formatCurrency(monthlyBalance)}</span>`;
+        countText += ` | Balance du mois brut <span style="color: ${balanceColor}; font-weight: bold;">${formatCurrency(monthlyBalance)}</span>`;
+    }
+    
+    if (modalData.montant_debut_mois !== undefined && modalData.account_type === 'classique') {
+        const debutColor = montantDebutMois >= 0 ? 'green' : 'red';
+        countText += ` | Montant début de mois: <span style="color: ${debutColor}; font-weight: bold;">${formatCurrency(montantDebutMois)}</span>`;
+    }
+    
+    // Calculer et afficher la balance du mois net (brut - montant début de mois)
+    if (modalData.monthly_balance !== undefined && modalData.montant_debut_mois !== undefined && modalData.account_type === 'classique') {
+        const balanceNet = monthlyBalance - montantDebutMois;
+        const balanceNetColor = balanceNet >= 0 ? 'green' : 'red';
+        countText += ` | Balance du mois net <span style="color: ${balanceNetColor}; font-weight: bold;">${formatCurrency(balanceNet)}</span>`;
     }
     
     console.log('🔍 CLIENT updateModalFilteredCount: countText final:', countText);
