@@ -6774,6 +6774,9 @@ async function createCreanceTablesIfNotExists() {
 // Initialiser les tables créance au démarrage
 createCreanceTablesIfNotExists();
 
+// Initialiser la table dashboard_snapshots au démarrage
+createDashboardSnapshotsTable();
+
 // Route pour obtenir les comptes créance accessibles à l'utilisateur
 app.get('/api/creance/accounts', requireAuth, async (req, res) => {
     try {
@@ -8558,6 +8561,9 @@ async function createDashboardSnapshotsTable() {
                 cash_bictorys_amount DECIMAL(15,2) DEFAULT 0,
                 creances_total DECIMAL(15,2) DEFAULT 0,
                 creances_mois DECIMAL(15,2) DEFAULT 0,
+                
+                -- Livraisons partenaires
+                livraisons_partenaires DECIMAL(15,2) DEFAULT 0,
                 
                 -- Stock
                 stock_point_vente DECIMAL(15,2) DEFAULT 0,
