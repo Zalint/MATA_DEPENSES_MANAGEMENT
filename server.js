@@ -7911,7 +7911,7 @@ app.post('/api/cash-bictorys/upload', requireCashBictorysAuth, upload.single('fi
 // Route pour obtenir toutes les données du dashboard pour un mois spécifique
 app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
     try {
-        const { month, cutoff_date } = req.query; // Format YYYY-MM et YYYY-MM-DD
+        const { month, cutoff_date, start_date, end_date } = req.query; // Format YYYY-MM et YYYY-MM-DD
         const userRole = req.session.user.role;
         const userId = req.session.user.id;
 
@@ -7919,24 +7919,34 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
         }
 
-        // Calculer les dates de début et fin du mois
-        const [year, monthNum] = month.split('-').map(Number);
-        const startDate = new Date(year, monthNum - 1, 1);
+        // Utiliser les dates fournies par le frontend si disponibles, sinon calculer
+        let startDateStr, endDateStr;
         
-        // Si cutoff_date est fourni, utiliser cette date comme fin, sinon fin du mois
-        let endDate;
-        let endDateStr;
-        
-        if (cutoff_date && /^\d{4}-\d{2}-\d{2}$/.test(cutoff_date)) {
-            endDate = new Date(cutoff_date + ' 23:59:59');
-            endDateStr = cutoff_date + ' 23:59:59';
-            console.log(`📅 SERVER: monthly-data avec cutoff_date: ${cutoff_date}`);
+        if (start_date && end_date && /^\d{4}-\d{2}-\d{2}$/.test(start_date) && /^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+            // Utiliser les dates fournies par le frontend
+            startDateStr = start_date;
+            endDateStr = end_date + ' 23:59:59';
+            console.log(`📅 SERVER: monthly-data avec dates frontend: ${start_date} à ${end_date}`);
         } else {
-            endDate = new Date(year, monthNum, 0, 23, 59, 59);
-            endDateStr = endDate.toISOString().split('T')[0] + ' 23:59:59';
+            // Calculer les dates de début et fin du mois (fallback)
+            const [year, monthNum] = month.split('-').map(Number);
+            const startDate = new Date(year, monthNum - 1, 1);
+            
+            // Si cutoff_date est fourni, utiliser cette date comme fin, sinon fin du mois
+            let endDate;
+            
+            if (cutoff_date && /^\d{4}-\d{2}-\d{2}$/.test(cutoff_date)) {
+                endDate = new Date(cutoff_date + ' 23:59:59');
+                endDateStr = cutoff_date + ' 23:59:59';
+                console.log(`📅 SERVER: monthly-data avec cutoff_date: ${cutoff_date}`);
+            } else {
+                endDate = new Date(year, monthNum, 0, 23, 59, 59);
+                endDateStr = endDate.toISOString().split('T')[0] + ' 23:59:59';
+            }
+            
+            startDateStr = startDate.toISOString().split('T')[0];
+            console.log(`📅 SERVER: monthly-data avec dates calculées: ${startDateStr} à ${endDateStr}`);
         }
-        
-        const startDateStr = startDate.toISOString().split('T')[0];
 
         let accountFilter = '';
         let params = [startDateStr, endDateStr];

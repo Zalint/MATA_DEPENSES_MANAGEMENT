@@ -1003,6 +1003,94 @@ function resetDashboardDates() {
     }
 }
 
+// Initialiser les listeners pour les champs de date du dashboard
+function initDashboardDateListeners() {
+    console.log('🔍 CLIENT: Tentative d\'initialisation des listeners de date du dashboard');
+    
+    const dashboardStartDate = document.getElementById('dashboard-start-date');
+    const dashboardEndDate = document.getElementById('dashboard-end-date');
+    const snapshotDate = document.getElementById('snapshot-date');
+    
+    console.log('🔍 CLIENT: Éléments trouvés:', {
+        dashboardStartDate: !!dashboardStartDate,
+        dashboardEndDate: !!dashboardEndDate,
+        snapshotDate: !!snapshotDate
+    });
+    
+    if (dashboardStartDate) {
+        // Supprimer l'ancien listener s'il existe
+        dashboardStartDate.removeEventListener('change', handleDashboardDateChange);
+        dashboardStartDate.addEventListener('change', handleDashboardDateChange);
+        console.log('✅ CLIENT: Listener ajouté pour dashboard-start-date');
+        
+        // Test manuel pour vérifier que l'élément fonctionne
+        console.log('🔍 CLIENT: Test - Valeur actuelle dashboard-start-date:', dashboardStartDate.value);
+    } else {
+        console.warn('⚠️ CLIENT: Élément dashboard-start-date non trouvé');
+    }
+    
+    if (dashboardEndDate) {
+        // Supprimer l'ancien listener s'il existe
+        dashboardEndDate.removeEventListener('change', handleDashboardDateChange);
+        dashboardEndDate.addEventListener('change', handleDashboardDateChange);
+        console.log('✅ CLIENT: Listener ajouté pour dashboard-end-date');
+        
+        // Test manuel pour vérifier que l'élément fonctionne
+        console.log('🔍 CLIENT: Test - Valeur actuelle dashboard-end-date:', dashboardEndDate.value);
+    } else {
+        console.warn('⚠️ CLIENT: Élément dashboard-end-date non trouvé');
+    }
+    
+    if (snapshotDate) {
+        // Supprimer l'ancien listener s'il existe
+        snapshotDate.removeEventListener('change', handleDashboardDateChange);
+        snapshotDate.addEventListener('change', handleDashboardDateChange);
+        console.log('✅ CLIENT: Listener ajouté pour snapshot-date');
+        
+        // Test manuel pour vérifier que l'élément fonctionne
+        console.log('🔍 CLIENT: Test - Valeur actuelle snapshot-date:', snapshotDate.value);
+    } else {
+        console.warn('⚠️ CLIENT: Élément snapshot-date non trouvé');
+    }
+}
+
+// Fonction appelée quand les dates du dashboard changent
+async function handleDashboardDateChange(event) {
+    console.log('📅 CLIENT: Changement de date détecté dans le dashboard');
+    console.log('📅 CLIENT: Élément qui a changé:', event.target.id);
+    console.log('📅 CLIENT: Nouvelle valeur:', event.target.value);
+    
+    const dashboardStartDate = document.getElementById('dashboard-start-date')?.value;
+    const dashboardEndDate = document.getElementById('dashboard-end-date')?.value;
+    
+    console.log('📅 CLIENT: Valeurs actuelles des dates:', {
+        startDate: dashboardStartDate,
+        endDate: dashboardEndDate
+    });
+    
+    if (!dashboardStartDate || !dashboardEndDate) {
+        console.warn('⚠️ CLIENT: Dates manquantes, impossible de mettre à jour');
+        return;
+    }
+    
+    console.log(`📅 CLIENT: Mise à jour avec les dates: ${dashboardStartDate} à ${dashboardEndDate}`);
+    
+    try {
+        // Recharger les données du dashboard avec les nouvelles dates
+        await loadDashboardData();
+        
+        // Si un mois est sélectionné, recharger aussi les données mensuelles
+        if (selectedMonth) {
+            await loadMonthlySpecificData(selectedMonth);
+        }
+        
+        console.log('✅ CLIENT: Données mises à jour après changement de date');
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur lors de la mise à jour après changement de date:', error);
+        showNotification('Erreur lors de la mise à jour des données', 'error');
+    }
+}
+
 // Fonction appelée quand l'option "Afficher les comptes avec zéro dépenses" change
 function onShowZeroAccountsChange() {
     // Recharger les données du dashboard pour refléter le changement
@@ -5635,13 +5723,27 @@ function updateModalFilteredCount(filtered, total) {
     
     // Récupérer les informations financières depuis les données de la modal
     const modalData = window.modalAccountData || {};
+    
+    // Calculer les vraies valeurs en fonction des dépenses filtrées
+    const totalExpenses = window.modalExpenses || [];
+    const totalExpensesAmount = totalExpenses.reduce((sum, expense) => sum + (parseInt(expense.total) || 0), 0);
+    
+    // Récupérer les données de base
     const monthlyCredits = parseInt(modalData.monthly_credits) || 0;
-    const monthlyBalance = parseInt(modalData.monthly_balance) || 0;
+    const netTransfers = parseInt(modalData.net_transfers) || 0;
     const montantDebutMois = parseInt(modalData.montant_debut_mois) || 0;
     
+    // Calculer les vraies valeurs filtrées
+    // Le crédit du mois reste le même (c'est un montant fixe)
+    const monthlyCreditsFiltered = monthlyCredits;
+    
+    // La balance du mois filtrée = crédit du mois - dépenses filtrées + transferts nets + montant début de mois
+    const monthlyBalanceFiltered = monthlyCreditsFiltered - filteredTotal + netTransfers + montantDebutMois;
+    
     console.log('🔍 CLIENT updateModalFilteredCount: modalData:', modalData);
-    console.log('🔍 CLIENT updateModalFilteredCount: monthlyCredits:', monthlyCredits);
-    console.log('🔍 CLIENT updateModalFilteredCount: monthlyBalance:', monthlyBalance);
+    console.log('🔍 CLIENT updateModalFilteredCount: totalExpensesAmount:', totalExpensesAmount);
+    console.log('🔍 CLIENT updateModalFilteredCount: monthlyCreditsFiltered:', monthlyCreditsFiltered);
+    console.log('🔍 CLIENT updateModalFilteredCount: monthlyBalanceFiltered:', monthlyBalanceFiltered);
     console.log('🔍 CLIENT updateModalFilteredCount: montantDebutMois:', montantDebutMois);
     
     // Créer le texte avec les informations financières
@@ -5649,12 +5751,12 @@ function updateModalFilteredCount(filtered, total) {
     countText += ` - Total filtré: ${formatCurrency(filteredTotal)}`;
     
     if (modalData.monthly_credits !== undefined) {
-        countText += ` | Crédit du mois: ${formatCurrency(monthlyCredits)}`;
+        countText += ` | Crédit du mois: ${formatCurrency(monthlyCreditsFiltered)}`;
     }
     
     if (modalData.monthly_balance !== undefined) {
-        const balanceColor = monthlyBalance >= 0 ? 'green' : 'red';
-        countText += ` | Balance du mois brut <span style="color: ${balanceColor}; font-weight: bold;">${formatCurrency(monthlyBalance)}</span>`;
+        const balanceColor = monthlyBalanceFiltered >= 0 ? 'green' : 'red';
+        countText += ` | Balance du mois brut <span style="color: ${balanceColor}; font-weight: bold;">${formatCurrency(monthlyBalanceFiltered)}</span>`;
     }
     
     if (modalData.montant_debut_mois !== undefined && modalData.account_type === 'classique') {
@@ -5664,7 +5766,7 @@ function updateModalFilteredCount(filtered, total) {
     
     // Calculer et afficher la balance du mois net (brut - montant début de mois)
     if (modalData.monthly_balance !== undefined && modalData.montant_debut_mois !== undefined && modalData.account_type === 'classique') {
-        const balanceNet = monthlyBalance - montantDebutMois;
+        const balanceNet = monthlyBalanceFiltered - montantDebutMois;
         const balanceNetColor = balanceNet >= 0 ? 'green' : 'red';
         countText += ` | Balance du mois net <span style="color: ${balanceNetColor}; font-weight: bold;">${formatCurrency(balanceNet)}</span>`;
     }
@@ -8327,6 +8429,9 @@ async function loadDashboard() {
             initMonthSelector();
         }
         
+        // Initialiser les listeners pour les champs de date du dashboard
+        initDashboardDateListeners();
+        
         // Charger les données du mois sélectionné ou mois en cours
         const currentMonth = selectedMonth || getCurrentMonth();
         await loadMonthlyDashboard(currentMonth);
@@ -10548,7 +10653,17 @@ async function loadCashBictorysLatest() {
 // Charger SEULEMENT les données spécifiques au mois (sans affecter les soldes actuels)
 async function loadMonthlySpecificData(monthYear) {
     try {
-        const response = await fetch(apiUrl(`/api/dashboard/monthly-data?month=${monthYear}`));
+        // Récupérer les dates de début et fin calculées par updateDateFilters
+        const dashboardStartDate = document.getElementById('dashboard-start-date')?.value;
+        const dashboardEndDate = document.getElementById('dashboard-end-date')?.value;
+        
+        // Construire l'URL avec les paramètres de date
+        let apiUrlWithParams = `/api/dashboard/monthly-data?month=${monthYear}`;
+        if (dashboardStartDate && dashboardEndDate) {
+            apiUrlWithParams += `&start_date=${dashboardStartDate}&end_date=${dashboardEndDate}`;
+        }
+        
+        const response = await fetch(apiUrl(apiUrlWithParams));
         const data = await response.json();
         
         if (response.ok) {
@@ -10581,7 +10696,17 @@ async function loadMonthlySpecificData(monthYear) {
 // Charger les données principales du dashboard pour un mois (DEPRECATED - remplacée par loadMonthlySpecificData)
 async function loadMonthlyDashboardData(monthYear) {
     try {
-        const response = await fetch(apiUrl(`/api/dashboard/monthly-data?month=${monthYear}`));
+        // Récupérer les dates de début et fin calculées par updateDateFilters
+        const dashboardStartDate = document.getElementById('dashboard-start-date')?.value;
+        const dashboardEndDate = document.getElementById('dashboard-end-date')?.value;
+        
+        // Construire l'URL avec les paramètres de date
+        let apiUrlWithParams = `/api/dashboard/monthly-data?month=${monthYear}`;
+        if (dashboardStartDate && dashboardEndDate) {
+            apiUrlWithParams += `&start_date=${dashboardStartDate}&end_date=${dashboardEndDate}`;
+        }
+        
+        const response = await fetch(apiUrl(apiUrlWithParams));
         const data = await response.json();
         
         if (response.ok) {
@@ -14773,6 +14898,39 @@ function initDashboardSaveSection() {
     }
     
     console.log('✅ CLIENT: Section de sauvegarde initialisée');
+}
+
+// Fonction de test manuel pour vérifier les listeners (à appeler depuis la console)
+function testDashboardDateListeners() {
+    console.log('🧪 CLIENT: Test manuel des listeners de date du dashboard');
+    
+    const dashboardStartDate = document.getElementById('dashboard-start-date');
+    const dashboardEndDate = document.getElementById('dashboard-end-date');
+    const snapshotDate = document.getElementById('snapshot-date');
+    
+    console.log('🧪 CLIENT: Éléments trouvés:', {
+        dashboardStartDate: !!dashboardStartDate,
+        dashboardEndDate: !!dashboardEndDate,
+        snapshotDate: !!snapshotDate
+    });
+    
+    if (dashboardStartDate) {
+        console.log('🧪 CLIENT: Valeur actuelle start-date:', dashboardStartDate.value);
+        console.log('🧪 CLIENT: Test de déclenchement manuel...');
+        dashboardStartDate.dispatchEvent(new Event('change'));
+    }
+    
+    if (dashboardEndDate) {
+        console.log('🧪 CLIENT: Valeur actuelle end-date:', dashboardEndDate.value);
+        console.log('🧪 CLIENT: Test de déclenchement manuel...');
+        dashboardEndDate.dispatchEvent(new Event('change'));
+    }
+    
+    if (snapshotDate) {
+        console.log('🧪 CLIENT: Valeur actuelle snapshot-date:', snapshotDate.value);
+        console.log('🧪 CLIENT: Test de déclenchement manuel...');
+        snapshotDate.dispatchEvent(new Event('change'));
+    }
 }
 
 // Valider la date de snapshot en temps réel
