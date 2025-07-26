@@ -7948,6 +7948,9 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             console.log(`📅 SERVER: monthly-data avec dates calculées: ${startDateStr} à ${endDateStr}`);
         }
 
+        // Définir year et monthNum pour compatibilité avec le code existant
+        const [year, monthNum] = month.split('-').map(Number);
+
         let accountFilter = '';
         let params = [startDateStr, endDateStr];
         
@@ -8101,8 +8104,8 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             LEFT JOIN monthly_credits mc ON a.id = mc.account_id
             LEFT JOIN monthly_transfers mt ON a.id = mt.account_id
             LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id 
-                AND mdm.year = ${new Date(startDateStr).getFullYear()}
-                AND mdm.month = ${new Date(startDateStr).getMonth() + 1}
+                AND mdm.year = ${year}
+                AND mdm.month = ${monthNum}
             WHERE a.is_active = true AND a.account_type NOT IN ('depot', 'partenaire', 'creance') ${accountFilter}
             GROUP BY a.id, a.account_name, a.account_type, a.current_balance, a.total_credited, mc.monthly_credits, mt.net_transfers, mdm.montant
             ORDER BY spent DESC
@@ -8187,7 +8190,7 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
             categoryChart: categoryDataResult.rows,
             monthInfo: {
                 month,
-                monthName: new Date(startDateStr).toLocaleDateString('fr-FR', { 
+                monthName: new Date(year, monthNum - 1).toLocaleDateString('fr-FR', { 
                     month: 'long', 
                     year: 'numeric' 
                 })
