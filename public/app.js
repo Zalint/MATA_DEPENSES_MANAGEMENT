@@ -996,10 +996,12 @@ function resetDashboardDates() {
         selectedMonth = currentMonth;
     }
     
-    // Synchroniser snapshot-date avec la date du jour
-    if (snapshotDate) {
+    // Ne pas synchroniser automatiquement snapshot-date avec endDate
+    // L'utilisateur doit pouvoir choisir librement la date de snapshot
+    if (snapshotDate && !snapshotDate.value) {
+        // Seulement initialiser si pas de valeur déjà définie
         snapshotDate.value = endDate;
-        console.log('📅 Snapshot-date synchronisé:', endDate);
+        console.log('📅 Snapshot-date initialisé:', endDate);
     }
 }
 
@@ -14519,10 +14521,18 @@ async function loadVisualisationData() {
 async function loadPLData(startDate, endDate, periodType) {
     try {
         console.log('📊 CLIENT: Chargement données PL pour visualisation');
-        const response = await fetch(`/api/visualisation/pl-data?start_date=${startDate}&end_date=${endDate}&period_type=${periodType}`);
+        console.log(`📅 CLIENT: Paramètres - startDate: "${startDate}", endDate: "${endDate}", periodType: "${periodType}"`);
+        
+        const url = `/api/visualisation/pl-data?start_date=${startDate}&end_date=${endDate}&period_type=${periodType}`;
+        console.log(`🌐 CLIENT: URL appelée: ${url}`);
+        
+        const response = await fetch(url);
         if (!response.ok) throw new Error('Erreur chargement données PL');
         
         const result = await response.json();
+        
+        console.log('📊 CLIENT: Réponse API brute:', result);
+        console.log(`📊 CLIENT: Données reçues (${result.data?.length || 0} éléments):`, result.data);
         
         // Les données arrivent déjà formatées depuis l'API
         currentVisualisationData.pl = {
@@ -14657,7 +14667,10 @@ function updateVisualisationTable(tab, data) {
     tbody.innerHTML = '';
     
     // Remplir avec les nouvelles données
-    data.data.forEach(row => {
+    data.data.forEach((row, index) => {
+        console.log(`📊 CLIENT: Ligne ${index + 1} - Données brutes:`, row);
+        console.log(`📅 CLIENT: Ligne ${index + 1} - Date brute: "${row.date}" (type: ${typeof row.date})`);
+        
         const tr = document.createElement('tr');
         
         switch (tab) {
@@ -15055,11 +15068,14 @@ async function saveDashboardSnapshot() {
             solde_general: parseFormattedNumber(document.getElementById('solde-amount')?.textContent),
             solde_depot: parseFormattedNumber(document.getElementById('total-depot-balance')?.textContent),
             solde_partner: parseFormattedNumber(document.getElementById('total-partner-balance')?.textContent),
+            // Utiliser directement la valeur du PL affichée dans le dashboard
+            pl_final: parseFormattedNumber(document.getElementById('pl-estim-charges')?.textContent),
             total_credited_with_expenses: 0, // À implémenter si nécessaire
             total_credited_general: 0 // À implémenter si nécessaire
         };
         
         console.log('📊 CLIENT: Données snapshot collectées:', snapshotData);
+        console.log('📅 CLIENT: Date snapshot envoyée au serveur:', snapshotData.snapshot_date);
         
         const response = await fetch('/api/dashboard/save-snapshot', {
             method: 'POST',

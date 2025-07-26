@@ -8594,6 +8594,28 @@ async function createDashboardSnapshotsTable() {
             CREATE INDEX IF NOT EXISTS idx_dashboard_snapshots_date ON dashboard_snapshots(snapshot_date)
         `);
         
+        // Ajouter la colonne livraisons_partenaires si elle n'existe pas
+        try {
+            await pool.query(`
+                ALTER TABLE dashboard_snapshots 
+                ADD COLUMN IF NOT EXISTS livraisons_partenaires DECIMAL(15,2) DEFAULT 0
+            `);
+            console.log('✅ Colonne livraisons_partenaires ajoutée/vérifiée');
+        } catch (error) {
+            console.log('ℹ️ Colonne livraisons_partenaires déjà présente ou erreur:', error.message);
+        }
+        
+        // Ajouter la colonne pl_final si elle n'existe pas
+        try {
+            await pool.query(`
+                ALTER TABLE dashboard_snapshots 
+                ADD COLUMN IF NOT EXISTS pl_final DECIMAL(15,2) DEFAULT 0
+            `);
+            console.log('✅ Colonne pl_final ajoutée/vérifiée');
+        } catch (error) {
+            console.log('ℹ️ Colonne pl_final déjà présente ou erreur:', error.message);
+        }
+        
         console.log('✅ Table dashboard_snapshots créée/vérifiée');
         
     } catch (error) {
@@ -8629,17 +8651,21 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
             return res.status(400).json({ error: 'Date du snapshot requise' });
         }
         
+        // Utiliser directement la date fournie sans conversion de fuseau horaire
+        let correctedSnapshotDate = snapshot_date;
+        console.log(`📅 Date snapshot reçue: ${snapshot_date} (utilisée directement)`);
+        
         const username = req.session.user.username;
         
         // Calculer automatiquement les livraisons partenaires validées du mois
         let livraisons_partenaires = 0;
         try {
-            // Utiliser le mois de la snapshot_date
-            const snapshotDate = new Date(snapshot_date);
+            // Utiliser le mois de la date corrigée
+            const snapshotDate = new Date(correctedSnapshotDate);
             const year = snapshotDate.getFullYear();
             const month = snapshotDate.getMonth() + 1;
             const firstDayOfMonth = `${year}-${month.toString().padStart(2, '0')}-01`;
-            const snapshotDateStr = snapshot_date;
+            const snapshotDateStr = correctedSnapshotDate;
             
             // Récupérer les livraisons partenaires validées du mois jusqu'à la date du snapshot
             const livraisonsQuery = `
@@ -8657,37 +8683,42 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
             const livraisonsResult = await pool.query(livraisonsQuery, [firstDayOfMonth, snapshotDateStr]);
             livraisons_partenaires = parseInt(livraisonsResult.rows[0].total_livraisons) || 0;
             
-            console.log(`🚚 Livraisons partenaires calculées pour snapshot ${snapshot_date}: ${livraisons_partenaires} FCFA`);
+            console.log(`🚚 Livraisons partenaires calculées pour snapshot ${correctedSnapshotDate}: ${livraisons_partenaires} FCFA`);
             
         } catch (error) {
             console.error('Erreur calcul livraisons partenaires pour snapshot:', error);
             livraisons_partenaires = 0;
         }
         
+        // Utiliser directement le PL final envoyé par le frontend (valeur du dashboard)
+        let pl_final = parseFloat(req.body.pl_final) || 0;
+        console.log(`📊 PL final reçu du frontend pour snapshot ${correctedSnapshotDate}: ${pl_final} FCFA`);
+        
         // Vérifier si un snapshot existe déjà pour cette date
         const existingCheck = await pool.query(
             'SELECT id, created_by, created_at FROM dashboard_snapshots WHERE snapshot_date = $1',
-            [snapshot_date]
+            [correctedSnapshotDate]
         );
         
         const isUpdate = existingCheck.rows.length > 0;
         const existingSnapshot = isUpdate ? existingCheck.rows[0] : null;
         
         if (isUpdate) {
-            console.log(`⚠️  ÉCRASEMENT: Snapshot existant trouvé pour ${snapshot_date}`);
+            console.log(`⚠️  ÉCRASEMENT: Snapshot existant trouvé pour ${correctedSnapshotDate}`);
             console.log(`   Créé par: ${existingSnapshot.created_by}`);
             console.log(`   Créé le: ${existingSnapshot.created_at}`);
         }
         
         // Préparer les valeurs pour le logging
         const sqlValues = [
-            snapshot_date, total_spent_amount || 0, total_remaining_amount || 0,
+            correctedSnapshotDate, total_spent_amount || 0, total_remaining_amount || 0,
             total_credited_with_expenses || 0, total_credited_general || 0,
             cash_bictorys_amount || 0, creances_total || 0, creances_mois || 0,
             stock_point_vente || 0, stock_vivant_total || 0, stock_vivant_variation || 0,
             livraisons_partenaires,
             daily_burn || 0, weekly_burn || 0, monthly_burn || 0,
             solde_depot || 0, solde_partner || 0, solde_general || 0,
+            pl_final,
             username, notes || ''
         ];
         
@@ -8700,9 +8731,10 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
                 livraisons_partenaires,
                 daily_burn, weekly_burn, monthly_burn,
                 solde_depot, solde_partner, solde_general,
+                pl_final,
                 created_by, notes
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
             )
             ON CONFLICT (snapshot_date) 
             DO UPDATE SET
@@ -8723,6 +8755,7 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
                 solde_depot = EXCLUDED.solde_depot,
                 solde_partner = EXCLUDED.solde_partner,
                 solde_general = EXCLUDED.solde_general,
+                pl_final = EXCLUDED.pl_final,
                 created_by = EXCLUDED.created_by,
                 notes = EXCLUDED.notes,
                 created_at = CURRENT_TIMESTAMP
@@ -8755,8 +8788,9 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
         console.log('$16 (solde_depot):', sqlValues[15]);
         console.log('$17 (solde_partner):', sqlValues[16]);
         console.log('$18 (solde_general):', sqlValues[17]);
-        console.log('$19 (created_by):', sqlValues[18]);
-        console.log('$20 (notes):', sqlValues[19]);
+        console.log('$19 (pl_final):', sqlValues[18]);
+        console.log('$20 (created_by):', sqlValues[19]);
+        console.log('$21 (notes):', sqlValues[20]);
         console.log('\n⏳ Exécution de la requête...');
         
         // Insérer ou mettre à jour le snapshot (UPSERT)
@@ -8771,15 +8805,15 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
         console.log('📅 Snapshot date confirmée:', result.rows[0]?.snapshot_date);
         console.log('=== FIN LOGS SQL SNAPSHOT ===\n');
         
-        console.log(`✅ Snapshot sauvegardé pour ${snapshot_date} par ${username}`);
+        console.log(`✅ Snapshot sauvegardé pour ${correctedSnapshotDate} par ${username}`);
         
         // Préparer le message selon le type d'opération
         let message, messageType;
         if (isUpdate) {
-            message = `Snapshot du ${snapshot_date} mis à jour (écrasement de l'ancien)`;
+            message = `Snapshot du ${correctedSnapshotDate} mis à jour (écrasement de l'ancien)`;
             messageType = 'overwrite';
         } else {
-            message = `Nouveau snapshot créé pour le ${snapshot_date}`;
+            message = `Nouveau snapshot créé pour le ${correctedSnapshotDate}`;
             messageType = 'create';
         }
         
@@ -8834,6 +8868,11 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
     try {
         const { start_date, end_date, period_type = 'daily' } = req.query;
         
+        console.log(`🔍 Visualisation PL - Paramètres reçus:`);
+        console.log(`   start_date: ${start_date}`);
+        console.log(`   end_date: ${end_date}`);
+        console.log(`   period_type: ${period_type}`);
+        
         if (!start_date || !end_date) {
             return res.status(400).json({ error: 'Les dates de début et fin sont requises' });
         }
@@ -8868,30 +8907,44 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                     COALESCE(livraisons_partenaires, 0) as livraisons_partenaires,
                     monthly_burn as cash_burn,
                     monthly_burn as cash_burn_monthly,
-                    weekly_burn as cash_burn_weekly
+                    weekly_burn as cash_burn_weekly,
+                    COALESCE(pl_final, 0) as pl_final
                 FROM dashboard_snapshots
-                WHERE snapshot_date >= $1 AND snapshot_date <= $2
+                WHERE snapshot_date::date >= $1::date AND snapshot_date::date <= $2::date
                 ORDER BY snapshot_date
             `;
         }
 
         const result = await pool.query(query, [start_date, end_date]);
         
+        console.log(`📊 Visualisation PL - Résultat SQL brut:`, result.rows);
+        console.log(`📊 Visualisation PL - Nombre de lignes récupérées: ${result.rows.length}`);
+        
         // Lire l'estimation des charges fixes depuis le fichier JSON
-        let chargesFixesEstimation = 5850000; // Valeur par défaut
+        let chargesFixesEstimation = 0; // Valeur par défaut (même que dashboard)
         try {
             const configPath = path.join(__dirname, 'financial_settings.json');
             if (fs.existsSync(configPath)) {
                 const configData = fs.readFileSync(configPath, 'utf8');
                 const financialConfig = JSON.parse(configData);
-                chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 5850000;
+                chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 0;
             }
         } catch (configError) {
             console.error('Erreur lecture config financière pour visualisation PL:', configError);
+            chargesFixesEstimation = 0;
         }
         
-        const plData = result.rows.map(row => {
+        console.log(`📊 Visualisation PL - Charges fixes estimation: ${chargesFixesEstimation} FCFA`);
+        console.log(`📊 Visualisation PL - Requête SQL: ${query}`);
+        console.log(`📊 Visualisation PL - Paramètres: start_date=${start_date}, end_date=${end_date}`);
+        
+        const plData = result.rows.map((row, index) => {
+            console.log(`📊 Visualisation PL - Traitement ligne ${index + 1}:`, row);
+            console.log(`📅 Visualisation PL - Ligne ${index + 1} - row.period brut: "${row.period}" (type: ${typeof row.period})`);
+            
             const snapshotDate = new Date(row.period);
+            console.log(`📅 Visualisation PL - Ligne ${index + 1} - snapshotDate créé:`, snapshotDate);
+            
             const cashBictorys = parseFloat(row.cash_bictorys) || 0;
             const creances = parseFloat(row.creances) || 0;
             const stockPv = parseFloat(row.stock_pv) || 0;
@@ -8907,7 +8960,10 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                 cashBurn = parseFloat(row.cash_burn_monthly) || 0;
             }
             
-            // Calculer le prorata des charges fixes basé sur la date du snapshot
+            // Utiliser directement le PL final sauvegardé dans le snapshot
+            const plFinal = parseFloat(row.pl_final) || 0;
+            
+            // Calculer le prorata des charges fixes pour l'affichage (même logique que dashboard)
             let chargesProrata = 0;
             if (chargesFixesEstimation > 0) {
                 const currentDay = snapshotDate.getDate();
@@ -8939,12 +8995,25 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                 chargesProrata = (chargesFixesEstimation * joursOuvrablesEcoules) / totalJoursOuvrables;
             }
             
-            // Calcul du PL final avec la formule correcte incluant les livraisons partenaires
-            const plBase = cashBictorys + creances + stockPv - cashBurn;
-            const plFinal = plBase + ecartStockVivant - chargesProrata - livraisonsPartenaires;
+            // Formater la date correctement pour le frontend
+            let formattedDate;
+            if (row.period instanceof Date) {
+                // Utiliser les méthodes locales pour éviter le décalage de fuseau horaire
+                const year = row.period.getFullYear();
+                const month = String(row.period.getMonth() + 1).padStart(2, '0');
+                const day = String(row.period.getDate()).padStart(2, '0');
+                formattedDate = `${year}-${month}-${day}`;
+            } else if (typeof row.period === 'string') {
+                // Si c'est déjà une string, s'assurer qu'elle est au format YYYY-MM-DD
+                formattedDate = row.period.split('T')[0];
+            } else {
+                formattedDate = row.period;
+            }
             
-            return {
-                date: row.period instanceof Date ? row.period.toISOString().split('T')[0] : row.period,
+            console.log(`📅 Visualisation PL - Ligne ${index + 1} - Date finale formatée: "${formattedDate}"`);
+            
+            const resultRow = {
+                date: formattedDate,
                 cash_bictorys: cashBictorys,
                 creances: creances,
                 stock_pv: stockPv,
@@ -8954,6 +9023,9 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                 charges_estimees: Math.round(chargesProrata),
                 pl_final: Math.round(plFinal)
             };
+            
+            console.log(`📊 Visualisation PL - Ligne ${index + 1} - Résultat final:`, resultRow);
+            return resultRow;
         });
 
         console.log(`✅ Données PL récupérées: ${plData.length} points de ${start_date} à ${end_date}`);
