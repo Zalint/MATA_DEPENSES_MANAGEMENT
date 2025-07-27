@@ -14185,6 +14185,13 @@ function createPLChart() {
                 borderColor: 'rgb(54, 162, 235)',
                 backgroundColor: 'rgba(54, 162, 235, 0.1)',
                 tension: 0.4
+            }, {
+                label: 'Dépenses (Cash Burn)',
+                data: data.map(item => item.cash_burn),
+                borderColor: 'rgb(255, 159, 64)',
+                backgroundColor: 'rgba(255, 159, 64, 0.1)',
+                tension: 0.4,
+                borderDash: [5, 5]
             }]
         },
         options: {
