@@ -1949,7 +1949,7 @@
 
                 <!-- Section Gestion Stock -->
                 <section id="stock-soir-section" class="section">
-                    <h2>Gestion des Stocks du Soir</h2>
+                    <h2 style="color: #22c55e;">Gestion des Stocks du Soir</h2>
                     
                     <!-- Upload de fichier JSON -->
                     <div class="stock-upload-card" style="display: none;">
@@ -1994,6 +1994,14 @@
                             <button id="view-stats-btn" class="btn btn-info">
                                 <i class="fas fa-chart-bar"></i> Statistiques
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- Affichage du total -->
+                    <div id="stock-total-display" class="stock-total-display" style="display: none;">
+                        <div class="total-card">
+                            <h4><i class="fas fa-calculator"></i> Total Stock Soir</h4>
+                            <div class="total-amount" id="stock-total-amount">0 FCFA</div>
                         </div>
                     </div>
 

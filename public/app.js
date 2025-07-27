@@ -8983,6 +8983,15 @@ function setupStockEventListeners() {
         dateFilter.dataset.listenerAttached = 'true';
     }
 
+    // Filtrage automatique lors du changement de point de vente
+    const pointFilter = document.getElementById('stock-point-filter');
+    if (pointFilter && !pointFilter.dataset.listenerAttached) {
+        pointFilter.addEventListener('change', () => {
+            applyStockFilters();
+        });
+        pointFilter.dataset.listenerAttached = 'true';
+    }
+
     const refreshBtn = document.getElementById('refresh-stock');
     if (refreshBtn && !refreshBtn.dataset.listenerAttached) {
         refreshBtn.addEventListener('click', () => {
@@ -9091,10 +9100,38 @@ function displayStockData(data) {
     
     if (!data || data.length === 0) {
         tbody.innerHTML = '<tr><td colspan="7" class="text-center">Aucune donnée de stock disponible.</td></tr>';
+        updateStockTotal(0); // Afficher 0 quand pas de données
         return;
     }
 
     const filteredData = applyStockFilters(true);
+    const dateFilter = document.getElementById('stock-date-filter');
+    const isDateSelected = dateFilter && dateFilter.value;
+
+    let totalStockSoir;
+    let isLatestValue = false;
+
+    if (isDateSelected) {
+        // Si une date est sélectionnée : calculer le total de cette date
+        totalStockSoir = filteredData.reduce((total, item) => {
+            return total + parseFloat(item.stock_soir || 0);
+        }, 0);
+        isLatestValue = false;
+    } else {
+        // Si aucune date n'est sélectionnée : prendre la dernière valeur
+        if (filteredData.length > 0) {
+            // Trier par date décroissante et prendre la première
+            const sortedData = filteredData.sort((a, b) => new Date(b.date) - new Date(a.date));
+            totalStockSoir = parseFloat(sortedData[0].stock_soir || 0);
+            isLatestValue = true;
+        } else {
+            totalStockSoir = 0;
+            isLatestValue = false;
+        }
+    }
+
+    // Afficher le total avec le bon contexte
+    updateStockTotal(totalStockSoir, isLatestValue);
 
     filteredData.forEach(item => {
         const row = document.createElement('tr');
@@ -9117,6 +9154,37 @@ function displayStockData(data) {
 function sortStockData(data) {
     // Logique de tri à implémenter
     return data;
+}
+
+// Fonction pour mettre à jour l'affichage du total des stocks soir
+function updateStockTotal(total, isLatestValue = false) {
+    const totalDisplay = document.getElementById('stock-total-display');
+    const totalAmount = document.getElementById('stock-total-amount');
+    const totalTitle = document.querySelector('#stock-total-display h4');
+    
+    if (totalDisplay && totalAmount && totalTitle) {
+        // Formater le total avec des espaces pour les milliers
+        const formattedTotal = total.toLocaleString('fr-FR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        
+        totalAmount.textContent = `${formattedTotal} FCFA`;
+        
+        // Mettre à jour le titre selon le contexte
+        if (isLatestValue) {
+            totalTitle.innerHTML = '<i class="fas fa-clock"></i> Dernière Valeur Stock Soir';
+        } else {
+            totalTitle.innerHTML = '<i class="fas fa-calculator"></i> Total Stock Soir';
+        }
+        
+        // Afficher le total seulement s'il y a des données
+        if (total > 0) {
+            totalDisplay.style.display = 'block';
+        } else {
+            totalDisplay.style.display = 'none';
+        }
+    }
 }
 
 function applyStockFilters(calledFromDisplay = false) {
