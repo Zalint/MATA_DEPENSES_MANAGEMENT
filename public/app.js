@@ -16377,47 +16377,72 @@ function exportPLDetailsToExcel() {
     }
 
     const currentDate = new Date().toLocaleDateString('fr-FR');
+    const plDetails = window.currentPLDetails;
     
-    // Récupérer les valeurs directement depuis le modal (plus fiable)
-    const getValue = (elementId) => {
-        const element = document.getElementById(elementId);
-        return element ? element.textContent : 'N/A';
+    // Fonction pour nettoyer les valeurs formatées (supprimer "F CFA" et espaces)
+    const cleanCurrencyValue = (formattedValue) => {
+        if (!formattedValue || formattedValue === 'N/A') return 0;
+        // Supprimer "F CFA" et tous les espaces, puis convertir en nombre
+        return parseInt(formattedValue.replace(/[^\d-]/g, '')) || 0;
     };
+    
+    // Fonction pour récupérer les valeurs brutes depuis les détails PL
+    const getRawValue = (key) => {
+        switch (key) {
+            case 'cashBictorys': return plDetails.cashBictorys || 0;
+            case 'creances': return plDetails.creances || 0;
+            case 'stockPointVente': return plDetails.stockPointVente || 0;
+            case 'cashBurn': return plDetails.cashBurn || 0;
+            case 'plBase': return plDetails.plBase || 0;
+            case 'stockVivantVariation': return plDetails.stockVivantVariation || 0;
+            case 'livraisonsPartenaires': return plDetails.livraisonsPartenaires || 0;
+            case 'chargesFixesEstimation': return plDetails.chargesFixesEstimation || 0;
+            case 'chargesProrata': return plDetails.chargesProrata || 0;
+            case 'plFinal': return plDetails.plFinal || 0;
+            default: return 0;
+        }
+    };
+    
+    // Date du PL (date de calcul)
+    const plDate = plDetails.date ? 
+        `${plDetails.date.jour}/${plDetails.date.mois}/${plDetails.date.annee}` : 
+        'N/A';
     
     // Préparer les données pour l'export
     const exportData = [
         // En-tête
         ['DÉTAILS DU CALCUL PL - MATA GROUP', ''],
         ['Date d\'export:', currentDate],
+        ['Date du PL:', plDate],
         ['', ''],
         
         // Section PL de Base
         ['PL DE BASE', ''],
-        ['Cash Bictorys du mois', getValue('pl-cash-bictorys')],
-        ['Créances du mois', getValue('pl-creances')],
-        ['Écart Stock Mata Mensuel', getValue('pl-stock-mata')],
-        ['Cash Burn du mois', getValue('pl-cash-burn')],
-        ['PL de base', getValue('pl-base-result')],
+        ['Cash Bictorys du mois', getRawValue('cashBictorys')],
+        ['Créances du mois', getRawValue('creances')],
+        ['Écart Stock Mata Mensuel', getRawValue('stockPointVente')],
+        ['Cash Burn du mois', getRawValue('cashBurn')],
+        ['PL de base', getRawValue('plBase')],
         ['', ''],
         
         // Section Ajustements
         ['AJUSTEMENTS', ''],
-        ['Écart Stock Vivant Mensuel', getValue('pl-stock-vivant')],
-        ['Livraisons partenaires du mois', getValue('pl-livraisons')],
+        ['Écart Stock Vivant Mensuel', getRawValue('stockVivantVariation')],
+        ['Livraisons partenaires du mois', getRawValue('livraisonsPartenaires')],
         ['', ''],
         
         // Section Charges Fixes
         ['ESTIMATION CHARGES FIXES', ''],
-        ['Estimation charges fixes mensuelle', getValue('pl-charges-fixes')],
-        ['Jours ouvrables écoulés', getValue('pl-jours-ouvrables')],
-        ['Total jours ouvrables dans le mois', getValue('pl-total-jours')],
-        ['Pourcentage du mois écoulé', getValue('pl-pourcentage')],
-        ['Charges prorata (jours ouvrables)', getValue('pl-charges-prorata')],
+        ['Estimation charges fixes mensuelle', getRawValue('chargesFixesEstimation')],
+        ['Jours ouvrables écoulés', plDetails.prorata?.joursEcoules || 0],
+        ['Total jours ouvrables dans le mois', plDetails.prorata?.totalJours || 0],
+        ['Pourcentage du mois écoulé', plDetails.prorata?.pourcentage ? plDetails.prorata.pourcentage + '%' : '0%'],
+        ['Charges prorata (jours ouvrables)', getRawValue('chargesProrata')],
         ['', ''],
         
         // Section PL Final
         ['PL FINAL', ''],
-        ['PL FINAL', getValue('pl-final-result')]
+        ['PL FINAL', getRawValue('plFinal')]
     ];
 
     // Créer le workbook et worksheet
@@ -16433,8 +16458,8 @@ function exportPLDetailsToExcel() {
     // Ajouter le worksheet au workbook
     XLSX.utils.book_append_sheet(wb, ws, 'Détails PL');
 
-    // Générer le nom de fichier
-    const fileName = `Details_PL_Mata_${currentDate.replace(/\//g, '-')}.xlsx`;
+    // Générer le nom de fichier avec la date du PL
+    const fileName = `Details_PL_Mata_${plDate.replace(/\//g, '-')}_export_${currentDate.replace(/\//g, '-')}.xlsx`;
 
     // Exporter le fichier
     XLSX.writeFile(wb, fileName);
