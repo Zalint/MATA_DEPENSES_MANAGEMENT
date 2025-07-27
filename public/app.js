@@ -16301,6 +16301,77 @@ function closePLDetailsModal() {
     }
 }
 
+// Fonction pour exporter les détails PL en Excel
+function exportPLDetailsToExcel() {
+    if (!window.currentPLDetails) {
+        alert('Aucune donnée PL disponible pour l\'export');
+        return;
+    }
+
+    const currentDate = new Date().toLocaleDateString('fr-FR');
+    
+    // Récupérer les valeurs directement depuis le modal (plus fiable)
+    const getValue = (elementId) => {
+        const element = document.getElementById(elementId);
+        return element ? element.textContent : 'N/A';
+    };
+    
+    // Préparer les données pour l'export
+    const exportData = [
+        // En-tête
+        ['DÉTAILS DU CALCUL PL - MATA GROUP', ''],
+        ['Date d\'export:', currentDate],
+        ['', ''],
+        
+        // Section PL de Base
+        ['PL DE BASE', ''],
+        ['Cash Bictorys du mois', getValue('pl-cash-bictorys')],
+        ['Créances du mois', getValue('pl-creances')],
+        ['Écart Stock Mata Mensuel', getValue('pl-stock-mata')],
+        ['Cash Burn du mois', getValue('pl-cash-burn')],
+        ['PL de base', getValue('pl-base-result')],
+        ['', ''],
+        
+        // Section Ajustements
+        ['AJUSTEMENTS', ''],
+        ['Écart Stock Vivant Mensuel', getValue('pl-stock-vivant')],
+        ['Livraisons partenaires du mois', getValue('pl-livraisons')],
+        ['', ''],
+        
+        // Section Charges Fixes
+        ['ESTIMATION CHARGES FIXES', ''],
+        ['Estimation charges fixes mensuelle', getValue('pl-charges-fixes')],
+        ['Jours ouvrables écoulés', getValue('pl-jours-ouvrables')],
+        ['Total jours ouvrables dans le mois', getValue('pl-total-jours')],
+        ['Pourcentage du mois écoulé', getValue('pl-pourcentage')],
+        ['Charges prorata (jours ouvrables)', getValue('pl-charges-prorata')],
+        ['', ''],
+        
+        // Section PL Final
+        ['PL FINAL', ''],
+        ['PL FINAL', getValue('pl-final-result')]
+    ];
+
+    // Créer le workbook et worksheet
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(exportData);
+
+    // Définir les styles et largeurs de colonnes
+    ws['!cols'] = [
+        { width: 35 },
+        { width: 20 }
+    ];
+
+    // Ajouter le worksheet au workbook
+    XLSX.utils.book_append_sheet(wb, ws, 'Détails PL');
+
+    // Générer le nom de fichier
+    const fileName = `Details_PL_Mata_${currentDate.replace(/\//g, '-')}.xlsx`;
+
+    // Exporter le fichier
+    XLSX.writeFile(wb, fileName);
+}
+
 // Fonction pour remplir le modal avec les détails PL
 function fillPLDetailsModal(details) {
     // Section PL de base
