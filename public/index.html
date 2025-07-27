@@ -267,7 +267,10 @@
                                 <i class="fas fa-calculator"></i>
                             </div>
                             <div class="stat-content">
-                                <h3>PL (avec ecart stock mensuel et une estim. charges)</h3>
+                                <h3>
+                                    PL (avec ecart stock mensuel et une estim. charges)
+                                    <i class="fas fa-info-circle pl-details-icon" id="pl-details-icon" title="Voir les détails du calcul"></i>
+                                </h3>
                                 <p class="stat-value" id="pl-estim-charges">0 FCFA</p>
                             </div>
                         </div>
@@ -3205,6 +3208,104 @@
                 </button>
                 <button type="button" class="btn btn-primary" id="confirm-copy-btn" onclick="confirmCopyStockData()" disabled>
                     <i class="fas fa-copy"></i> Copier les données
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Détails PL -->
+    <div id="pl-details-modal" class="modal">
+        <div class="modal-content pl-details-modal">
+            <div class="modal-header">
+                <h2><i class="fas fa-calculator"></i> Détails du Calcul PL</h2>
+                <span class="close" onclick="closePLDetailsModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="pl-details-container">
+                    <!-- Section PL de base -->
+                    <div class="pl-section">
+                        <h3><i class="fas fa-chart-line"></i> PL de Base</h3>
+                        <div class="pl-formula">
+                            <div class="formula-item">
+                                <span class="label">💰 Cash Bictorys du mois:</span>
+                                <span class="value" id="pl-cash-bictorys">0 FCFA</span>
+                            </div>
+                            <div class="formula-item">
+                                <span class="label">💳 Créances du mois:</span>
+                                <span class="value" id="pl-creances">0 FCFA</span>
+                            </div>
+                            <div class="formula-item">
+                                <span class="label">📦 Écart Stock Mata Mensuel:</span>
+                                <span class="value" id="pl-stock-mata">0 FCFA</span>
+                            </div>
+                            <div class="formula-item negative">
+                                <span class="label">💸 Cash Burn du mois:</span>
+                                <span class="value" id="pl-cash-burn">0 FCFA</span>
+                            </div>
+                            <div class="formula-result">
+                                <span class="label">📊 PL de base =</span>
+                                <span class="value" id="pl-base-result">0 FCFA</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section Ajustements -->
+                    <div class="pl-section">
+                        <h3><i class="fas fa-adjust"></i> Ajustements</h3>
+                        <div class="pl-formula">
+                            <div class="formula-item">
+                                <span class="label">🌱 Écart Stock Vivant Mensuel:</span>
+                                <span class="value" id="pl-stock-vivant">0 FCFA</span>
+                            </div>
+                            <div class="formula-item negative">
+                                <span class="label">🚚 Livraisons partenaires du mois:</span>
+                                <span class="value" id="pl-livraisons">0 FCFA</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section Charges Fixes -->
+                    <div class="pl-section">
+                        <h3><i class="fas fa-cogs"></i> Estimation Charges Fixes</h3>
+                        <div class="pl-formula">
+                            <div class="formula-item">
+                                <span class="label">⚙️ Estimation charges fixes mensuelle:</span>
+                                <span class="value" id="pl-charges-fixes">0 FCFA</span>
+                            </div>
+                            <div class="formula-item">
+                                <span class="label">📅 Jours ouvrables écoulés:</span>
+                                <span class="value" id="pl-jours-ouvrables">0</span>
+                            </div>
+                            <div class="formula-item">
+                                <span class="label">📅 Total jours ouvrables dans le mois:</span>
+                                <span class="value" id="pl-total-jours">0</span>
+                            </div>
+                            <div class="formula-item">
+                                <span class="label">📅 Pourcentage du mois écoulé:</span>
+                                <span class="value" id="pl-pourcentage">0%</span>
+                            </div>
+                            <div class="formula-item negative">
+                                <span class="label">⏰ Charges prorata (jours ouvrables):</span>
+                                <span class="value" id="pl-charges-prorata">0 FCFA</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section PL Final -->
+                    <div class="pl-section final">
+                        <h3><i class="fas fa-trophy"></i> PL Final</h3>
+                        <div class="pl-formula">
+                            <div class="formula-result final">
+                                <span class="label">🎯 PL FINAL =</span>
+                                <span class="value" id="pl-final-result">0 FCFA</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closePLDetailsModal()">
+                    <i class="fas fa-times"></i> Fermer
                 </button>
             </div>
         </div>

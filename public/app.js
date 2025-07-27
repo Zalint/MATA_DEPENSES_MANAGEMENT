@@ -1276,6 +1276,9 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
                 console.error('❌ Erreur dans le calcul:', stats.plCalculationDetails.error);
             }
             console.groupEnd();
+            
+            // Stocker les détails PL pour le modal
+            window.currentPLDetails = stats.plCalculationDetails;
         }
         
         // Mettre à jour les périodes
@@ -16186,3 +16189,105 @@ function getMonthName(monthNumber) {
     ];
     return months[monthNumber - 1] || 'Mois inconnu';
 }
+
+// ===== FONCTIONS MODAL PL DÉTAILS =====
+
+// Fonction pour ouvrir le modal PL
+function openPLDetailsModal() {
+    const modal = document.getElementById('pl-details-modal');
+    if (!modal) {
+        console.error('❌ Modal PL non trouvé');
+        return;
+    }
+    
+    if (!window.currentPLDetails) {
+        console.warn('⚠️ Aucun détail PL disponible');
+        showNotification('Aucun détail de calcul PL disponible. Veuillez recharger le dashboard.', 'warning');
+        return;
+    }
+    
+    // Remplir les données du modal
+    fillPLDetailsModal(window.currentPLDetails);
+    
+    // Afficher le modal
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+    
+    console.log('✅ Modal PL ouvert avec succès');
+}
+
+// Fonction pour fermer le modal PL
+function closePLDetailsModal() {
+    const modal = document.getElementById('pl-details-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        document.body.style.overflow = 'auto';
+        console.log('✅ Modal PL fermé');
+    }
+}
+
+// Fonction pour remplir le modal avec les détails PL
+function fillPLDetailsModal(details) {
+    // Section PL de base
+    document.getElementById('pl-cash-bictorys').textContent = formatCurrency(details.cashBictorys);
+    document.getElementById('pl-creances').textContent = formatCurrency(details.creances);
+    document.getElementById('pl-stock-mata').textContent = formatCurrency(details.stockPointVente);
+    document.getElementById('pl-cash-burn').textContent = formatCurrency(details.cashBurn);
+    document.getElementById('pl-base-result').textContent = formatCurrency(details.plBase);
+    
+    // Section Ajustements
+    document.getElementById('pl-stock-vivant').textContent = formatCurrency(details.stockVivantVariation || 0);
+    document.getElementById('pl-livraisons').textContent = formatCurrency(details.livraisonsPartenaires || 0);
+    
+    // Section Charges Fixes
+    document.getElementById('pl-charges-fixes').textContent = formatCurrency(details.chargesFixesEstimation);
+    
+    if (details.prorata && details.prorata.totalJours > 0) {
+        document.getElementById('pl-jours-ouvrables').textContent = details.prorata.joursEcoules;
+        document.getElementById('pl-total-jours').textContent = details.prorata.totalJours;
+        document.getElementById('pl-pourcentage').textContent = details.prorata.pourcentage + '%';
+    } else {
+        document.getElementById('pl-jours-ouvrables').textContent = '0';
+        document.getElementById('pl-total-jours').textContent = '0';
+        document.getElementById('pl-pourcentage').textContent = '0%';
+    }
+    
+    document.getElementById('pl-charges-prorata').textContent = formatCurrency(details.chargesProrata);
+    
+    // Section PL Final
+    document.getElementById('pl-final-result').textContent = formatCurrency(details.plFinal);
+    
+    console.log('✅ Modal PL rempli avec les détails');
+}
+
+// Ajouter l'écouteur d'événement pour l'icône PL
+document.addEventListener('DOMContentLoaded', function() {
+    const plDetailsIcon = document.getElementById('pl-details-icon');
+    if (plDetailsIcon) {
+        plDetailsIcon.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            openPLDetailsModal();
+        });
+    }
+    
+    // Fermer le modal en cliquant sur le fond
+    const plModal = document.getElementById('pl-details-modal');
+    if (plModal) {
+        plModal.addEventListener('click', function(e) {
+            if (e.target === plModal) {
+                closePLDetailsModal();
+            }
+        });
+    }
+    
+    // Fermer le modal avec la touche Escape
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            const plModal = document.getElementById('pl-details-modal');
+            if (plModal && plModal.style.display === 'block') {
+                closePLDetailsModal();
+            }
+        }
+    });
+});
