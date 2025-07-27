@@ -1227,19 +1227,38 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             let cashBictorysResult;
             
             if (cutoff_date) {
-                // Pour cutoff_date : récupérer la dernière valeur avant ou égale à cette date
+                // Pour cutoff_date : récupérer la dernière valeur non-nulle avant ou égale à cette date
                 cashBictorysResult = await pool.query(`
                     SELECT amount
                     FROM cash_bictorys
                     WHERE date = (
                         SELECT MAX(date)
                         FROM cash_bictorys
-                        WHERE month_year = $1
+                        WHERE amount != 0 
+                        AND month_year = $1
                         AND date <= $2
                     )
+                    AND amount != 0
                     AND month_year = $1
                     AND date <= $2
                 `, [monthYear, referenceDateStr]);
+                
+                // Si aucune valeur non-nulle trouvée, prendre la dernière valeur (même si 0)
+                if (cashBictorysResult.rows.length === 0) {
+                    console.log(`💰 DEBUG: Aucune valeur non-nulle trouvée pour ${monthYear} jusqu'au ${cutoff_date}, recherche de la dernière valeur...`);
+                    cashBictorysResult = await pool.query(`
+                        SELECT amount
+                        FROM cash_bictorys
+                        WHERE date = (
+                            SELECT MAX(date)
+                            FROM cash_bictorys
+                            WHERE month_year = $1
+                            AND date <= $2
+                        )
+                        AND month_year = $1
+                        AND date <= $2
+                    `, [monthYear, referenceDateStr]);
+                }
             } else {
                 // Étape 1 : Chercher des valeurs non-nulles pour le mois
                 cashBictorysResult = await pool.query(`

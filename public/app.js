@@ -8121,7 +8121,7 @@ async function loadTransfersCard() {
 // ... existing code ...
 
 // Fonction pour charger les données du dashboard
-async function loadDashboardData() {
+async function loadDashboardData(cutoffDate = null) {
     if (currentUser.role !== 'directeur_general' && currentUser.role !== 'pca' && currentUser.role !== 'directeur' && currentUser.role !== 'admin') {
         return;
     }
@@ -8138,6 +8138,15 @@ async function loadDashboardData() {
         
         const startDate = startDateElement.value;
         const endDate = endDateElement.value;
+        
+        // Récupérer automatiquement le cutoff_date depuis l'interface si non fourni
+        if (!cutoffDate) {
+            const snapshotDateElement = document.getElementById('snapshot-date');
+            if (snapshotDateElement && snapshotDateElement.value) {
+                cutoffDate = snapshotDateElement.value;
+                console.log(`📅 CLIENT: Cutoff_date récupéré automatiquement: ${cutoffDate}`);
+            }
+        }
         
         console.log('Chargement dashboard pour:', currentUser.username, 'Role:', currentUser.role);
         console.log('Dates:', startDate, 'à', endDate);
@@ -8196,7 +8205,7 @@ async function loadDashboardData() {
         createChart('category-chart', stats.category_breakdown, 'category');
         
         // Mettre à jour les cartes de statistiques
-        await updateStatsCards(startDate, endDate);
+        await updateStatsCards(startDate, endDate, cutoffDate);
         
         // Charger les données de stock
         await loadStockSummary(startDate, endDate);
