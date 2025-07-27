@@ -1615,6 +1615,11 @@ function displayExpenses(expenses) {
             </button>` : 
             '<span style="color: #999;">Aucun</span>';
         
+        // Bouton pour voir les détails (toujours disponible)
+        const viewDetailsButton = `<button class="btn btn-sm btn-info" onclick="openViewDetailsModal(${expense.id})" title="Voir les détails de la dépense">
+            <i class="fas fa-eye"></i>
+        </button>`;
+        
         // Bouton pour modifier la dépense avec la nouvelle logique
         let editButton = '';
         if (canEdit) {
@@ -1669,6 +1674,7 @@ function displayExpenses(expenses) {
             ${['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) ? `<td>${expense.user_name}</td>` : ''}
             <td>
                 <div class="action-buttons">
+                    ${viewDetailsButton}
                     ${editButton}
                     ${generateDeleteButton(expense, isDGExpenseOnDirectorAccount)}
                 </div>
@@ -4348,6 +4354,68 @@ async function openEditModal(expenseId) {
 function closeEditModal() {
     document.getElementById('edit-expense-modal').style.display = 'none';
     document.getElementById('edit-expense-form').reset();
+}
+
+// Fonction pour ouvrir le modal de détails d'une dépense
+async function openViewDetailsModal(expenseId) {
+    try {
+        const response = await fetch(`/api/expenses/${expenseId}`);
+        if (!response.ok) throw new Error('Erreur récupération de la dépense');
+        const expense = await response.json();
+        
+        console.log('DEBUG: Données de la dépense pour détails:', expense);
+
+        // Remplir les champs de détails
+        document.getElementById('view-expense-account').textContent = expense.account_name || 'Non renseigné';
+        document.getElementById('view-expense-type').textContent = expense.expense_type || 'Non renseigné';
+        document.getElementById('view-expense-category').textContent = expense.category_name || 'Non renseigné';
+        document.getElementById('view-expense-subcategory').textContent = expense.subcategory || 'Non renseigné';
+        
+        // Afficher le réseau social si applicable
+        const socialNetworkRow = document.getElementById('view-social-network-row');
+        const socialNetworkDetail = document.getElementById('view-social-network-detail');
+        if (expense.social_network_detail) {
+            socialNetworkRow.style.display = 'block';
+            socialNetworkDetail.textContent = expense.social_network_detail;
+        } else {
+            socialNetworkRow.style.display = 'none';
+        }
+        
+        document.getElementById('view-expense-date').textContent = expense.expense_date ? formatDate(expense.expense_date) : 'Non renseigné';
+        document.getElementById('view-expense-created').textContent = expense.created_at ? formatDate(expense.created_at) + ' ' + new Date(expense.created_at).toLocaleTimeString('fr-FR', {hour: '2-digit', minute: '2-digit'}) : 'Non renseigné';
+        document.getElementById('view-expense-designation').textContent = expense.designation || 'Non renseigné';
+        document.getElementById('view-expense-supplier').textContent = expense.supplier || 'Non renseigné';
+        document.getElementById('view-expense-quantity').textContent = expense.quantity || 'Non renseigné';
+        document.getElementById('view-expense-unit-price').textContent = expense.unit_price ? formatCurrency(expense.unit_price) : 'Non renseigné';
+        document.getElementById('view-expense-total').textContent = expense.total || expense.amount ? formatCurrency(parseInt(expense.total || expense.amount)) : 'Non renseigné';
+        document.getElementById('view-expense-predictable').textContent = expense.predictable === 'oui' ? 'Oui' : 'Non';
+        document.getElementById('view-expense-username').textContent = expense.username || 'Non renseigné';
+        document.getElementById('view-expense-description').textContent = expense.description || 'Non renseigné';
+        
+        // Gérer le justificatif
+        const justificationElement = document.getElementById('view-expense-justification');
+        if (expense.justification_filename) {
+            justificationElement.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span>${expense.justification_filename}</span>
+                    <button class="btn btn-sm btn-primary" onclick="window.open('${expense.justification_path}', '_blank')" title="Télécharger le justificatif">
+                        <i class="fas fa-download"></i> Télécharger
+                    </button>
+                </div>
+            `;
+        } else {
+            justificationElement.textContent = 'Aucun justificatif';
+        }
+        
+        document.getElementById('view-details-modal').style.display = 'block';
+    } catch (error) {
+        console.error('Erreur ouverture modal détails:', error);
+        showNotification(error.message, 'error');
+    }
+}
+
+function closeViewDetailsModal() {
+    document.getElementById('view-details-modal').style.display = 'none';
 }
 
 // Charger les catégories pour le modal de modification
