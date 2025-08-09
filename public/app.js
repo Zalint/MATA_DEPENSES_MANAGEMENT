@@ -1547,7 +1547,7 @@ function displayExpenses(expenses) {
     const tbody = document.getElementById('expenses-tbody');
     tbody.innerHTML = '';
     
-    const colSpan = ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) ? '16' : '15';
+    const colSpan = ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) ? '17' : '16';
     
     if (expenses.length === 0) {
         tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center;">Aucune dépense trouvée</td></tr>`;
@@ -1585,9 +1585,9 @@ function displayExpenses(expenses) {
                  const expenseDate = new Date(expense.created_at);
                  const now = new Date();
                  const hoursDifference = (now - expenseDate) / (1000 * 60 * 60);
-                 if (hoursDifference > 48) {
+                 if (hoursDifference > 24) {
                      canEdit = false;
-                     cantEditReason = "Modification non autorisée - Plus de 48 heures écoulées.";
+                     cantEditReason = "Modification non autorisée - Plus de 24 heures écoulées.";
                  } else {
                      canEdit = true;
                  }
@@ -1627,7 +1627,7 @@ function displayExpenses(expenses) {
                 const expenseDate = new Date(expense.created_at);
                 const now = new Date();
                 const hoursDifference = (now - expenseDate) / (1000 * 60 * 60);
-                const remainingHours = 48 - hoursDifference;
+                const remainingHours = 24 - hoursDifference;
 
                 if (remainingHours <= 12) {
                     editButton = `<button class="btn btn-sm btn-warning" onclick="openEditModal(${expense.id})" title="⚠️ Il reste ${Math.floor(remainingHours)}h${Math.floor((remainingHours % 1) * 60)}min pour modifier">
@@ -1651,11 +1651,21 @@ function displayExpenses(expenses) {
         // Checkbox cochée selon l'état selected_for_invoice
         const isChecked = expense.selected_for_invoice ? 'checked' : '';
         
+        // Formater les dates
+        const expenseDate = formatDate(expense.expense_date);
+        const timestamp = new Date(expense.timestamp_creation);
+        const timestampDate = timestamp.toLocaleDateString('fr-FR');
+        const timestampTime = timestamp.toLocaleTimeString('fr-FR', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+
         row.innerHTML = `
             <td>
                 <input type="checkbox" class="expense-checkbox" data-expense-id="${expense.id}" ${isChecked}>
             </td>
-            <td>${formatDate(expense.expense_date)}</td>
+            <td>${expenseDate}</td>
+            <td>${timestampDate}<br><small class="text-muted">${timestampTime}</small></td>
             <td title="${expense.category_name}">${expense.category_name.length > 25 ? expense.category_name.substring(0, 25) + '...' : expense.category_name}</td>
             <td title="${expense.designation || ''}">${expense.designation ? (expense.designation.length > 20 ? expense.designation.substring(0, 20) + '...' : expense.designation) : '-'}</td>
             <td title="${expense.supplier || ''}">${expense.supplier ? (expense.supplier.length > 15 ? expense.supplier.substring(0, 15) + '...' : expense.supplier) : '-'}</td>
@@ -1748,15 +1758,15 @@ function generateDeleteButton(expense, isDGExpenseOnDirectorAccount) {
         // Dépense du DG sur compte directeur - seuls les directeurs simples ne peuvent pas supprimer
         deleteButton = '<span style="color: #999;" title="Seul le Directeur Général peut supprimer cette dépense"><i class="fas fa-lock"></i></span>';
     } else if (currentUser.role === 'directeur') {
-        // Vérifier la restriction de 48 heures pour les directeurs simples (leurs propres dépenses)
+        // Vérifier la restriction de 24 heures pour les directeurs simples (leurs propres dépenses)
         const expenseDate = new Date(expense.created_at);
         const now = new Date();
         const hoursDifference = (now - expenseDate) / (1000 * 60 * 60);
         
-        if (hoursDifference > 48) {
-            deleteButton = '<span style="color: #dc3545;" title="Suppression non autorisée - Plus de 48 heures écoulées"><i class="fas fa-clock"></i></span>';
+        if (hoursDifference > 24) {
+            deleteButton = '<span style="color: #dc3545;" title="Suppression non autorisée - Plus de 24 heures écoulées"><i class="fas fa-clock"></i></span>';
         } else {
-            const remainingHours = 48 - hoursDifference;
+            const remainingHours = 24 - hoursDifference;
             if (remainingHours <= 12) {
                 // Avertissement - proche de la limite
                 deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteExpense(${expense.id})" title="⚠️ Il reste ${Math.floor(remainingHours)}h${Math.floor((remainingHours % 1) * 60)}min pour supprimer">
@@ -3174,7 +3184,7 @@ function generateCreditDeleteButton(credit) {
     
     if (canDelete.allowed) {
         if (canDelete.timeWarning) {
-            // Avertissement - proche de la limite de 48h pour les directeurs
+            // Avertissement - proche de la limite de 24h pour les directeurs
             deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteCredit(${credit.id})" title="${canDelete.timeWarning}">
                 <i class="fas fa-trash" style="color: #fbbf24;"></i>
             </button>`;
@@ -3199,22 +3209,22 @@ function canDeleteCredit(credit) {
         return { allowed: true };
     }
     
-    // Directeurs simples : vérifier s'ils ont les droits de crédit sur ce compte ET dans les 48h
+    // Directeurs simples : vérifier s'ils ont les droits de crédit sur ce compte ET dans les 24h
     if (currentUser.role === 'directeur') {
         // TODO: Vérifier les permissions de crédit du directeur sur ce compte
-        // Pour l'instant, on vérifie juste les 48h
+        // Pour l'instant, on vérifie juste les 24h
         const creditDate = new Date(credit.created_at);
         const now = new Date();
         const hoursDifference = (now - creditDate) / (1000 * 60 * 60);
         
-        if (hoursDifference > 48) {
+        if (hoursDifference > 24) {
             return {
                 allowed: false,
-                reason: `Suppression non autorisée - Plus de 48 heures écoulées (${Math.floor(hoursDifference)}h)`
+                reason: `Suppression non autorisée - Plus de 24 heures écoulées (${Math.floor(hoursDifference)}h)`
             };
         }
         
-        const remainingHours = 48 - hoursDifference;
+        const remainingHours = 24 - hoursDifference;
         if (remainingHours <= 12) {
             return {
                 allowed: true,
@@ -4285,8 +4295,8 @@ async function openEditModal(expenseId) {
 
         if (currentUser.role === 'directeur') {
             const hoursDifference = (new Date() - new Date(expense.created_at)) / 36e5;
-            if (hoursDifference > 48) {
-                alert(`Modification non autorisée. La dépense a été créée il y a plus de 48 heures.`);
+            if (hoursDifference > 24) {
+                alert(`Modification non autorisée. La dépense a été créée il y a plus de 24 heures.`);
                 return;
             }
         }
@@ -5279,7 +5289,10 @@ function createExpenseDetailsModal() {
                         <thead style="background-color: #f8f9fa; border-bottom: 2px solid #dee2e6;">
                             <tr>
                                 <th class="sortable" data-field="expense_date" style="padding: 12px; text-align: left; cursor: pointer; user-select: none; position: relative;">
-                                    Date <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                    Date Dépense <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
+                                </th>
+                                <th class="sortable" data-field="created_at" style="padding: 12px; text-align: left; cursor: pointer; user-select: none; position: relative;">
+                                    Timestamp <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
                                 </th>
                                 <th class="sortable" data-field="designation" style="padding: 12px; text-align: left; cursor: pointer; user-select: none; position: relative;">
                                     Désignation <i class="fas fa-sort sort-icon" style="margin-left: 5px; opacity: 0.5;"></i>
@@ -5599,7 +5612,7 @@ function displayModalExpenses(expenses) {
     if (expenses.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="13" style="text-align: center; padding: 20px; color: #666;">
+                <td colspan="14" style="text-align: center; padding: 20px; color: #666;">
                     Aucune dépense trouvée avec les filtres appliqués.
                 </td>
             </tr>
@@ -5610,9 +5623,20 @@ function displayModalExpenses(expenses) {
     tbody.innerHTML = expenses.map(expense => {
         const isDGExpense = currentUser.role === 'directeur' && expense.username !== currentUser.username;
         const rowStyle = isDGExpense ? 'font-style: italic; opacity: 0.8;' : '';
+        
+        // Formater les dates
+        const expenseDate = formatDate(expense.expense_date);
+        const timestamp = new Date(expense.timestamp_creation);
+        const timestampDate = timestamp.toLocaleDateString('fr-FR');
+        const timestampTime = timestamp.toLocaleTimeString('fr-FR', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+        
         return `
             <tr style="${rowStyle}">
-                <td style="padding: 12px;">${formatDate(expense.expense_date)}</td>
+                <td style="padding: 12px;">${expenseDate}</td>
+                <td style="padding: 12px;">${timestampDate}<br><small style="color: #999;">${timestampTime}</small></td>
                 <td style="padding: 12px;">
                         ${expense.designation || 'Sans désignation'}
                         ${isDGExpense ? '<span style=\"color: #007bff; font-size: 0.8rem; margin-left: 8px;\">(DG)</span>' : ''}
@@ -6146,7 +6170,7 @@ function getDeliveryDeleteButton(delivery, currentUser, assignedDirectors) {
         const now = new Date();
         const timeDiff = now - deliveryDate;
         const hoursDiff = timeDiff / (1000 * 60 * 60);
-        const remainingHours = 48 - hoursDiff;
+        const remainingHours = 24 - hoursDiff;
         
         if (remainingHours > 0) {
             const hours = Math.floor(remainingHours);
@@ -6225,12 +6249,12 @@ function canDeleteDelivery(delivery, currentUser, assignedDirectors) {
         return true;
     }
     
-    // Assigned directors can delete within 48h regardless of status
+    // Assigned directors can delete within 24h regardless of status
     if (currentUser.role === 'directeur') {
         const isAssigned = assignedDirectors.includes(currentUser.id);
         if (!isAssigned) return false;
         
-        // Check if delivery is within 48h window
+        // Check if delivery is within 24h window
         const deliveryDate = new Date(delivery.delivery_date);
         const now = new Date();
         const timeDiff = now - deliveryDate;
@@ -6465,14 +6489,14 @@ async function deletePartnerDelivery(deliveryId) {
             const now = new Date();
             const timeDiff = now - deliveryDateTime;
             const hoursDiff = timeDiff / (1000 * 60 * 60);
-            const remainingHours = 48 - hoursDiff;
+            const remainingHours = 24 - hoursDiff;
             
             if (remainingHours > 0) {
                 const hours = Math.floor(remainingHours);
                 const minutes = Math.floor((remainingHours % 1) * 60);
                 timeWarning = `⏰ Temps restant: ${hours}h${minutes}min\n`;
             } else {
-                timeWarning = `❌ Délai de 48h dépassé - suppression non autorisée\n`;
+                timeWarning = `❌ Délai de 24h dépassé - suppression non autorisée\n`;
             }
         }
         
@@ -8313,14 +8337,24 @@ async function loadStockSummary(startDate = null, endDate = null) {
         
         const stockTotalElement = document.getElementById('stock-total');
         const stockDateElement = document.getElementById('stock-date');
+        const stockMataDetailsElement = document.getElementById('stock-mata-details');
         
         if (stockTotalElement && stockDateElement) {
             if (stockData.totalStock !== 0) {
                 stockTotalElement.textContent = stockData.totalStock.toLocaleString('fr-FR');
                 stockDateElement.textContent = `(${stockData.formattedDate || stockData.latestDate || 'Date inconnue'})`;
+                
+                // Afficher les détails des dates si disponibles
+                if (stockMataDetailsElement && stockData.details) {
+                    stockMataDetailsElement.textContent = stockData.details;
+                    stockMataDetailsElement.style.display = 'block';
+                }
             } else {
                 stockTotalElement.textContent = '0';
                 stockDateElement.textContent = stockData.message || 'Aucune donnée';
+                if (stockMataDetailsElement) {
+                    stockMataDetailsElement.style.display = 'none';
+                }
             }
         }
         
@@ -8719,7 +8753,7 @@ function generateDirectorCreditDeleteButton(credit) {
     
     if (canDelete.allowed) {
         if (canDelete.timeWarning) {
-            // Avertissement - proche de la limite de 48h pour les directeurs
+            // Avertissement - proche de la limite de 24h pour les directeurs
             deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteDirectorCredit(${credit.id})" title="${canDelete.timeWarning}">
                 <i class="fas fa-trash" style="color: #fbbf24;"></i>
             </button>`;
@@ -8744,7 +8778,7 @@ function canDeleteDirectorCredit(credit) {
         return { allowed: true };
     }
     
-    // Directeurs simples : vérifier s'ils ont créé ce crédit ET dans les 48h
+    // Directeurs simples : vérifier s'ils ont créé ce crédit ET dans les 24h
     if (currentUser.role === 'directeur') {
         // Vérifier si c'est le directeur qui a créé ce crédit
         if (credit.credited_by !== currentUser.id) {
@@ -8754,19 +8788,19 @@ function canDeleteDirectorCredit(credit) {
             };
         }
         
-        // Vérifier les 48h
+        // Vérifier les 24h
         const creditDate = new Date(credit.created_at || credit.credit_date);
         const now = new Date();
         const hoursDifference = (now - creditDate) / (1000 * 60 * 60);
         
-        if (hoursDifference > 48) {
+        if (hoursDifference > 24) {
             return {
                 allowed: false,
-                reason: `Suppression non autorisée - Plus de 48 heures écoulées (${Math.floor(hoursDifference)}h)`
+                reason: `Suppression non autorisée - Plus de 24 heures écoulées (${Math.floor(hoursDifference)}h)`
             };
         }
         
-        const remainingHours = 48 - hoursDifference;
+        const remainingHours = 24 - hoursDifference;
         if (remainingHours <= 12) {
             return {
                 allowed: true,
@@ -10737,6 +10771,7 @@ async function loadStockVivantVariation(startDate = null, endDate = null) {
         // Mettre à jour l'affichage
         const variationElement = document.getElementById('stock-vivant-variation');
         const periodElement = document.getElementById('stock-variation-period');
+        const stockVivantDetailsElement = document.getElementById('stock-vivant-details');
         
         if (variationElement && periodElement) {
             // Utiliser les nouvelles données
@@ -10757,6 +10792,14 @@ async function loadStockVivantVariation(startDate = null, endDate = null) {
             
             // Mettre à jour la période d'information
             periodElement.textContent = data.month_year ? `Mois: ${data.month_year}` : (data.periodInfo || 'Variation mois actuel vs précédent');
+            
+            // Afficher les détails des dates si disponibles
+            if (stockVivantDetailsElement && data.details) {
+                stockVivantDetailsElement.textContent = data.details;
+                stockVivantDetailsElement.style.display = 'block';
+            } else if (stockVivantDetailsElement) {
+                stockVivantDetailsElement.style.display = 'none';
+            }
         }
     } catch (error) {
         console.error('Erreur chargement écart stock vivant:', error);
@@ -13417,7 +13460,7 @@ function updateOperationsHistoryTable(operations) {
     tbody.innerHTML = '';
     
     if (operations.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">Aucune opération trouvée</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #999;">Aucune opération trouvée</td></tr>';
         return;
     }
     
@@ -13430,8 +13473,18 @@ function updateOperationsHistoryTable(operations) {
         // Générer les boutons d'actions selon les permissions
         const actionsHtml = generateCreanceOperationActions(operation);
         
+        // Formater les dates
+        const operationDate = formatDate(operation.operation_date);
+        const timestamp = new Date(operation.timestamp_creation);
+        const timestampDate = timestamp.toLocaleDateString('fr-FR');
+        const timestampTime = timestamp.toLocaleTimeString('fr-FR', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+        
         row.innerHTML = `
-            <td>${formatDate(operation.operation_date)}</td>
+            <td>${operationDate}</td>
+            <td>${timestampDate}<br><small class="text-muted">${timestampTime}</small></td>
             <td>${operation.client_name}</td>
             <td class="${typeClass}">${typeText}</td>
             <td class="${typeClass}">${formatCurrency(operation.amount)}</td>
@@ -13480,9 +13533,9 @@ function canEditCreanceOperation(operation) {
         return true;
     }
     
-    // Directeur peut modifier ses propres opérations dans les 48h
+    // Directeur peut modifier ses propres opérations dans les 24h
     if (userRole === 'directeur' && operationCreatedBy === currentUserId) {
-        return isWithin48Hours(operation.created_at);
+        return isWithin24Hours(operation.created_at);
     }
     
     return false;
@@ -13499,23 +13552,23 @@ function canDeleteCreanceOperation(operation) {
         return true;
     }
     
-    // Directeur peut supprimer ses propres opérations dans les 48h
+    // Directeur peut supprimer ses propres opérations dans les 24h
     if (userRole === 'directeur' && operationCreatedBy === currentUserId) {
-        return isWithin48Hours(operation.created_at);
+        return isWithin24Hours(operation.created_at);
     }
     
     return false;
 }
 
-// Vérifier si une date est dans les 48 heures
-function isWithin48Hours(dateString) {
+// Vérifier si une date est dans les 24 heures
+function isWithin24Hours(dateString) {
     if (!dateString) return false;
     
     const operationDate = new Date(dateString);
     const now = new Date();
     const diffHours = (now - operationDate) / (1000 * 60 * 60);
     
-    return diffHours <= 48;
+    return diffHours <= 24;
 }
 
 // Modifier une opération créance

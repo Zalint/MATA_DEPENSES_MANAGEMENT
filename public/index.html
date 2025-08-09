@@ -312,9 +312,10 @@
                                 <i class="fas fa-boxes"></i>
                             </div>
                             <div class="stat-content">
-                                <h3>Écart Stock Point de Vente</h3>
+                                <h3>📦 Écart Stock Mata Mensuel</h3>
                                 <p class="stat-value" id="stock-total">0</p>
                                 <small class="stat-period" id="stock-date">Dernière date</small>
+                                <small class="stat-details" id="stock-mata-details" style="display: none; font-size: 0.75em; color: #666; margin-top: 4px;"></small>
                             </div>
                         </div>
 
@@ -367,9 +368,10 @@
                                 <i class="fas fa-exchange-alt"></i>
                             </div>
                             <div class="stat-content">
-                                <h3>Écart de stock vivant mensuel</h3>
+                                <h3>🌱 Écart Stock Vivant Mensuel</h3>
                                 <p class="stat-value" id="stock-vivant-variation">0 FCFA</p>
                                 <small class="stat-period" id="stock-variation-period">Variation mois actuel vs précédent</small>
+                                <small class="stat-details" id="stock-vivant-details" style="display: none; font-size: 0.75em; color: #666; margin-top: 4px;"></small>
                             </div>
                         </div>
 
@@ -570,7 +572,10 @@
                                         <input type="checkbox" id="select-all-header" title="Sélectionner tout">
                                     </th>
                                     <th class="sortable" data-sort="expense_date">
-                                        Date <i class="fas fa-sort"></i>
+                                        Date Dépense <i class="fas fa-sort"></i>
+                                    </th>
+                                    <th class="sortable" data-sort="created_at">
+                                        Timestamp <i class="fas fa-sort"></i>
                                     </th>
                                     <th class="sortable" data-sort="category_name">
                                         Catégorie <i class="fas fa-sort"></i>
@@ -1275,7 +1280,8 @@
                                     <table id="operations-history-table" class="data-table">
                                         <thead>
                                             <tr>
-                                                <th>Date</th>
+                                                <th>Date Opération</th>
+                                                <th>Timestamp</th>
                                                 <th>Client</th>
                                                 <th>Type</th>
                                                 <th>Montant</th>

@@ -706,6 +706,8 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
                    u.username, 
                    u.role as user_role, -- <<< CORRECTION APPLIQUÉE ICI
                    a.account_name,
+                   e.expense_date as expense_date,
+                   e.created_at as timestamp_creation,
                    CASE 
                        WHEN e.expense_type IS NOT NULL THEN 
                            CONCAT(e.expense_type, ' > ', e.category, ' > ', e.subcategory,
@@ -1876,6 +1878,9 @@ app.get('/api/dashboard/stock-summary', requireAuth, async (req, res) => {
                 isVariation: true, // Indicateur pour le frontend
                 currentStock: currentStockMata,
                 previousStock: previousStockMata,
+                currentStockDate: currentStockMataDate ? currentStockMataDate.toISOString().split('T')[0] : null,
+                previousStockDate: previousStockMataDate ? previousStockMataDate.toISOString().split('T')[0] : null,
+                details: `Stock actuel (${currentStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStockMata.toLocaleString()} FCFA | Stock précédent (${previousStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStockMata.toLocaleString()} FCFA`,
                 message: 'Écart Stock Mata mensuel calculé avec succès'
             });
         } else {
@@ -2929,13 +2934,13 @@ app.put('/api/expenses/:id', requireAuth, upload.single('justification'), async 
         
         const existingExpense = existingExpenseResult.rows[0];
 
-        // Vérifier la restriction de 48 heures pour les directeurs réguliers (pas pour admin, DG, PCA)
+        // Vérifier la restriction de 24 heures pour les directeurs réguliers (pas pour admin, DG, PCA)
         if (req.session.user.role === 'directeur') {
             const expenseCreatedAt = new Date(existingExpense.created_at);
             const now = new Date();
             const hoursDifference = (now - expenseCreatedAt) / (1000 * 60 * 60);
             
-            if (hoursDifference > 48) {
+            if (hoursDifference > 24) {
                 console.log(`❌ ERREUR 403: Tentative de modification de la dépense ${expenseId} après ${hoursDifference.toFixed(2)} heures par le directeur ${userId}`);
                 return res.status(403).json({ 
                     error: `Modification non autorisée. Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures.`
@@ -3109,15 +3114,15 @@ app.delete('/api/expenses/:id', requireAuth, async (req, res) => {
         
         const expense = existingExpense.rows[0];
         
-        // Vérifier la restriction de 48 heures pour les directeurs réguliers (pas pour admin, DG, PCA)
+        // Vérifier la restriction de 24 heures pour les directeurs réguliers (pas pour admin, DG, PCA)
         if (req.session.user.role === 'directeur') {
             const expenseCreatedAt = new Date(expense.created_at);
             const now = new Date();
             const hoursDifference = (now - expenseCreatedAt) / (1000 * 60 * 60);
             
-            if (hoursDifference > 48) {
+            if (hoursDifference > 24) {
                 return res.status(403).json({ 
-                    error: `Suppression non autorisée. Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures. Les directeurs ne peuvent supprimer une dépense que dans les 48 heures suivant sa création.` 
+                    error: `Suppression non autorisée. Cette dépense a été créée il y a ${Math.floor(hoursDifference)} heures. Les directeurs ne peuvent supprimer une dépense que dans les 24 heures suivant sa création.` 
                 });
             }
         }
@@ -3238,7 +3243,7 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
         if (['admin', 'directeur_general', 'pca'].includes(userRole)) {
             // Admin/DG/PCA peuvent supprimer n'importe quel crédit
         } else if (userRole === 'directeur') {
-            // Les directeurs ne peuvent supprimer que leurs propres crédits et dans les 48h
+            // Les directeurs ne peuvent supprimer que leurs propres crédits et dans les 24h
             if (credit.credited_by !== userId) {
                 return res.status(403).json({ error: 'Vous ne pouvez supprimer que vos propres crédits' });
             }
@@ -3247,9 +3252,9 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
             const now = new Date();
             const hoursDifference = (now - creditDate) / (1000 * 60 * 60);
             
-            if (hoursDifference > 48) {
+            if (hoursDifference > 24) {
                 return res.status(403).json({ 
-                    error: `Suppression non autorisée - Plus de 48 heures écoulées (${Math.floor(hoursDifference)}h)`
+                    error: `Suppression non autorisée - Plus de 24 heures écoulées (${Math.floor(hoursDifference)}h)`
                 });
             }
         } else {
@@ -4238,17 +4243,17 @@ app.delete('/api/partner/deliveries/:deliveryId', requireAuth, async (req, res) 
             );
             
             if (assignmentResult.rows.length > 0) {
-                // Vérifier le délai de 48h
+                // Vérifier le délai de 24h
                 const deliveryDate = new Date(deliveryForPermission.delivery_date);
                 const now = new Date();
                 const timeDiff = now - deliveryDate;
                 const hoursDiff = timeDiff / (1000 * 60 * 60);
                 
-                canDelete = hoursDiff <= 48;
+                canDelete = hoursDiff <= 24;
                 
                 if (!canDelete) {
                     return res.status(403).json({ 
-                        error: `Délai de suppression dépassé. Les directeurs peuvent supprimer des livraisons seulement dans les 48h suivant la date de livraison.`
+                        error: `Délai de suppression dépassé. Les directeurs peuvent supprimer des livraisons seulement dans les 24h suivant la date de livraison.`
                     });
                 }
             }
@@ -6998,7 +7003,9 @@ app.get('/api/creance/:accountId/operations', requireAuth, async (req, res) => {
         }
 
         const result = await pool.query(`
-            SELECT co.*, cc.client_name, u.full_name as created_by_name
+            SELECT co.*, cc.client_name, u.full_name as created_by_name,
+                   co.operation_date as operation_date,
+                   co.created_at as timestamp_creation
             FROM creance_operations co
             JOIN creance_clients cc ON co.client_id = cc.id
             JOIN users u ON co.created_by = u.id
@@ -7100,7 +7107,7 @@ app.put('/api/creance/operations/:operationId', requireAuth, async (req, res) =>
         if (!canEdit) {
             return res.status(403).json({ 
                 error: userRole === 'directeur' 
-                    ? 'Vous ne pouvez modifier que vos propres opérations dans les 48h'
+                    ? 'Vous ne pouvez modifier que vos propres opérations dans les 24h'
                     : 'Permission refusée' 
             });
         }
@@ -7159,7 +7166,7 @@ app.delete('/api/creance/operations/:operationId', requireAuth, async (req, res)
         if (!canDelete) {
             return res.status(403).json({ 
                 error: userRole === 'directeur' 
-                    ? 'Vous ne pouvez supprimer que vos propres opérations dans les 48h'
+                    ? 'Vous ne pouvez supprimer que vos propres opérations dans les 24h'
                     : 'Seul l\'admin peut supprimer les opérations' 
             });
         }
@@ -7184,11 +7191,11 @@ function checkCreanceOperationEditPermission(userRole, userId, operationCreatedB
         return true;
     }
     
-    // Directeur peut modifier ses propres opérations dans les 48h
+    // Directeur peut modifier ses propres opérations dans les 24h
     if (userRole === 'directeur' && 
         operationCreatedBy === userId && 
         accountAssignedTo === userId) {
-        return isWithin48Hours(operationCreatedAt);
+        return isWithin24Hours(operationCreatedAt);
     }
     
     return false;
@@ -7201,25 +7208,25 @@ function checkCreanceOperationDeletePermission(userRole, userId, operationCreate
         return true;
     }
     
-    // Directeur peut supprimer ses propres opérations dans les 48h
+    // Directeur peut supprimer ses propres opérations dans les 24h
     if (userRole === 'directeur' && 
         operationCreatedBy === userId && 
         accountAssignedTo === userId) {
-        return isWithin48Hours(operationCreatedAt);
+        return isWithin24Hours(operationCreatedAt);
     }
     
     return false;
 }
 
-// Fonction utilitaire pour vérifier si une date est dans les 48 heures
-function isWithin48Hours(dateString) {
+// Fonction utilitaire pour vérifier si une date est dans les 24 heures
+function isWithin24Hours(dateString) {
     if (!dateString) return false;
     
     const operationDate = new Date(dateString);
     const now = new Date();
     const diffHours = (now - operationDate) / (1000 * 60 * 60);
     
-    return diffHours <= 48;
+    return diffHours <= 24;
 }
 
 // Route pour obtenir le total des créances (somme des soldes de tous les clients)
@@ -8544,7 +8551,12 @@ app.get('/api/dashboard/stock-vivant-variation', requireAuth, async (req, res) =
             variation_total: variationTotale,
             formatted: `${variationTotale.toLocaleString('fr-FR')} FCFA`,
             month_year: monthYear,
-            cutoff_date: cutoff_date
+            cutoff_date: cutoff_date,
+            currentStock: currentStock,
+            previousStock: previousStock,
+            currentStockDate: currentStockDate ? currentStockDate.toISOString().split('T')[0] : null,
+            previousStockDate: previousStockDate ? previousStockDate.toISOString().split('T')[0] : null,
+            details: `Stock actuel (${currentStockDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStock.toLocaleString()} FCFA | Stock précédent (${previousStockDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStock.toLocaleString()} FCFA`
         };
 
         // Ajouter les détails de debug si demandés
