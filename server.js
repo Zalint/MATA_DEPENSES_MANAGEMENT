@@ -9654,8 +9654,6 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 SELECT 
                     cc.id,
                     cc.client_name,
-                    cc.phone,
-                    cc.address,
                     COALESCE(credits.total_credits, 0) as credit_initial,
                     COALESCE(advances.total_advances, 0) as total_avances,
                     COALESCE(reimbursements.total_reimbursements, 0) as total_remboursements,
@@ -9720,8 +9718,8 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 total_avances: parseFloat(client.total_avances || 0),
                 total_remboursements: parseFloat(client.total_remboursements || 0),
                 solde_final: parseFloat(client.solde_final || 0),
-                telephone: client.phone || '',
-                adresse: client.address || ''
+                telephone: '',
+                adresse: ''
             }));
 
             const operations = operationsResult.rows.map(op => ({
@@ -9847,7 +9845,7 @@ Répondez en français de manière professionnelle.`;
                 generated_at: new Date().toISOString(),
                 openai_integration: openaiInsights?.error ? "error" : "success",
                 api_version: "1.0",
-                year_filter: currentYear,
+                year_filter: selectedDate.getFullYear(),
                 total_clients: detailsData.reduce((sum, d) => sum + d.status.length, 0),
                 total_operations: detailsData.reduce((sum, d) => sum + d.operations.length, 0)
             }
