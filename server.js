@@ -9589,37 +9589,57 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
         const summaryData = [];
         
         for (const portfolio of portfolios) {
-            // Solde à la date sélectionnée
+            // Solde à la date sélectionnée (même logique que l'interface web)
             const currentBalanceQuery = `
                 SELECT 
                     COALESCE(SUM(
-                        CASE 
-                            WHEN co.operation_type = 'credit' THEN co.amount
-                            WHEN co.operation_type = 'debit' THEN -co.amount
-                            ELSE 0
-                        END
+                        cc.initial_credit + 
+                        COALESCE(credits.total_credits, 0) - 
+                        COALESCE(debits.total_debits, 0)
                     ), 0) as solde_final
-                FROM creance_operations co
-                JOIN creance_clients cc ON co.client_id = cc.id
+                FROM creance_clients cc
+                LEFT JOIN (
+                    SELECT client_id, SUM(amount) as total_credits
+                    FROM creance_operations 
+                    WHERE operation_type = 'credit' 
+                    AND operation_date <= $2
+                    GROUP BY client_id
+                ) credits ON cc.id = credits.client_id
+                LEFT JOIN (
+                    SELECT client_id, SUM(amount) as total_debits
+                    FROM creance_operations 
+                    WHERE operation_type = 'debit' 
+                    AND operation_date <= $2
+                    GROUP BY client_id
+                ) debits ON cc.id = debits.client_id
                 WHERE cc.account_id = $1 
-                AND co.operation_date <= $2
                 AND cc.is_active = true
             `;
             
-            // Solde à la date précédente
+            // Solde à la date précédente (même logique que l'interface web)
             const previousBalanceQuery = `
                 SELECT 
                     COALESCE(SUM(
-                        CASE 
-                            WHEN co.operation_type = 'credit' THEN co.amount
-                            WHEN co.operation_type = 'debit' THEN -co.amount
-                            ELSE 0
-                        END
+                        cc.initial_credit + 
+                        COALESCE(credits.total_credits, 0) - 
+                        COALESCE(debits.total_debits, 0)
                     ), 0) as solde_final
-                FROM creance_operations co
-                JOIN creance_clients cc ON co.client_id = cc.id
+                FROM creance_clients cc
+                LEFT JOIN (
+                    SELECT client_id, SUM(amount) as total_credits
+                    FROM creance_operations 
+                    WHERE operation_type = 'credit' 
+                    AND operation_date <= $2
+                    GROUP BY client_id
+                ) credits ON cc.id = credits.client_id
+                LEFT JOIN (
+                    SELECT client_id, SUM(amount) as total_debits
+                    FROM creance_operations 
+                    WHERE operation_type = 'debit' 
+                    AND operation_date <= $2
+                    GROUP BY client_id
+                ) debits ON cc.id = debits.client_id
                 WHERE cc.account_id = $1 
-                AND co.operation_date <= $2
                 AND cc.is_active = true
             `;
 
@@ -9649,15 +9669,15 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
         for (const portfolio of portfolios) {
             console.log(`🔍 EXTERNAL: Traitement portfolio ${portfolio.account_name} (ID: ${portfolio.id})`);
             
-            // STATUS: Information sur les clients
+            // STATUS: Information sur les clients (même logique que l'interface web)
             const clientsStatusQuery = `
                 SELECT 
                     cc.id,
                     cc.client_name,
-                    COALESCE(credits.total_credits, 0) as credit_initial,
-                    COALESCE(advances.total_advances, 0) as total_avances,
-                    COALESCE(reimbursements.total_reimbursements, 0) as total_remboursements,
-                    (COALESCE(credits.total_credits, 0) + COALESCE(advances.total_advances, 0) - COALESCE(reimbursements.total_reimbursements, 0)) as solde_final
+                    cc.initial_credit as credit_initial,
+                    COALESCE(credits.total_credits, 0) as total_avances,
+                    COALESCE(debits.total_debits, 0) as total_remboursements,
+                    (cc.initial_credit + COALESCE(credits.total_credits, 0) - COALESCE(debits.total_debits, 0)) as solde_final
                 FROM creance_clients cc
                 LEFT JOIN (
                     SELECT client_id, SUM(amount) as total_credits
@@ -9667,19 +9687,12 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                     GROUP BY client_id
                 ) credits ON cc.id = credits.client_id
                 LEFT JOIN (
-                    SELECT client_id, SUM(amount) as total_advances
-                    FROM creance_operations 
-                    WHERE operation_type = 'advance' 
-                    AND operation_date <= $2
-                    GROUP BY client_id
-                ) advances ON cc.id = advances.client_id
-                LEFT JOIN (
-                    SELECT client_id, SUM(amount) as total_reimbursements
+                    SELECT client_id, SUM(amount) as total_debits
                     FROM creance_operations 
                     WHERE operation_type = 'debit' 
                     AND operation_date <= $2
                     GROUP BY client_id
-                ) reimbursements ON cc.id = reimbursements.client_id
+                ) debits ON cc.id = debits.client_id
                 WHERE cc.account_id = $1 
                 AND cc.is_active = true
                 ORDER BY cc.client_name
