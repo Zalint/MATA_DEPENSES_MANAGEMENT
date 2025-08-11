@@ -8,6 +8,7 @@ const cors = require('cors');
 const fs = require('fs');
 const multer = require('multer');
 const PDFDocument = require('pdfkit');
+const OpenAI = require('openai');
 
 // Fonction utilitaire pour formater la monnaie
 function formatCurrency(amount) {
@@ -9528,5 +9529,339 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
     } catch (error) {
         console.error('❌ AUDIT: Erreur lors de l\'audit des flux:', error);
         res.status(500).json({ error: 'Erreur serveur lors de l\'audit' });
+    }
+});
+
+// =====================================================
+// EXTERNAL API FOR CREANCE PORTFOLIOS
+// =====================================================
+
+// Endpoint pour l'API externe des créances avec intégration OpenAI
+app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API créance avec params:', req.query);
+    
+    try {
+        // Vérifier la présence de la clé OpenAI
+        const openaiApiKey = process.env.OPENAI_API_KEY;
+        if (!openaiApiKey) {
+            console.log('⚠️ EXTERNAL: OPENAI_API_KEY manquante dans les variables d\'environnement');
+            return res.status(500).json({ 
+                error: 'Configuration OpenAI manquante',
+                code: 'OPENAI_CONFIG_MISSING'
+            });
+        }
+
+        // Déterminer la date sélectionnée (today par défaut)
+        const selectedDate = req.query.date ? new Date(req.query.date) : new Date();
+        const previousDate = new Date(selectedDate);
+        previousDate.setDate(previousDate.getDate() - 1);
+
+        // Formater les dates pour les requêtes SQL
+        const selectedDateStr = selectedDate.toISOString().split('T')[0];
+        const previousDateStr = previousDate.toISOString().split('T')[0];
+        
+        console.log(`📅 EXTERNAL: Dates calculées - Sélectionnée: ${selectedDateStr}, Précédente: ${previousDateStr}`);
+
+        // ===== PARTIE 1: SUMMARY - Différence des soldes finaux =====
+        
+        // Récupérer tous les portfolios de type créance
+        const portfoliosQuery = `
+            SELECT DISTINCT a.id, a.account_name, a.user_id, u.full_name as assigned_director_name
+            FROM accounts a 
+            LEFT JOIN users u ON a.user_id = u.id 
+            WHERE a.account_type = 'creance' AND a.is_active = true 
+            ORDER BY a.account_name
+        `;
+        
+        const portfoliosResult = await pool.query(portfoliosQuery);
+        const portfolios = portfoliosResult.rows;
+        
+        if (portfolios.length === 0) {
+            return res.json({
+                summary: { message: "Aucun portfolio de type créance trouvé" },
+                details: []
+            });
+        }
+
+        console.log(`📊 EXTERNAL: ${portfolios.length} portfolios créance trouvés`);
+
+        // Calculer les soldes finaux pour chaque portfolio aux deux dates
+        const summaryData = [];
+        
+        for (const portfolio of portfolios) {
+            // Solde à la date sélectionnée
+            const currentBalanceQuery = `
+                SELECT 
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN co.operation_type = 'credit' THEN co.amount
+                            WHEN co.operation_type = 'debit' THEN -co.amount
+                            ELSE 0
+                        END
+                    ), 0) as solde_final
+                FROM creance_operations co
+                JOIN creance_clients cc ON co.client_id = cc.id
+                WHERE cc.account_id = $1 
+                AND co.operation_date <= $2
+                AND cc.is_active = true
+            `;
+            
+            // Solde à la date précédente
+            const previousBalanceQuery = `
+                SELECT 
+                    COALESCE(SUM(
+                        CASE 
+                            WHEN co.operation_type = 'credit' THEN co.amount
+                            WHEN co.operation_type = 'debit' THEN -co.amount
+                            ELSE 0
+                        END
+                    ), 0) as solde_final
+                FROM creance_operations co
+                JOIN creance_clients cc ON co.client_id = cc.id
+                WHERE cc.account_id = $1 
+                AND co.operation_date <= $2
+                AND cc.is_active = true
+            `;
+
+            const [currentResult, previousResult] = await Promise.all([
+                pool.query(currentBalanceQuery, [portfolio.id, selectedDateStr]),
+                pool.query(previousBalanceQuery, [portfolio.id, previousDateStr])
+            ]);
+
+            const currentBalance = parseFloat(currentResult.rows[0]?.solde_final || 0);
+            const previousBalance = parseFloat(previousResult.rows[0]?.solde_final || 0);
+            const difference = currentBalance - previousBalance;
+
+            summaryData.push({
+                portfolio_name: portfolio.account_name,
+                portfolio_id: portfolio.id,
+                assigned_director: portfolio.assigned_director_name,
+                current_balance: currentBalance,
+                previous_balance: previousBalance,
+                difference: difference
+            });
+        }
+
+        // ===== PARTIE 2: DETAILS - Status et Opérations par portfolio =====
+        
+        const detailsData = [];
+        
+        for (const portfolio of portfolios) {
+            console.log(`🔍 EXTERNAL: Traitement portfolio ${portfolio.account_name} (ID: ${portfolio.id})`);
+            
+            // STATUS: Information sur les clients
+            const clientsStatusQuery = `
+                SELECT 
+                    cc.id,
+                    cc.client_name,
+                    cc.phone,
+                    cc.address,
+                    COALESCE(credits.total_credits, 0) as credit_initial,
+                    COALESCE(advances.total_advances, 0) as total_avances,
+                    COALESCE(reimbursements.total_reimbursements, 0) as total_remboursements,
+                    (COALESCE(credits.total_credits, 0) + COALESCE(advances.total_advances, 0) - COALESCE(reimbursements.total_reimbursements, 0)) as solde_final
+                FROM creance_clients cc
+                LEFT JOIN (
+                    SELECT client_id, SUM(amount) as total_credits
+                    FROM creance_operations 
+                    WHERE operation_type = 'credit' 
+                    AND operation_date <= $2
+                    GROUP BY client_id
+                ) credits ON cc.id = credits.client_id
+                LEFT JOIN (
+                    SELECT client_id, SUM(amount) as total_advances
+                    FROM creance_operations 
+                    WHERE operation_type = 'advance' 
+                    AND operation_date <= $2
+                    GROUP BY client_id
+                ) advances ON cc.id = advances.client_id
+                LEFT JOIN (
+                    SELECT client_id, SUM(amount) as total_reimbursements
+                    FROM creance_operations 
+                    WHERE operation_type = 'debit' 
+                    AND operation_date <= $2
+                    GROUP BY client_id
+                ) reimbursements ON cc.id = reimbursements.client_id
+                WHERE cc.account_id = $1 
+                AND cc.is_active = true
+                ORDER BY cc.client_name
+            `;
+
+            // OPERATIONS: Historique des opérations de l'année courante jusqu'à la date sélectionnée
+            const currentYear = selectedDate.getFullYear();
+            const yearStartDate = `${currentYear}-01-01`;
+            
+            const operationsQuery = `
+                SELECT 
+                    co.operation_date as date_operation,
+                    co.created_at as timestamp,
+                    cc.client_name as client,
+                    co.operation_type as type,
+                    co.amount as montant,
+                    co.description,
+                    u.full_name as created_by
+                FROM creance_operations co
+                JOIN creance_clients cc ON co.client_id = cc.id
+                LEFT JOIN users u ON co.created_by = u.id
+                WHERE cc.account_id = $1
+                AND co.operation_date >= $2
+                AND co.operation_date <= $3
+                ORDER BY co.operation_date DESC, co.created_at DESC
+            `;
+
+            const [statusResult, operationsResult] = await Promise.all([
+                pool.query(clientsStatusQuery, [portfolio.id, selectedDateStr]),
+                pool.query(operationsQuery, [portfolio.id, yearStartDate, selectedDateStr])
+            ]);
+
+            const clientsStatus = statusResult.rows.map(client => ({
+                client_name: client.client_name,
+                credit_initial: parseFloat(client.credit_initial || 0),
+                total_avances: parseFloat(client.total_avances || 0),
+                total_remboursements: parseFloat(client.total_remboursements || 0),
+                solde_final: parseFloat(client.solde_final || 0),
+                telephone: client.phone || '',
+                adresse: client.address || ''
+            }));
+
+            const operations = operationsResult.rows.map(op => ({
+                date_operation: op.date_operation instanceof Date ? 
+                               op.date_operation.toISOString().split('T')[0] : 
+                               op.date_operation,
+                timestamp: op.timestamp,
+                client: op.client,
+                type: op.type,
+                montant: parseFloat(op.montant || 0),
+                description: op.description || '',
+                created_by: op.created_by || ''
+            }));
+
+            detailsData.push({
+                portfolio_name: portfolio.account_name,
+                portfolio_id: portfolio.id,
+                assigned_director: portfolio.assigned_director_name,
+                status: clientsStatus,
+                operations: operations
+            });
+        }
+
+        // ===== INTÉGRATION OPENAI =====
+        
+        let openaiInsights = null;
+        try {
+            const openai = new OpenAI({
+                apiKey: openaiApiKey,
+            });
+
+            // Préparer un résumé des données pour OpenAI
+            const summaryForAI = {
+                date_selected: selectedDateStr,
+                date_previous: previousDateStr,
+                portfolios_count: portfolios.length,
+                total_current_balance: summaryData.reduce((sum, p) => sum + p.current_balance, 0),
+                total_previous_balance: summaryData.reduce((sum, p) => sum + p.previous_balance, 0),
+                total_difference: summaryData.reduce((sum, p) => sum + p.difference, 0),
+                portfolios_summary: summaryData.map(p => ({
+                    name: p.portfolio_name,
+                    difference: p.difference,
+                    current_balance: p.current_balance
+                })),
+                total_clients: detailsData.reduce((sum, d) => sum + d.status.length, 0),
+                total_operations: detailsData.reduce((sum, d) => sum + d.operations.length, 0)
+            };
+
+            const prompt = `En tant qu'analyste financier expert en créances, analysez ces données de portfolios de créance:
+
+Date d'analyse: ${selectedDateStr} (comparé à ${previousDateStr})
+Nombre de portfolios: ${summaryForAI.portfolios_count}
+Solde total actuel: ${summaryForAI.total_current_balance} FCFA
+Solde total précédent: ${summaryForAI.total_previous_balance} FCFA
+Différence totale: ${summaryForAI.total_difference} FCFA
+Nombre total de clients: ${summaryForAI.total_clients}
+Nombre total d'opérations: ${summaryForAI.total_operations}
+
+Détail par portfolio:
+${summaryForAI.portfolios_summary.map(p => 
+    `- ${p.name}: ${p.current_balance} FCFA (différence: ${p.difference} FCFA)`
+).join('\n')}
+
+Fournissez une analyse concise (maximum 200 mots) couvrant:
+1. Tendance générale des créances
+2. Portfolios performants vs préoccupants
+3. Recommandations stratégiques
+4. Points d'attention pour la gestion
+
+Répondez en français de manière professionnelle.`;
+
+            const completion = await openai.chat.completions.create({
+                model: "gpt-3.5-turbo",
+                messages: [
+                    {
+                        role: "system",
+                        content: "Vous êtes un analyste financier expert spécialisé dans la gestion des créances et des portfolios financiers."
+                    },
+                    {
+                        role: "user",
+                        content: prompt
+                    }
+                ],
+                max_tokens: 300,
+                temperature: 0.7,
+            });
+
+            openaiInsights = {
+                analysis: completion.choices[0]?.message?.content || "Analyse non disponible",
+                model_used: "gpt-3.5-turbo",
+                generated_at: new Date().toISOString(),
+                tokens_used: completion.usage?.total_tokens || 0
+            };
+
+            console.log(`🤖 EXTERNAL: Analyse OpenAI générée avec ${openaiInsights.tokens_used} tokens`);
+
+        } catch (openaiError) {
+            console.error('❌ EXTERNAL: Erreur OpenAI:', openaiError.message);
+            openaiInsights = {
+                error: "Analyse automatique temporairement indisponible",
+                error_details: process.env.NODE_ENV === 'development' ? openaiError.message : undefined,
+                generated_at: new Date().toISOString()
+            };
+        }
+
+        // ===== RÉPONSE FINALE =====
+        
+        const response = {
+            summary: {
+                date_selected: selectedDateStr,
+                date_previous: previousDateStr,
+                portfolios_count: portfolios.length,
+                portfolios: summaryData,
+                totals: {
+                    current_balance: summaryData.reduce((sum, p) => sum + p.current_balance, 0),
+                    previous_balance: summaryData.reduce((sum, p) => sum + p.previous_balance, 0),
+                    total_difference: summaryData.reduce((sum, p) => sum + p.difference, 0)
+                }
+            },
+            details: detailsData,
+            ai_insights: openaiInsights,
+            metadata: {
+                generated_at: new Date().toISOString(),
+                openai_integration: openaiInsights?.error ? "error" : "success",
+                api_version: "1.0",
+                year_filter: currentYear,
+                total_clients: detailsData.reduce((sum, d) => sum + d.status.length, 0),
+                total_operations: detailsData.reduce((sum, d) => sum + d.operations.length, 0)
+            }
+        };
+
+        console.log(`✅ EXTERNAL: Réponse générée avec ${portfolios.length} portfolios et analyse IA`);
+        res.json(response);
+
+    } catch (error) {
+        console.error('❌ EXTERNAL: Erreur lors de la génération de l\'API créance:', error);
+        res.status(500).json({ 
+            error: 'Erreur serveur lors de la génération des données créance',
+            code: 'CREANCE_API_ERROR',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
