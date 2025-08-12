@@ -9741,7 +9741,7 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                                op.date_operation,
                 timestamp: op.timestamp,
                 client: op.client,
-                type: op.type,
+                type: op.type === 'credit' ? 'avance' : op.type === 'debit' ? 'remboursement' : op.type,
                 montant: parseFloat(op.montant || 0),
                 description: op.description || '',
                 created_by: op.created_by || ''
