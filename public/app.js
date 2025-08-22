@@ -2052,13 +2052,82 @@ function populateFilterOptions(expenses) {
         userFilter.innerHTML += `<option value="${user}">${user}</option>`;
     });
     
-    // Les types de dépenses sont déjà définis en HTML statique
+    // Charger les types de dépenses dynamiquement
+    loadExpenseTypeFilters();
 }
 
 // Variables globales pour le filtre des types de dépenses
 let selectedExpenseTypes = [];
 
-// Types de dépenses sont définis statiquement dans le HTML
+// Fonction pour charger dynamiquement les types de dépenses depuis la base de données
+async function loadExpenseTypeFilters() {
+    try {
+        console.log('🔍 Loading expense types from database...');
+        
+        const response = await fetch('/api/expense-types');
+        if (!response.ok) {
+            throw new Error('Failed to fetch expense types');
+        }
+        
+        const expenseTypes = await response.json();
+        console.log('📋 Received expense types:', expenseTypes);
+        
+        // Générer les checkboxes dynamiquement
+        generateExpenseTypeCheckboxes(expenseTypes);
+        
+    } catch (error) {
+        console.error('❌ Error loading expense types:', error);
+    }
+}
+
+// Fonction pour générer dynamiquement les checkboxes des types de dépenses
+function generateExpenseTypeCheckboxes(expenseTypes) {
+    const container = document.getElementById('expense-type-checkboxes-container');
+    container.innerHTML = ''; // Vider le conteneur
+    
+    // Trier les types : tresorerie en premier s'il existe, puis alphabétique
+    const sortedTypes = [...expenseTypes].sort((a, b) => {
+        if (a.value === 'tresorerie') return -1;
+        if (b.value === 'tresorerie') return 1;
+        return a.label.localeCompare(b.label);
+    });
+    
+    sortedTypes.forEach((type, index) => {
+        // Determiner si la checkbox doit être cochée par défaut
+        // tresorerie est non-cochée, tous les autres sont cochés
+        const isChecked = type.value !== 'tresorerie';
+        
+        // Créer l'élément div conteneur
+        const div = document.createElement('div');
+        div.style.cssText = index === sortedTypes.length - 1 ? 
+            'display: flex; align-items: center;' : 
+            'margin-bottom: 8px; display: flex; align-items: center;';
+        
+        // Créer la checkbox
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `expense-type-${type.value.toLowerCase().replace(/[^a-z0-9]/g, '-')}`;
+        checkbox.value = type.value;
+        checkbox.onchange = onExpenseTypeChange;
+        checkbox.checked = isChecked;
+        checkbox.style.cssText = 'margin-right: 10px; width: 14px; height: 14px; appearance: auto !important;';
+        
+        // Créer le label
+        const label = document.createElement('label');
+        label.htmlFor = checkbox.id;
+        label.textContent = `${type.label} (${type.count})`;
+        label.style.cssText = 'font-size: 14px; color: #333; cursor: pointer;';
+        
+        // Ajouter les éléments au div
+        div.appendChild(checkbox);
+        div.appendChild(label);
+        
+        // Ajouter le div au conteneur
+        container.appendChild(div);
+    });
+    
+    console.log(`✅ Generated ${sortedTypes.length} expense type checkboxes`);
+}
 
 // Fonction pour initialiser l'état des filtres par type de dépense au chargement de la page
 function initializeExpenseTypeFilterState() {

@@ -768,9 +768,16 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
         
         query += ' ORDER BY e.expense_date DESC, e.created_at DESC';
         
-        const result = await pool.query(query, params);
-        
-        res.json(result.rows);
+        const { rows } = await pool.query(query, params);
+
+        // Correction pour les dépenses sans type
+        rows.forEach(row => {
+            if (!row.expense_type) {
+                row.expense_type = 'Non Catégorisé';
+            }
+        });
+
+        res.json(rows);
     } catch (error) {
         console.error('❌ GET EXPENSES: Erreur récupération dépenses:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -795,7 +802,6 @@ app.get('/api/users', requireAdminAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
-
 // Routes pour le dashboard
 app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
     try {
@@ -1546,7 +1552,6 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             console.error('Erreur calcul écart stock vivant pour PL:', error);
             stockVivantVariation = 0;
         }
-
         // 9. Récupérer les livraisons partenaires validées du mois
         let livraisonsPartenaires = 0;
         try {
@@ -2159,7 +2164,6 @@ app.post('/api/admin/adjustment-expense', requireAdminAuth, async (req, res) => 
         res.status(500).json({ error: 'Erreur serveur lors de la création de l\'ajustement' });
     }
 });
-
 // Route pour récupérer les détails des dépenses par compte
 app.get('/api/accounts/:accountName/expenses', requireAuth, async (req, res) => {
     try {
@@ -2902,7 +2906,6 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
-
 // Route GET pour génération et service direct du PDF (contourne les restrictions de Chrome)
 app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, res) => {
     // Configuration spécifique pour cette route
@@ -3665,7 +3668,6 @@ app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
     }
 });
-
 // Route pour supprimer un crédit de directeur
 app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => {
     try {
@@ -3769,6 +3771,67 @@ app.get('/api/categories/types', requireAuth, (req, res) => {
         res.json(types);
     } catch (error) {
         console.error('Erreur lecture types:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// API endpoint to get distinct expense types from database
+app.get('/api/expense-types', requireAuth, async (req, res) => {
+    try {
+        console.log('📋 GET EXPENSE TYPES: Fetching distinct expense types from database');
+        
+        const query = `
+            SELECT 
+                expense_type, 
+                COUNT(*) as count 
+            FROM expenses 
+            GROUP BY expense_type 
+            ORDER BY expense_type ASC
+        `;
+        
+        const { rows } = await pool.query(query);
+        
+        // Map expense types with proper formatting
+        const expenseTypes = rows.map(row => {
+            let displayName = row.expense_type;
+            let value = row.expense_type;
+            
+            // Handle null expense types
+            if (!row.expense_type) {
+                displayName = 'Non Catégorisé';
+                value = 'Non Catégorisé';
+            }
+            
+            // Create user-friendly display names
+            const displayNameMap = {
+                'tresorerie': 'Trésorerie',
+                'achatbovin': 'Achat Bovin',
+                'achatovin': 'Achat Ovin',
+                'depense_mata_group': 'Dépense Mata Group',
+                'depense_mata_prod': 'Dépense Mata Prod',
+                'depense_marketing': 'Dépense Marketing',
+                'fournisseur': 'Fournisseur',
+                'autres': 'Autres',
+                'achat': 'Achat',
+                'AutresAll': 'Autres All'
+            };
+            
+            if (displayNameMap[value]) {
+                displayName = displayNameMap[value];
+            }
+            
+            return {
+                value: value,
+                label: displayName,
+                count: parseInt(row.count)
+            };
+        });
+        
+        console.log(`📋 GET EXPENSE TYPES: Found ${expenseTypes.length} distinct expense types`);
+        res.json(expenseTypes);
+        
+    } catch (error) {
+        console.error('❌ GET EXPENSE TYPES: Error fetching expense types:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
@@ -4443,7 +4506,6 @@ app.post('/api/partner/deliveries/:deliveryId/first-validate', requireAuth, asyn
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
-
 // Route pour validation finale d'une livraison partenaire
 app.post('/api/partner/deliveries/:deliveryId/final-validate', requireAuth, async (req, res) => {
     try {
@@ -5238,7 +5300,6 @@ app.get('/health', (req, res) => {
         environment: process.env.NODE_ENV || 'development'
     });
 });
-
 // =====================================================
 // ADMIN ROUTES
 // =====================================================
@@ -6006,7 +6067,6 @@ app.get('/api/remboursements/synthese', requireAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
-
 // Route pour ajouter une permission de crédit pour un compte classique
 app.post('/api/accounts/:accountId/credit-permissions', requireAdminAuth, async (req, res) => {
     try {
@@ -6748,7 +6808,6 @@ app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
-
 // Route pour récupérer l'historique des transferts
 app.get('/api/transfers', requireAuth, async (req, res) => {
     try {
@@ -7524,7 +7583,6 @@ app.get('/api/dashboard/stock-vivant-total', requireAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur lors de la récupération du total stock vivant' });
     }
 });
-
 // Route pour récupérer l'écart de stock vivant mensuel
 app.get('/api/stock-vivant/monthly-variation', requireAuth, async (req, res) => {
     try {
@@ -8302,7 +8360,6 @@ app.get('/api/dashboard/total-creances', requireAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
-
 // Route pour obtenir les créances du mois (accepte paramètre month optionnel et cutoff_date)
 app.get('/api/dashboard/creances-mois', requireAuth, async (req, res) => {
     try {
@@ -8953,7 +9010,6 @@ app.post('/api/cash-bictorys/upload', requireCashBictorysAuth, upload.single('fi
         res.status(500).json({ error: 'Erreur serveur lors de l\'importation' });
     }
 });
-
 // ===== APIS DE GESTION MENSUELLE =====
 
 // Route pour obtenir toutes les données du dashboard pour un mois spécifique
@@ -9672,7 +9728,6 @@ async function createDashboardSnapshotsTable() {
         console.error('❌ Erreur création table dashboard_snapshots:', error);
     }
 }
-
 // Route pour sauvegarder un snapshot du tableau de bord
 app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
     try {
@@ -10297,7 +10352,6 @@ app.get('/api/visualisation/solde-data', requireAdminAuth, async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
-
 // ===== ENDPOINT AUDIT FLUX =====
 
 // Route pour auditer les flux d'un compte spécifique
