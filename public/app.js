@@ -1906,51 +1906,78 @@ async function deselectAllExpenses() {
 }
 
 async function generateInvoicesPDF() {
+    let timeoutId, progressInterval;
+    
     try {
         showNotification('Génération du PDF en cours...', 'info');
         
-        // Méthode 1: Ouvrir dans un nouvel onglet (contourne les restrictions de téléchargement)
-        const pdfUrl = '/api/expenses/generate-invoices-pdf';
-        const newWindow = window.open(pdfUrl, '_blank');
+        // Créer un AbortController pour gérer le timeout
+        const controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes timeout
         
-        if (newWindow) {
-            showNotification('PDF ouvert dans un nouvel onglet. Utilisez Ctrl+S pour le sauvegarder.', 'success');
+        // Afficher un indicateur de progression
+        progressInterval = setInterval(() => {
+            showNotification('Génération du PDF en cours... (patientez)', 'info');
+        }, 10000); // Mettre à jour toutes les 10 secondes
+        
+        const response = await fetch('/api/expenses/generate-invoices-pdf', {
+            method: 'POST',
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId); // Nettoyer le timeout si la requête réussit
+        clearInterval(progressInterval); // Nettoyer l'intervalle de progression
+        
+        if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            
+            // Ouvrir dans un nouvel onglet pour éviter les restrictions de Chrome
+            const newWindow = window.open(url, '_blank');
+            if (newWindow) {
+                // Tentative de téléchargement direct aussi
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                showNotification('PDF des factures généré avec succès ! Le PDF s\'ouvre dans un nouvel onglet.', 'success');
+            } else {
+                // Si le popup est bloqué, forcer le téléchargement
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                showNotification('PDF des factures généré avec succès !', 'success');
+            }
+            
+            // Nettoyer l'URL après un délai
+            setTimeout(() => {
+                window.URL.revokeObjectURL(url);
+            }, 1000);
         } else {
-            // Méthode 2: Créer un lien de téléchargement visible si popup bloqué
-            const downloadLink = document.createElement('a');
-            downloadLink.href = pdfUrl;
-            downloadLink.target = '_blank';
-            downloadLink.textContent = '📄 Ouvrir le PDF des factures';
-            downloadLink.style.cssText = `
-                display: block;
-                margin: 20px auto;
-                padding: 15px 30px;
-                background: #1e3a8a;
-                color: white;
-                text-decoration: none;
-                border-radius: 5px;
-                text-align: center;
-                font-weight: bold;
-                max-width: 400px;
-                font-size: 16px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            `;
-            
-            // Ajouter le lien à la page
-            const container = document.querySelector('.main-content') || document.body;
-            
-            // Supprimer les anciens liens s'ils existent
-            const existingLinks = container.querySelectorAll('a[href*="generate-invoices-pdf"]');
-            existingLinks.forEach(link => link.remove());
-            
-            container.appendChild(downloadLink);
-            
-            showNotification('Lien ajouté à la page. Cliquez sur le bouton bleu pour ouvrir le PDF.', 'info');
+            const error = await response.json();
+            throw new Error(error.error);
         }
-        
     } catch (error) {
         console.error('Erreur génération PDF:', error);
-        showNotification(`Erreur: ${error.message}`, 'error');
+        
+        // Nettoyer les timeouts et intervalles en cas d'erreur
+        if (timeoutId) clearTimeout(timeoutId);
+        if (progressInterval) clearInterval(progressInterval);
+        
+        if (error.name === 'AbortError') {
+            showNotification('Erreur: La génération du PDF a pris trop de temps. Veuillez réessayer ou réduire le nombre de dépenses sélectionnées.', 'error');
+        } else {
+            showNotification(`Erreur: ${error.message}`, 'error');
+        }
     }
 }
 

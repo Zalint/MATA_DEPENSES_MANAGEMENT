@@ -2550,6 +2550,7 @@ app.post('/api/expenses/deselect-all', requireAuth, async (req, res) => {
     }
 });
 
+
 app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) => {
     // Configuration spécifique pour cette route
     req.setTimeout(300000); // 5 minutes
@@ -2644,8 +2645,12 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                 size: 'A4'
             });
             
+        // Headers pour éviter les restrictions de Chrome
         res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `attachment; filename="factures_completes_${new Date().toISOString().split('T')[0]}.pdf"`);
+        res.setHeader('Content-Disposition', `inline; filename="factures_completes_${new Date().toISOString().split('T')[0]}.pdf"`);
+        res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+        res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+        res.setHeader('Cache-Control', 'no-cache');
         
         doc.pipe(res);
         
@@ -2898,34 +2903,15 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
     }
 });
 
-// Route de test pour vérifier la génération PDF
-app.get('/api/test-pdf', (req, res) => {
-    try {
-        const doc = new PDFDocument({ 
-            margin: 0,
-            size: 'A4'
-        });
-        
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', 'attachment; filename="test.pdf"');
-        
-        doc.pipe(res);
-        
-        doc.fontSize(24).text('Test PDF Generation', 50, 50);
-        doc.fontSize(12).text('Ceci est un test de génération PDF', 50, 100);
-        doc.fontSize(12).text(`Généré le: ${new Date().toLocaleString('fr-FR')}`, 50, 120);
-        
-        doc.end();
-    } catch (error) {
-        console.error('Erreur test PDF:', error);
-        res.status(500).json({ error: 'Erreur serveur' });
-    }
-});
-
 // Route pour récupérer une dépense spécifique
 app.get('/api/expenses/:id', requireAuth, async (req, res) => {
     try {
         const expenseId = req.params.id;
+        
+        // Éviter les conflits avec les routes spécifiques
+        if (expenseId === 'generate-invoices-pdf') {
+            return res.status(405).json({ error: 'Méthode non autorisée. Utilisez POST pour générer un PDF.' });
+        }
         const userId = req.session.user.id;
         
         let query = `
