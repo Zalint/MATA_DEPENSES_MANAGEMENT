@@ -1929,9 +1929,33 @@ async function generateInvoicesPDF() {
         clearInterval(progressInterval); // Nettoyer l'intervalle de progression
         
         if (response.ok) {
-            // Ouvrir directement l'URL du PDF dans un nouvel onglet
-            const fileName = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
-            const pdfUrl = `/api/expenses/generate-invoices-pdf-direct?filename=${encodeURIComponent(fileName)}`;
+            // Récupérer les dates du filtre
+            const startDate = document.getElementById('filter-start-date').value;
+            const endDate = document.getElementById('filter-end-date').value;
+            
+            // Créer un nom de fichier avec les dates de filtre
+            let fileName = 'factures';
+            if (startDate && endDate) {
+                fileName += `_${startDate.replace(/-/g, '')}_${endDate.replace(/-/g, '')}`;
+            } else if (startDate) {
+                fileName += `_depuis_${startDate.replace(/-/g, '')}`;
+            } else if (endDate) {
+                fileName += `_jusqu_${endDate.replace(/-/g, '')}`;
+            } else {
+                fileName += `_${new Date().toISOString().split('T')[0]}`;
+            }
+            fileName += '.pdf';
+            
+            // Ouvrir directement l'URL du PDF dans un nouvel onglet avec les dates de filtre
+            let pdfUrl = `/api/expenses/generate-invoices-pdf-direct?filename=${encodeURIComponent(fileName)}`;
+            
+            // Ajouter les dates de filtre si elles sont présentes
+            if (startDate) {
+                pdfUrl += `&start_date=${encodeURIComponent(startDate)}`;
+            }
+            if (endDate) {
+                pdfUrl += `&end_date=${encodeURIComponent(endDate)}`;
+            }
             
             // Simple redirection vers le PDF
             window.open(pdfUrl, '_blank');

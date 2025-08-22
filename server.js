@@ -2913,9 +2913,36 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
         const userId = req.session.user.id;
         const filename = req.query.filename || `factures_${new Date().toISOString().split('T')[0]}.pdf`;
         
-        console.log('📄 PDF DIRECT: Génération pour', req.session.user.username);
+        // Récupérer et valider les dates de filtre
+        const { start_date, end_date } = req.query;
         
-        // Récupérer les dépenses sélectionnées (même logique que POST)
+        console.log('📄 PDF DIRECT: Génération pour', req.session.user.username);
+        console.log('📄 PDF DIRECT: Filtres dates - Start:', start_date, 'End:', end_date);
+        
+        // Validation des dates
+        let parsedStartDate = null;
+        let parsedEndDate = null;
+        
+        if (start_date) {
+            parsedStartDate = new Date(start_date);
+            if (isNaN(parsedStartDate.getTime())) {
+                throw new Error(`Format de date de début invalide: ${start_date}`);
+            }
+        }
+        
+        if (end_date) {
+            parsedEndDate = new Date(end_date);
+            if (isNaN(parsedEndDate.getTime())) {
+                throw new Error(`Format de date de fin invalide: ${end_date}`);
+            }
+        }
+        
+        // Vérifier que la date de début n'est pas postérieure à la date de fin
+        if (parsedStartDate && parsedEndDate && parsedStartDate > parsedEndDate) {
+            throw new Error('La date de début ne peut pas être postérieure à la date de fin');
+        }
+        
+        // Récupérer les dépenses sélectionnées avec filtrage par dates
         let query = `
                         SELECT e.*, 
                    u.full_name as user_name, 
@@ -2936,12 +2963,26 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
             WHERE e.selected_for_invoice = true
         `;
         let params = [];
+        let paramIndex = 1;
+        
+        // Ajouter le filtrage par dates
+        if (parsedStartDate) {
+            query += ` AND e.expense_date >= $${paramIndex}`;
+            params.push(parsedStartDate.toISOString().split('T')[0]);
+            paramIndex++;
+        }
+        
+        if (parsedEndDate) {
+            query += ` AND e.expense_date <= $${paramIndex}`;
+            params.push(parsedEndDate.toISOString().split('T')[0]);
+            paramIndex++;
+        }
         
         // Les directeurs voient leurs propres dépenses ET les dépenses du DG/PCA sur leurs comptes
         if (req.session.user.role === 'directeur') {
-            query += ` AND (e.user_id = $1 OR (
+            query += ` AND (e.user_id = $${paramIndex} OR (
                 SELECT a.user_id FROM accounts a WHERE a.id = e.account_id
-            ) = $1)`;
+            ) = $${paramIndex})`;
             params.push(userId);
         }
         
@@ -2950,16 +2991,31 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
         console.log('📄 PDF DIRECT: Trouvé', result.rows.length, 'dépenses');
         
         if (result.rows.length === 0) {
+            // Créer un message d'erreur avec les informations de filtrage
+            let dateInfo = '';
+            if (start_date || end_date) {
+                const formatDate = (date) => {
+                    if (!date) return 'Non définie';
+                    return new Date(date).toLocaleDateString('fr-FR');
+                };
+                dateInfo = `<div class="date-filter">
+                    <strong>Filtres appliqués:</strong><br>
+                    Date de début: ${formatDate(start_date)}<br>
+                    Date de fin: ${formatDate(end_date)}
+                </div>`;
+            }
+            
             // Envoyer une réponse HTML au lieu de JSON pour les GET requests
             const errorHtml = `
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Aucune dépense sélectionnée</title>
+                    <title>Aucune dépense trouvée</title>
                     <style>
                         body { font-family: Arial, sans-serif; padding: 50px; text-align: center; }
                         .error { color: #dc3545; font-size: 18px; margin: 20px; }
                         .instruction { color: #6c757d; font-size: 14px; margin: 20px; }
+                        .date-filter { color: #17a2b8; font-size: 14px; margin: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 5px; }
                         .button { 
                             background-color: #007bff; 
                             color: white; 
@@ -2972,10 +3028,11 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
                     </style>
                 </head>
                 <body>
-                    <h1>⚠️ Aucune dépense sélectionnée</h1>
-                    <div class="error">Aucune dépense n'est actuellement sélectionnée pour la génération de factures.</div>
+                    <h1>⚠️ Aucune dépense trouvée</h1>
+                    <div class="error">Aucune dépense correspondant aux critères n'a été trouvée.</div>
+                    ${dateInfo}
                     <div class="instruction">
-                        Veuillez retourner à la page des dépenses et cocher les dépenses que vous souhaitez inclure dans le PDF.
+                        Vérifiez que vous avez sélectionné des dépenses et que les dates de filtre correspondent à des dépenses existantes.
                     </div>
                     <a href="javascript:window.close()" class="button">Fermer cette page</a>
                     <a href="/" class="button">Retourner aux dépenses</a>
