@@ -1906,110 +1906,38 @@ async function deselectAllExpenses() {
 }
 
 async function generateInvoicesPDF() {
-    let timeoutId, progressInterval;
-    
     try {
         showNotification('Génération du PDF en cours...', 'info');
         
-        // Créer un AbortController pour gérer le timeout
-        const controller = new AbortController();
-        timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes timeout
+        // Créer un lien de téléchargement direct
+        const downloadLink = document.createElement('a');
+        downloadLink.href = '/api/expenses/generate-invoices-pdf';
+        downloadLink.download = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
+        downloadLink.textContent = '📄 Télécharger le PDF des factures';
+        downloadLink.style.cssText = `
+            display: block;
+            margin: 20px auto;
+            padding: 15px 30px;
+            background: #1e3a8a;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+            max-width: 400px;
+            font-size: 16px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        `;
         
-        // Afficher un indicateur de progression
-        progressInterval = setInterval(() => {
-            showNotification('Génération du PDF en cours... (patientez)', 'info');
-        }, 10000); // Mettre à jour toutes les 10 secondes
+        // Ajouter le lien à la page
+        const container = document.querySelector('.main-content') || document.body;
+        container.appendChild(downloadLink);
         
-        const response = await fetch('/api/expenses/generate-invoices-pdf', {
-            method: 'POST',
-            signal: controller.signal
-        });
+        showNotification('Lien de téléchargement ajouté. Cliquez sur le bouton bleu pour télécharger le PDF.', 'success');
         
-        clearTimeout(timeoutId); // Nettoyer le timeout si la requête réussit
-        clearInterval(progressInterval); // Nettoyer l'intervalle de progression
-        
-        if (response.ok) {
-            // Vérifier le type de contenu
-            const contentType = response.headers.get('content-type');
-            console.log('📄 PDF Response - Content-Type:', contentType);
-            console.log('📄 PDF Response - Status:', response.status);
-            console.log('📄 PDF Response - Headers:', Object.fromEntries(response.headers.entries()));
-            
-            if (contentType && contentType.includes('application/pdf')) {
-                const blob = await response.blob();
-                console.log('📄 PDF Blob - Size:', blob.size, 'bytes');
-                console.log('📄 PDF Blob - Type:', blob.type);
-                
-                // Méthode 1: Essayer le téléchargement direct
-                try {
-                    const url = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.style.display = 'none';
-                    a.href = url;
-                    a.download = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
-                    a.target = '_blank'; // Ouvrir dans un nouvel onglet si nécessaire
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                    
-                    showNotification('PDF des factures généré avec succès !', 'success');
-                } catch (downloadError) {
-                    console.warn('Téléchargement direct échoué, tentative avec ouverture dans un nouvel onglet:', downloadError);
-                    
-                    // Méthode 2: Ouvrir dans un nouvel onglet
-                    const url = window.URL.createObjectURL(blob);
-                    const newWindow = window.open(url, '_blank');
-                    
-                    if (newWindow) {
-                        showNotification('PDF ouvert dans un nouvel onglet. Utilisez Ctrl+S pour le sauvegarder.', 'info');
-                    } else {
-                        // Méthode 3: Créer un lien visible pour téléchargement manuel
-                        const downloadLink = document.createElement('a');
-                        downloadLink.href = url;
-                        downloadLink.download = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
-                        downloadLink.textContent = 'Cliquez ici pour télécharger le PDF';
-                        downloadLink.style.cssText = `
-                            display: block;
-                            margin: 20px auto;
-                            padding: 15px 30px;
-                            background: #1e3a8a;
-                            color: white;
-                            text-decoration: none;
-                            border-radius: 5px;
-                            text-align: center;
-                            font-weight: bold;
-                            max-width: 300px;
-                        `;
-                        
-                        // Ajouter le lien à la page
-                        const container = document.querySelector('.main-content') || document.body;
-                        container.appendChild(downloadLink);
-                        
-                        showNotification('Lien de téléchargement ajouté à la page. Cliquez sur le bouton bleu pour télécharger.', 'info');
-                    }
-                }
-            } else {
-                // Si ce n'est pas un PDF, essayer de lire comme JSON (erreur)
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Réponse inattendue du serveur');
-            }
-        } else {
-            const error = await response.json();
-            throw new Error(error.error);
-        }
     } catch (error) {
         console.error('Erreur génération PDF:', error);
-        
-        // Nettoyer les timeouts et intervalles en cas d'erreur
-        if (timeoutId) clearTimeout(timeoutId);
-        if (progressInterval) clearInterval(progressInterval);
-        
-        if (error.name === 'AbortError') {
-            showNotification('Erreur: La génération du PDF a pris trop de temps. Veuillez réessayer ou réduire le nombre de dépenses sélectionnées.', 'error');
-        } else {
-            showNotification(`Erreur: ${error.message}`, 'error');
-        }
+        showNotification(`Erreur: ${error.message}`, 'error');
     }
 }
 
