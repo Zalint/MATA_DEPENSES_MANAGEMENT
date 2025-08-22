@@ -2915,6 +2915,7 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
         
         console.log('🔍 PDF GENERATION DIRECT: Début de la génération de factures');
         console.log('🔍 PDF GENERATION DIRECT: Utilisateur:', req.session.user.username, 'Role:', req.session.user.role);
+        console.log('🔍 PDF GENERATION DIRECT: Filename demandé:', filename);
         
         // Récupérer les dépenses sélectionnées (même logique que POST)
         let query = `
@@ -2948,10 +2949,62 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
         
         query += ' ORDER BY e.expense_date DESC';
         
+        console.log('🔍 PDF GENERATION DIRECT: Requête SQL finale:', query);
+        console.log('🔍 PDF GENERATION DIRECT: Paramètres:', params);
+        
         const result = await pool.query(query, params);
         
+        console.log('🔍 PDF GENERATION DIRECT: Nombre de dépenses trouvées:', result.rows.length);
+        if (result.rows.length > 0) {
+            console.log('🔍 PDF GENERATION DIRECT: Première dépense comme exemple:', {
+                id: result.rows[0].id,
+                designation: result.rows[0].designation,
+                total: result.rows[0].total,
+                username: result.rows[0].username,
+                selected_for_invoice: result.rows[0].selected_for_invoice,
+                user_role: result.rows[0].user_role
+            });
+        }
+        result.rows.forEach((expense, index) => {
+            if (index < 5) { // Log only first 5 to avoid spam
+                console.log(`   📋 Dépense ${index + 1}: ID ${expense.id}, ${expense.designation}, ${expense.total} FCFA, User: ${expense.username}, Sélectionnée: ${expense.selected_for_invoice}`);
+            }
+        });
+        
         if (result.rows.length === 0) {
-            return res.status(400).json({ error: 'Aucune dépense sélectionnée pour la génération de factures.' });
+            // Envoyer une réponse HTML au lieu de JSON pour les GET requests
+            const errorHtml = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Aucune dépense sélectionnée</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; padding: 50px; text-align: center; }
+                        .error { color: #dc3545; font-size: 18px; margin: 20px; }
+                        .instruction { color: #6c757d; font-size: 14px; margin: 20px; }
+                        .button { 
+                            background-color: #007bff; 
+                            color: white; 
+                            padding: 10px 20px; 
+                            text-decoration: none; 
+                            border-radius: 5px; 
+                            display: inline-block; 
+                            margin: 20px;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <h1>⚠️ Aucune dépense sélectionnée</h1>
+                    <div class="error">Aucune dépense n'est actuellement sélectionnée pour la génération de factures.</div>
+                    <div class="instruction">
+                        Veuillez retourner à la page des dépenses et cocher les dépenses que vous souhaitez inclure dans le PDF.
+                    </div>
+                    <a href="javascript:window.close()" class="button">Fermer cette page</a>
+                    <a href="/" class="button">Retourner aux dépenses</a>
+                </body>
+                </html>
+            `;
+            return res.send(errorHtml);
         }
         
         // Séparer les dépenses avec et sans justificatifs
@@ -2966,24 +3019,42 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
             }
         });
         
+        console.log('🔍 PDF GENERATION DIRECT: Dépenses avec justificatifs:', expensesWithJustification.length);
+        console.log('🔍 PDF GENERATION DIRECT: Dépenses sans justificatifs:', expensesWithoutJustification.length);
+        
         // Créer le PDF
+        console.log('🔍 PDF GENERATION DIRECT: Création du document PDF...');
         const doc = new PDFDocument({ 
             margin: 0,
             size: 'A4'
         });
         
         // Headers pour téléchargement direct
+        console.log('🔍 PDF GENERATION DIRECT: Configuration des headers HTTP...');
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Cache-Control', 'no-cache');
+        
+        console.log('🔍 PDF GENERATION DIRECT: Pipe du document vers la réponse...');
+        
+        // Ajouter des gestionnaires d'événements pour le debugging
+        doc.on('error', (error) => {
+            console.error('❌ PDF GENERATION DIRECT: Erreur du document PDF:', error);
+        });
+        
+        res.on('error', (error) => {
+            console.error('❌ PDF GENERATION DIRECT: Erreur de la réponse HTTP:', error);
+        });
         
         doc.pipe(res);
         
         let isFirstPage = true;
         
         // PARTIE 1: Ajouter tous les justificatifs (même logique que POST)
+        console.log('🔍 PDF GENERATION DIRECT: Début traitement justificatifs...');
         for (let i = 0; i < expensesWithJustification.length; i++) {
             const expense = expensesWithJustification[i];
+            console.log(`🔍 PDF GENERATION DIRECT: Traitement justificatif ${i + 1}/${expensesWithJustification.length} - ID: ${expense.id}`);
             
             let justificationPath;
             if (expense.justification_path) {
@@ -3034,7 +3105,9 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
         }
         
         // PARTIE 2: Ajouter les templates MATA (version simplifiée)
+        console.log('🔍 PDF GENERATION DIRECT: Début traitement templates MATA...');
         expensesWithoutJustification.forEach((expense, index) => {
+            console.log(`🔍 PDF GENERATION DIRECT: Traitement template ${index + 1}/${expensesWithoutJustification.length} - ID: ${expense.id}`);
             if (!isFirstPage || index > 0) {
                 doc.addPage();
             }
@@ -3064,12 +3137,55 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
             isFirstPage = false;
         });
         
+        // Vérification de sécurité: si aucun contenu n'a été ajouté, ajouter une page de test
+        if (isFirstPage) {
+            console.log('⚠️ PDF GENERATION DIRECT: Aucun contenu ajouté, création d\'une page de test...');
+            doc.fontSize(16).text('TEST: PDF généré avec succès', 50, 100);
+            doc.text(`Nombre total de dépenses: ${result.rows.length}`, 50, 130);
+            doc.text(`Avec justificatifs: ${expensesWithJustification.length}`, 50, 150);
+            doc.text(`Sans justificatifs: ${expensesWithoutJustification.length}`, 50, 170);
+            doc.text(`Date de génération: ${new Date().toLocaleString('fr-FR')}`, 50, 190);
+        }
+        
         console.log('✅ PDF GENERATION DIRECT: Génération terminée, envoi du PDF...');
         doc.end();
         
     } catch (error) {
         console.error('Erreur génération PDF direct:', error);
-        res.status(500).json({ error: 'Erreur serveur' });
+        
+        // Envoyer une réponse HTML d'erreur au lieu de JSON
+        const errorHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>Erreur de génération PDF</title>
+                <style>
+                    body { font-family: Arial, sans-serif; padding: 50px; text-align: center; }
+                    .error { color: #dc3545; font-size: 18px; margin: 20px; }
+                    .details { color: #6c757d; font-size: 14px; margin: 20px; }
+                    .button { 
+                        background-color: #007bff; 
+                        color: white; 
+                        padding: 10px 20px; 
+                        text-decoration: none; 
+                        border-radius: 5px; 
+                        display: inline-block; 
+                        margin: 20px;
+                    }
+                </style>
+            </head>
+            <body>
+                <h1>❌ Erreur de génération PDF</h1>
+                <div class="error">Une erreur s'est produite lors de la génération du PDF.</div>
+                <div class="details">
+                    Détails de l'erreur: ${error.message || 'Erreur inconnue'}
+                </div>
+                <a href="javascript:window.close()" class="button">Fermer cette page</a>
+                <a href="/" class="button">Retourner aux dépenses</a>
+            </body>
+            </html>
+        `;
+        res.status(500).send(errorHtml);
     }
 });
 
