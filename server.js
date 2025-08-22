@@ -2913,11 +2913,12 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
         const userId = req.session.user.id;
         const filename = req.query.filename || `factures_${new Date().toISOString().split('T')[0]}.pdf`;
         
-        // Récupérer et valider les dates de filtre
-        const { start_date, end_date } = req.query;
+        // Récupérer et valider les filtres
+        const { start_date, end_date, expense_types } = req.query;
         
         console.log('📄 PDF DIRECT: Génération pour', req.session.user.username);
         console.log('📄 PDF DIRECT: Filtres dates - Start:', start_date, 'End:', end_date);
+        console.log('📄 PDF DIRECT: Types de dépenses:', expense_types);
         
         // Validation des dates
         let parsedStartDate = null;
@@ -2940,6 +2941,13 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
         // Vérifier que la date de début n'est pas postérieure à la date de fin
         if (parsedStartDate && parsedEndDate && parsedStartDate > parsedEndDate) {
             throw new Error('La date de début ne peut pas être postérieure à la date de fin');
+        }
+        
+        // Validation et parsing des types de dépenses
+        let selectedExpenseTypes = [];
+        if (expense_types) {
+            selectedExpenseTypes = expense_types.split(',').map(type => type.trim()).filter(Boolean);
+            console.log('📄 PDF DIRECT: Types sélectionnés:', selectedExpenseTypes);
         }
         
         // Récupérer les dépenses sélectionnées avec filtrage par dates
@@ -2978,6 +2986,14 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
             paramIndex++;
         }
         
+        // Ajouter le filtrage par types de dépenses
+        if (selectedExpenseTypes.length > 0) {
+            const placeholders = selectedExpenseTypes.map((_, index) => `$${paramIndex + index}`).join(',');
+            query += ` AND e.expense_type IN (${placeholders})`;
+            params.push(...selectedExpenseTypes);
+            paramIndex += selectedExpenseTypes.length;
+        }
+        
         // Les directeurs voient leurs propres dépenses ET les dépenses du DG/PCA sur leurs comptes
         if (req.session.user.role === 'directeur') {
             query += ` AND (e.user_id = $${paramIndex} OR (
@@ -2992,17 +3008,22 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
         
         if (result.rows.length === 0) {
             // Créer un message d'erreur avec les informations de filtrage
-            let dateInfo = '';
-            if (start_date || end_date) {
+            let filterInfo = '';
+            if (start_date || end_date || selectedExpenseTypes.length > 0) {
                 const formatDate = (date) => {
                     if (!date) return 'Non définie';
                     return new Date(date).toLocaleDateString('fr-FR');
                 };
-                dateInfo = `<div class="date-filter">
+                filterInfo = `<div class="date-filter">
                     <strong>Filtres appliqués:</strong><br>
                     Date de début: ${formatDate(start_date)}<br>
-                    Date de fin: ${formatDate(end_date)}
-                </div>`;
+                    Date de fin: ${formatDate(end_date)}<br>`;
+                
+                if (selectedExpenseTypes.length > 0) {
+                    filterInfo += `Types de dépenses: ${selectedExpenseTypes.join(', ')}<br>`;
+                }
+                
+                filterInfo += '</div>';
             }
             
             // Envoyer une réponse HTML au lieu de JSON pour les GET requests
@@ -3030,7 +3051,7 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
                 <body>
                     <h1>⚠️ Aucune dépense trouvée</h1>
                     <div class="error">Aucune dépense correspondant aux critères n'a été trouvée.</div>
-                    ${dateInfo}
+                    ${filterInfo}
                     <div class="instruction">
                         Vérifiez que vous avez sélectionné des dépenses et que les dates de filtre correspondent à des dépenses existantes.
                     </div>

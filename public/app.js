@@ -769,7 +769,6 @@ async function validateExpenseAmount() {
         console.error('Erreur validation solde:', error);
     }
 }
-
 // Fonction pour valider les fichiers uploadés
 function validateFile(fileInput) {
     const file = fileInput.files[0];
@@ -1539,7 +1538,6 @@ async function loadExpenses() {
         console.error('Erreur chargement dépenses:', error);
     }
 }
-
 function displayExpenses(expenses) {
     console.log('🎯 DISPLAY EXPENSES: Début affichage des dépenses');
     console.log('🎯 DISPLAY EXPENSES: Nombre de dépenses reçues:', expenses.length);
@@ -1944,9 +1942,14 @@ async function generateInvoicesPDF() {
             } else {
                 fileName += `_${new Date().toISOString().split('T')[0]}`;
             }
+            
+            // Ajouter les types de dépenses au nom du fichier si filtré
+            if (selectedExpenseTypes.length > 0) {
+                fileName += `_${selectedExpenseTypes.length}types`;
+            }
             fileName += '.pdf';
             
-            // Ouvrir directement l'URL du PDF dans un nouvel onglet avec les dates de filtre
+            // Ouvrir directement l'URL du PDF dans un nouvel onglet avec les filtres
             let pdfUrl = `/api/expenses/generate-invoices-pdf-direct?filename=${encodeURIComponent(fileName)}`;
             
             // Ajouter les dates de filtre si elles sont présentes
@@ -1955,6 +1958,11 @@ async function generateInvoicesPDF() {
             }
             if (endDate) {
                 pdfUrl += `&end_date=${encodeURIComponent(endDate)}`;
+            }
+            
+            // Ajouter les types de dépenses sélectionnés
+            if (selectedExpenseTypes.length > 0) {
+                pdfUrl += `&expense_types=${encodeURIComponent(selectedExpenseTypes.join(','))}`;
             }
             
             // Simple redirection vers le PDF
@@ -2009,8 +2017,9 @@ async function loadExpensesWithFilters() {
         // Charger les options de filtres
         populateFilterOptions(expenses);
         
-        // Appliquer les filtres et afficher
-        applyFiltersAndDisplay();
+        // Initialiser l'état des filtres par type et appliquer le filtre par défaut
+        initializeExpenseTypeFilterState();
+        applyFiltersAndDisplay(); 
         
     } catch (error) {
         console.error('Erreur chargement dépenses:', error);
@@ -2042,6 +2051,47 @@ function populateFilterOptions(expenses) {
     users.forEach(user => {
         userFilter.innerHTML += `<option value="${user}">${user}</option>`;
     });
+    
+    // Les types de dépenses sont déjà définis en HTML statique
+}
+
+// Variables globales pour le filtre des types de dépenses
+let selectedExpenseTypes = [];
+
+// Types de dépenses sont définis statiquement dans le HTML
+
+// Fonction pour initialiser l'état des filtres par type de dépense au chargement de la page
+function initializeExpenseTypeFilterState() {
+    const checkboxes = document.querySelectorAll('#expense-type-checkboxes-container input[type="checkbox"]');
+    selectedExpenseTypes = [];
+    checkboxes.forEach(checkbox => {
+        if (checkbox.checked) {
+            selectedExpenseTypes.push(checkbox.value);
+        }
+    });
+}
+
+// Fonction appelée quand une checkbox change
+function onExpenseTypeChange() {
+    const checkboxes = document.querySelectorAll('#expense-type-checkboxes-container input[type="checkbox"]');
+    selectedExpenseTypes = [];
+    
+    checkboxes.forEach(checkbox => {
+        if (checkbox.checked) {
+            selectedExpenseTypes.push(checkbox.value);
+        }
+    });
+    
+    applyFiltersAndDisplay();
+}
+
+// Fonction pour effacer le filtre des types de dépenses
+function clearExpenseTypeFilter() {
+    const checkboxes = document.querySelectorAll('#expense-type-checkboxes-container input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    selectedExpenseTypes = [];
 }
 
 // Fonction pour appliquer les filtres
@@ -2086,6 +2136,13 @@ function applyFiltersAndDisplay() {
     const userFilter = document.getElementById('filter-user').value;
     if (userFilter) {
         filteredExpenses = filteredExpenses.filter(e => e.username === userFilter);
+    }
+    
+    // Filtrer par types de dépenses sélectionnés
+    if (selectedExpenseTypes.length > 0) {
+        filteredExpenses = filteredExpenses.filter(e => 
+            selectedExpenseTypes.includes(e.expense_type)
+        );
     }
     
     // Appliquer le tri
@@ -2176,6 +2233,9 @@ function clearAllFilters() {
     document.getElementById('filter-amount-max').value = '';
     document.getElementById('filter-user').value = '';
     
+    // Réinitialiser le filtre des types de dépenses
+    clearExpenseTypeFilter();
+    
     // Réappliquer les filtres (qui seront vides)
     applyFiltersAndDisplay();
     
@@ -2264,7 +2324,6 @@ function exportExpensesToCSV() {
     
     showNotification('Export CSV généré avec succès', 'success');
 }
-
 // Fonction pour mettre à jour le compteur de résultats filtrés
 function updateFilteredCount(filtered, total) {
     const existingCounter = document.getElementById('filtered-count');
@@ -2287,7 +2346,6 @@ function updateFilteredCount(filtered, total) {
 async function loadExpenses() {
     await loadExpensesWithFilters();
 }
-
 async function addExpense(formData) {
     try {
         // Vérifier le type de compte sélectionné
@@ -3020,7 +3078,6 @@ async function activateAccount(accountId) {
         showNotification(`Erreur: ${error.message}`, 'error');
     }
 }
-
 // Fonction pour modifier un compte
 async function editAccount(accountId) {
     try {
@@ -3499,7 +3556,6 @@ function setDefaultDate() {
         predictableField.value = 'oui';
     }
 }
-
 // Gestionnaires d'événements
 document.addEventListener('DOMContentLoaded', function() {
     // Vérifier si l'utilisateur est déjà connecté
@@ -4279,7 +4335,6 @@ function showSimplifiedExpenseForm() {
         descriptionField.required = true;
     }
 }
-
 // Fonction pour afficher tous les champs (formulaire complet)
 function showAllExpenseFields() {
     // Afficher tous les champs
@@ -5054,7 +5109,6 @@ function displayExpenseDetailsModal(data, totalAmount, remainingAmount, totalCre
     // Afficher le modal
     modal.style.display = 'block';
 }
-
 // Fonction pour afficher l'évolution jour par jour
 function displayDailyEvolution(dailyData) {
     const tbody = document.getElementById('modal-daily-evolution-tbody');
@@ -5848,7 +5902,6 @@ function exportModalExpensesToCSV() {
     
     showNotification(`Export CSV réussi (${sortedExpenses.length} dépenses)`, 'success');
 }
-
 // Fonction pour mettre à jour le compteur de résultats filtrés du modal
 function updateModalFilteredCount(filtered, total) {
     const modal = document.getElementById('expense-details-modal');
@@ -6644,7 +6697,6 @@ async function loadPartnerConfiguration() {
         console.error('Erreur chargement configuration partenaires:', error);
     }
 }
-
 // Afficher la configuration des comptes partenaires
 function displayPartnerConfiguration(partnerAccounts, directors) {
     const configDiv = document.getElementById('partner-accounts-config');
@@ -7414,7 +7466,6 @@ function closeMobileMenu() {
         }
     }
 }
-
 // Event listeners pour le formulaire utilisateur
 document.addEventListener('DOMContentLoaded', function() {
     // Setup mobile menu
@@ -8169,7 +8220,6 @@ function updateDashboardDisplay() {
     
     console.log('[Dashboard] Mise à jour visuelle terminée');
 }
-
 // Fonction pour charger les données de transferts (DG/PCA uniquement)
 async function loadTransfersCard() {
     // Masquer les transferts pour les directeurs simples
@@ -8901,7 +8951,6 @@ async function deleteDirectorCredit(creditId) {
         showDirectorCreditNotification(`Erreur: ${error.message}`, 'error');
     }
 }
-
 // Configurer le formulaire de crédit directeur
 function setupDirectorCreditForm() {
     const form = document.getElementById('directorCreditForm');
@@ -9666,7 +9715,6 @@ async function getLastStockVivantDate() {
         return null;
     }
 }
-
 async function initStockVivantModule() {
     try {
         // 1. Charger la configuration depuis l'API
@@ -10387,7 +10435,6 @@ function populateStockVivantCategoryFilter() {
         console.log('✅ CLIENT: Catégories chargées:', Object.keys(stockVivantConfig.categories).length);
     }
 }
-
 // Fonction simple pour afficher le tableau de stock vivant
 function displaySimpleStockVivant() {
     console.log(`[Stock Vivant] Loading simple stock vivant table...`);
@@ -11153,10 +11200,6 @@ async function loadMonthlySpecificDataWithCutoff(monthYear, cutoffDate) {
                 monthlyBalanceTotalElement.textContent = data.monthlyBalanceTotalFormatted || '0 FCFA';
             }
             
-            // 📊 DEBUG: Logs de debug des données mensuelles (masqués en production)
-            // console.log(`🔍 DEBUG: monthly-data response keys:`, Object.keys(data));
-            // console.log(`🔍 DEBUG: monthlyBurnDetails présent?`, !!data.monthlyBurnDetails);
-            
             // 📊 LOGS DÉTAILLÉS CASH BURN DU MOIS
             if (data.monthlyBurnDetails) {
                 console.group(`💸 CASH BURN DU MOIS - Détail jour par jour (${monthYear} jusqu'au ${cutoffDate})`);
@@ -11189,7 +11232,6 @@ async function loadMonthlySpecificDataWithCutoff(monthYear, cutoffDate) {
         console.error('❌ CLIENT: Erreur chargement données mensuelles avec cutoff:', error);
     }
 }
-
 // Charger les créances totales avec cutoff
 async function loadMonthlyCreancesWithCutoff(monthYear, cutoffDate) {
     try {
@@ -11973,7 +12015,6 @@ function populateExpenseConfirmationSummary() {
         fileRow.style.display = 'none';
     }
 }
-
 async function displayBudgetValidationInModal() {
     try {
         const budgetContainer = document.getElementById('budget-validation');
@@ -12774,7 +12815,6 @@ function updateLineNumbers(configType) {
     const lineNumbersText = lines.map((_, index) => index + 1).join('\n');
     lineNumbers.textContent = lineNumbersText;
 }
-
 function syncLineNumbersScroll(configType) {
     const editor = document.getElementById(`${configType}-json-editor`);
     const lineNumbers = document.getElementById(`${configType}-line-numbers`);
@@ -13564,7 +13604,6 @@ function generateCreanceOperationActions(operation) {
     
     return actions.length > 0 ? actions.join(' ') : '<span class="text-muted">-</span>';
 }
-
 // Vérifier si l'utilisateur peut modifier une opération créance
 function canEditCreanceOperation(operation) {
     const userRole = currentUser.role;
@@ -14364,7 +14403,6 @@ async function initVisualisationModule() {
         showNotification('Erreur lors de l\'initialisation de la visualisation', 'error');
     }
 }
-
 // Créer les graphiques de visualisation
 function createVisualisationCharts() {
     console.log('📊 CLIENT: Création des graphiques de visualisation');
@@ -15163,7 +15201,6 @@ function initDashboardSaveSection() {
     
     console.log('✅ CLIENT: Section de sauvegarde initialisée');
 }
-
 // Fonction de test manuel pour vérifier les listeners (à appeler depuis la console)
 function testDashboardDateListeners() {
     console.log('🧪 CLIENT: Test manuel des listeners de date du dashboard');
@@ -15928,7 +15965,6 @@ function displayAuditResults(auditData) {
     
     console.log(`✅ AUDIT: Résultats d'audit affichés pour "${account.name}"`);
 }
-
 // Afficher le tableau des mouvements
 function displayAuditMovementsTable(movements) {
     const tbody = document.getElementById('audit-movements-tbody');
