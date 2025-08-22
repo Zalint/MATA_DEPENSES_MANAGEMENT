@@ -1706,6 +1706,9 @@ function displayExpenses(expenses) {
     
     updateSelectedCount();
     
+    // Mettre à jour le total des dépenses affichées
+    updateExpensesTotal(expenses);
+    
     console.log('🎯 DISPLAY EXPENSES: Affichage terminé');
 }
 
@@ -2222,6 +2225,9 @@ function applyFiltersAndDisplay() {
     
     // Mettre à jour le compteur
     updateFilteredCount(filteredExpenses.length, currentExpenses.length);
+    
+    // Mettre à jour le total des dépenses
+    updateExpensesTotal(filteredExpenses);
 }
 
 // Fonction pour trier les dépenses
@@ -2409,6 +2415,31 @@ function updateFilteredCount(filtered, total) {
         const tableContainer = document.querySelector('.table-container');
         tableContainer.parentNode.insertBefore(counter, tableContainer);
     }
+}
+
+// Fonction pour mettre à jour le total des dépenses affichées
+function updateExpensesTotal(expenses) {
+    const totalElement = document.getElementById('total-amount');
+    if (!totalElement) return;
+    
+    // Calculer le total de toutes les dépenses affichées
+    const total = expenses.reduce((sum, expense) => {
+        const amount = parseInt(expense.total || expense.amount) || 0;
+        return sum + amount;
+    }, 0);
+    
+    // Formater le montant avec le format français
+    const formattedTotal = new Intl.NumberFormat('fr-FR', {
+        style: 'currency',
+        currency: 'XOF',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0
+    }).format(total);
+    
+    // Mettre à jour l'affichage
+    totalElement.textContent = formattedTotal;
+    
+    console.log(`💰 Total des dépenses affichées: ${formattedTotal} (${expenses.length} dépenses)`);
 }
 
 // Remplacer la fonction loadExpenses existante
