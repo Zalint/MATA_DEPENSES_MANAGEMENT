@@ -5932,6 +5932,34 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             accountsByType[accountType][accountName] = account;
         });
 
+        // ===== EXTRACTION DES DONNÉES GLOBALES =====
+        // Extraire les données stockVivant, livraisonPartenaire et stockSoirMata au niveau racine
+        const globalStockVivant = {};
+        const globalLivraisonPartenaire = {};
+        const globalStockSoirMata = {};
+
+        Object.keys(statusData).forEach(accountName => {
+            const account = statusData[accountName];
+            
+            // Extraire stockVivant
+            if (account.stockVivant) {
+                globalStockVivant[accountName] = account.stockVivant;
+                delete account.stockVivant; // Supprimer du niveau compte
+            }
+            
+            // Extraire livraisonPartenaire
+            if (account.livraisonPartenaire) {
+                globalLivraisonPartenaire[accountName] = account.livraisonPartenaire;
+                delete account.livraisonPartenaire; // Supprimer du niveau compte
+            }
+            
+            // Extraire stockSoirMata
+            if (account.stockSoirMata) {
+                globalStockSoirMata[accountName] = account.stockSoirMata;
+                delete account.stockSoirMata; // Supprimer du niveau compte
+            }
+        });
+
         const response = {
             success: true,
             date_selected: selectedDateStr,
@@ -5942,6 +5970,9 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 previous_month_period: `${previousMonthStr} to ${endOfPreviousMonthStr}`
             },
             accounts: accountsByType,
+            stockVivant: globalStockVivant,
+            livraisonPartenaire: globalLivraisonPartenaire,
+            stockSoirMata: globalStockSoirMata,
             global_metrics: globalMetrics,
             metadata: {
                 total_accounts: accounts.length,
@@ -5952,6 +5983,9 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         };
 
         console.log(`✅ EXTERNAL: API Status générée avec succès - ${accounts.length} comptes traités`);
+        
+        // Gestion de l'encodage pour les caractères spéciaux
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.json(response);
 
     } catch (error) {
