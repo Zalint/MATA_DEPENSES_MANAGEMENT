@@ -1909,31 +1909,44 @@ async function generateInvoicesPDF() {
     try {
         showNotification('Génération du PDF en cours...', 'info');
         
-        // Créer un lien de téléchargement direct
-        const downloadLink = document.createElement('a');
-        downloadLink.href = '/api/expenses/generate-invoices-pdf';
-        downloadLink.download = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
-        downloadLink.textContent = '📄 Télécharger le PDF des factures';
-        downloadLink.style.cssText = `
-            display: block;
-            margin: 20px auto;
-            padding: 15px 30px;
-            background: #1e3a8a;
-            color: white;
-            text-decoration: none;
-            border-radius: 5px;
-            text-align: center;
-            font-weight: bold;
-            max-width: 400px;
-            font-size: 16px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        `;
+        // Méthode 1: Ouvrir dans un nouvel onglet (contourne les restrictions de téléchargement)
+        const pdfUrl = '/api/expenses/generate-invoices-pdf';
+        const newWindow = window.open(pdfUrl, '_blank');
         
-        // Ajouter le lien à la page
-        const container = document.querySelector('.main-content') || document.body;
-        container.appendChild(downloadLink);
-        
-        showNotification('Lien de téléchargement ajouté. Cliquez sur le bouton bleu pour télécharger le PDF.', 'success');
+        if (newWindow) {
+            showNotification('PDF ouvert dans un nouvel onglet. Utilisez Ctrl+S pour le sauvegarder.', 'success');
+        } else {
+            // Méthode 2: Créer un lien de téléchargement visible si popup bloqué
+            const downloadLink = document.createElement('a');
+            downloadLink.href = pdfUrl;
+            downloadLink.target = '_blank';
+            downloadLink.textContent = '📄 Ouvrir le PDF des factures';
+            downloadLink.style.cssText = `
+                display: block;
+                margin: 20px auto;
+                padding: 15px 30px;
+                background: #1e3a8a;
+                color: white;
+                text-decoration: none;
+                border-radius: 5px;
+                text-align: center;
+                font-weight: bold;
+                max-width: 400px;
+                font-size: 16px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            `;
+            
+            // Ajouter le lien à la page
+            const container = document.querySelector('.main-content') || document.body;
+            
+            // Supprimer les anciens liens s'ils existent
+            const existingLinks = container.querySelectorAll('a[href*="generate-invoices-pdf"]');
+            existingLinks.forEach(link => link.remove());
+            
+            container.appendChild(downloadLink);
+            
+            showNotification('Lien ajouté à la page. Cliquez sur le bouton bleu pour ouvrir le PDF.', 'info');
+        }
         
     } catch (error) {
         console.error('Erreur génération PDF:', error);
