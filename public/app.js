@@ -1929,19 +1929,13 @@ async function generateInvoicesPDF() {
         clearInterval(progressInterval); // Nettoyer l'intervalle de progression
         
         if (response.ok) {
-            // Rediriger vers un endpoint GET qui génère et sert directement le PDF
+            // Ouvrir directement l'URL du PDF dans un nouvel onglet
             const fileName = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
-            const downloadUrl = `/api/expenses/generate-invoices-pdf-direct?filename=${encodeURIComponent(fileName)}`;
+            const pdfUrl = `/api/expenses/generate-invoices-pdf-direct?filename=${encodeURIComponent(fileName)}`;
             
-            // Ouvrir dans un nouvel onglet pour éviter les restrictions de sandbox
-            const newWindow = window.open(downloadUrl, '_blank');
-            
-            if (newWindow) {
-                showNotification('PDF des factures généré avec succès ! Le PDF s\'ouvre dans un nouvel onglet.', 'success');
-            } else {
-                // Si les popups sont bloqués, proposer un lien de téléchargement
-                showNotification(`PDF généré ! <a href="${downloadUrl}" target="_blank" style="color: #007bff; text-decoration: underline;">Cliquez ici pour télécharger</a>`, 'success');
-            }
+            // Simple redirection vers le PDF
+            window.open(pdfUrl, '_blank');
+            showNotification('PDF des factures généré avec succès ! Le PDF s\'ouvre dans un nouvel onglet.', 'success');
         } else {
             const error = await response.json();
             throw new Error(error.error);
