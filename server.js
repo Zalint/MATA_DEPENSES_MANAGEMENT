@@ -18,6 +18,19 @@ function formatCurrency(amount) {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Configuration des timeouts pour les requêtes longues (PDF generation)
+app.use((req, res, next) => {
+    // Augmenter le timeout pour les requêtes de génération PDF
+    if (req.path === '/api/expenses/generate-invoices-pdf') {
+        req.setTimeout(300000); // 5 minutes pour la génération PDF
+        res.setTimeout(300000); // 5 minutes pour la réponse
+    } else {
+        req.setTimeout(60000); // 1 minute pour les autres requêtes
+        res.setTimeout(60000); // 1 minute pour les autres réponses
+    }
+    next();
+});
+
 // Configuration de la base de données PostgreSQL
 const pool = new Pool({
     user: process.env.DB_USER || 'zalint',
@@ -25,7 +38,11 @@ const pool = new Pool({
     database: process.env.DB_NAME || 'depenses_management',
     password: process.env.DB_PASSWORD || 'bonea2024',
     port: process.env.DB_PORT || 5432,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    statement_timeout: 300000, // 5 minutes pour les requêtes longues
+    query_timeout: 300000, // 5 minutes pour les requêtes longues
+    connectionTimeoutMillis: 60000, // 1 minute pour la connexion
+    idleTimeoutMillis: 30000 // 30 secondes pour les connexions inactives
 });
 
 // Configuration de multer pour l'upload de fichiers
@@ -2534,6 +2551,10 @@ app.post('/api/expenses/deselect-all', requireAuth, async (req, res) => {
 });
 
 app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) => {
+    // Configuration spécifique pour cette route
+    req.setTimeout(300000); // 5 minutes
+    res.setTimeout(300000); // 5 minutes
+    
     try {
         const userId = req.session.user.id;
         
@@ -2598,6 +2619,8 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
             console.log(`   📋 Dépense trouvée: ID ${expense.id}, ${expense.designation}, ${expense.total} FCFA, User: ${expense.username}, Sélectionnée: ${expense.selected_for_invoice}`);
         });
         
+        console.log('⏱️ PDF GENERATION: Début du traitement des justificatifs...');
+        
         if (result.rows.length === 0) {
             return res.status(400).json({ error: 'Aucune dépense sélectionnée pour la génération de factures. Veuillez cocher les dépenses que vous souhaitez inclure dans le PDF.' });
         }
@@ -2629,7 +2652,12 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
             let isFirstPage = true;
             
             // PARTIE 1: Ajouter tous les justificatifs (pièces jointes)
-            for (const expense of expensesWithJustification) {
+            console.log(`⏱️ PDF GENERATION: Traitement de ${expensesWithJustification.length} justificatifs...`);
+            
+            for (let i = 0; i < expensesWithJustification.length; i++) {
+                const expense = expensesWithJustification[i];
+                console.log(`⏱️ PDF GENERATION: Progression ${i + 1}/${expensesWithJustification.length} - Dépense ID: ${expense.id}`);
+                
                 // Utiliser le chemin complet stocké dans justification_path
                 let justificationPath;
                 if (expense.justification_path) {
@@ -2743,7 +2771,10 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
             }
             
             // PARTIE 2: Ajouter les templates MATA pour les dépenses sans justificatifs
+            console.log(`⏱️ PDF GENERATION: Traitement de ${expensesWithoutJustification.length} templates MATA...`);
+            
             expensesWithoutJustification.forEach((expense, index) => {
+                console.log(`⏱️ PDF GENERATION: Template ${index + 1}/${expensesWithoutJustification.length} - Dépense ID: ${expense.id}`);
                 if (!isFirstPage || index > 0) {
                     doc.addPage();
                 }
@@ -2855,6 +2886,7 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                 isFirstPage = false;
         });
         
+        console.log('✅ PDF GENERATION: Génération terminée, envoi du PDF...');
         doc.end();
         } else {
             return res.status(400).json({ error: 'Aucune dépense à traiter' });
@@ -4883,6 +4915,579 @@ app.put('/api/admin/config/financial', requireAdminAuth, (req, res) => {
 // Root endpoint
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// =====================================================
+// EXTERNAL API FOR STATUS DASHBOARD
+// =====================================================
+
+// Endpoint pour l'API externe des status par compte avec tableau de bord complet
+app.get('/external/api/status', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API status avec params:', req.query);
+    
+    try {
+        // Déterminer la date sélectionnée (today par défaut)
+        const selectedDate = req.query.date ? new Date(req.query.date) : new Date();
+        const selectedDateStr = selectedDate.toISOString().split('T')[0];
+        
+        // Dates pour les calculs
+        const startOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
+        const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
+        
+        const startOfWeek = new Date(selectedDate);
+        const dayOfWeek = startOfWeek.getDay();
+        const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        startOfWeek.setDate(selectedDate.getDate() + diffToMonday);
+        const startOfWeekStr = startOfWeek.toISOString().split('T')[0];
+        
+        const previousMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth() - 1, 1);
+        const endOfPreviousMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 0);
+        const previousMonthStr = previousMonth.toISOString().split('T')[0];
+        const endOfPreviousMonthStr = endOfPreviousMonth.toISOString().split('T')[0];
+        
+        console.log(`📅 EXTERNAL: Dates calculées - Sélectionnée: ${selectedDateStr}, Début du mois: ${startOfMonthStr}, Début semaine: ${startOfWeekStr}`);
+
+        // Récupérer tous les comptes actifs
+        const accountsQuery = `
+            SELECT DISTINCT a.id, a.account_name, a.user_id, a.account_type, a.current_balance,
+                   u.full_name as assigned_director_name
+            FROM accounts a 
+            LEFT JOIN users u ON a.user_id = u.id 
+            WHERE a.is_active = true 
+            ORDER BY a.account_name
+        `;
+        
+        const accountsResult = await pool.query(accountsQuery);
+        const accounts = accountsResult.rows;
+        
+        if (accounts.length === 0) {
+            return res.json({
+                success: true,
+                date_selected: selectedDateStr,
+                message: 'Aucun compte actif trouvé',
+                accounts: [],
+                metadata: {
+                    total_accounts: 0,
+                    generation_timestamp: new Date().toISOString()
+                }
+            });
+        }
+
+        const statusData = {};
+
+        // ===== TRAITEMENT PAR COMPTE =====
+        for (const account of accounts) {
+            const accountId = account.id;
+            const accountName = account.account_name;
+            
+            console.log(`📊 EXTERNAL: Traitement du compte ${accountName} (ID: ${accountId})`);
+            
+            statusData[accountName] = {
+                accountInfo: {
+                    id: accountId,
+                    name: accountName,
+                    type: account.account_type,
+                    assigned_director: account.assigned_director_name,
+                    current_balance: parseFloat(account.current_balance) || 0
+                }
+            };
+
+            // ===== 1. DAILY EXPENSES =====
+            const dailyExpensesQuery = `
+                SELECT id, designation, supplier, total, category, subcategory, expense_type, 
+                       created_at, description
+                FROM expenses 
+                WHERE account_id = $1 AND expense_date = $2
+                ORDER BY created_at DESC
+            `;
+            const dailyExpensesResult = await pool.query(dailyExpensesQuery, [accountId, selectedDateStr]);
+            
+            const dailyExpensesTotal = dailyExpensesResult.rows.reduce((sum, exp) => sum + (parseFloat(exp.total) || 0), 0);
+            const remainingDailyBalance = (parseFloat(account.current_balance) || 0) - dailyExpensesTotal;
+            
+            // Structure de base pour dailyExpenses
+            let dailyExpensesStructure = {
+                expenses: dailyExpensesResult.rows.map(exp => ({
+                    id: exp.id,
+                    description: exp.designation,
+                    supplier: exp.supplier,
+                    amount: parseFloat(exp.total) || 0,
+                    category: exp.category,
+                    subcategory: exp.subcategory,
+                    type: exp.expense_type,
+                    created_at: exp.created_at,
+                    additional_description: exp.description
+                })),
+                total_daily_expenses: dailyExpensesTotal,
+                remaining_balance: remainingDailyBalance
+            };
+
+            // ===== AJOUT DES DONNÉES CRÉANCE POUR LES COMPTES DE TYPE "CREANCE" =====
+            if (account.account_type === 'creance') {
+                try {
+                    // Récupération des clients avec leurs soldes
+                    const clientsQuery = `
+                        SELECT 
+                            cc.client_name,
+                            cc.client_phone,
+                            COALESCE(SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE 0 END), 0) as credit_initial,
+                            COALESCE(SUM(CASE WHEN co.operation_type = 'avance' THEN co.amount ELSE 0 END), 0) as total_avances,
+                            COALESCE(SUM(CASE WHEN co.operation_type = 'remboursements' THEN co.amount ELSE 0 END), 0) as total_remboursements
+                        FROM creance_clients cc
+                        LEFT JOIN creance_operations co ON cc.id = co.client_id AND co.account_id = $1
+                        WHERE cc.account_id = $1
+                        GROUP BY cc.id, cc.client_name, cc.client_phone
+                        ORDER BY cc.client_name
+                    `;
+                    const clientsResult = await pool.query(clientsQuery, [accountId]);
+                    
+                    const clients = clientsResult.rows.map(client => ({
+                        client_name: client.client_name,
+                        credit_initial: parseInt(client.credit_initial) || 0,
+                        total_avances: parseInt(client.total_avances) || 0,
+                        total_remboursements: parseInt(client.total_remboursements) || 0,
+                        solde_final: (parseInt(client.credit_initial) || 0) + (parseInt(client.total_avances) || 0) - (parseInt(client.total_remboursements) || 0),
+                        telephone: client.client_phone || "",
+                        adresse: ""
+                    }));
+
+                    // Récupération des opérations de la date sélectionnée
+                    const operationsQuery = `
+                        SELECT 
+                            co.operation_date,
+                            co.created_at,
+                            cc.client_name,
+                            co.operation_type,
+                            co.amount,
+                            co.description,
+                            u.username as created_by
+                        FROM creance_operations co
+                        JOIN creance_clients cc ON co.client_id = cc.id
+                        LEFT JOIN users u ON co.created_by = u.id
+                        WHERE co.operation_date = $1 AND co.account_id = $2
+                        ORDER BY co.created_at DESC
+                    `;
+                    const operationsResult = await pool.query(operationsQuery, [selectedDateStr, accountId]);
+                    
+                    const operations = operationsResult.rows.map(op => ({
+                        date_operation: op.operation_date,
+                        timestamp: op.created_at,
+                        client: op.client_name,
+                        type: op.operation_type,
+                        montant: parseInt(op.amount) || 0,
+                        description: op.description || "",
+                        created_by: op.created_by || "Système"
+                    }));
+
+                    // Ajout des données créance à dailyExpenses
+                    dailyExpensesStructure.clients = clients;
+                    dailyExpensesStructure.operations = operations;
+                    
+                } catch (creanceError) {
+                    console.log(`⚠️ Erreur données créance pour compte ${accountName}:`, creanceError.message);
+                    dailyExpensesStructure.clients = [];
+                    dailyExpensesStructure.operations = [];
+                    dailyExpensesStructure.creance_error = "Erreur lors de la récupération des données créance";
+                }
+            }
+
+            statusData[accountName].dailyExpenses = dailyExpensesStructure;
+
+            // ===== 2. MONTHLY EXPENSES =====
+            const monthlyExpensesQuery = `
+                SELECT SUM(total) as total_monthly
+                FROM expenses 
+                WHERE account_id = $1 AND expense_date >= $2 AND expense_date <= $3
+            `;
+            const monthlyExpensesResult = await pool.query(monthlyExpensesQuery, [accountId, startOfMonthStr, selectedDateStr]);
+            const monthlyExpensesTotal = parseFloat(monthlyExpensesResult.rows[0]?.total_monthly) || 0;
+            const remainingMonthlyBalance = (parseFloat(account.current_balance) || 0) - monthlyExpensesTotal;
+            
+            statusData[accountName].monthlyExpenses = {
+                total_monthly_expenses: monthlyExpensesTotal,
+                period: `${startOfMonthStr} to ${selectedDateStr}`,
+                remaining_balance: remainingMonthlyBalance
+            };
+
+            // ===== 3. STOCK VIVANT =====
+            try {
+                const stockVivantQuery = `
+                    SELECT date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire
+                    FROM stock_vivant 
+                    WHERE date_stock <= $1
+                    ORDER BY date_stock DESC, categorie, produit
+                    LIMIT 50
+                `;
+                const stockVivantResult = await pool.query(stockVivantQuery, [selectedDateStr]);
+                
+                // Calcul de la variation par rapport au mois précédent
+                const previousMonthStockQuery = `
+                    SELECT SUM(total) as total_previous_month
+                    FROM stock_vivant 
+                    WHERE date_stock >= $1 AND date_stock <= $2
+                `;
+                const previousMonthStockResult = await pool.query(previousMonthStockQuery, [previousMonthStr, endOfPreviousMonthStr]);
+                const currentMonthStockQuery = `
+                    SELECT SUM(total) as total_current_month
+                    FROM stock_vivant 
+                    WHERE date_stock >= $1 AND date_stock <= $2
+                `;
+                const currentMonthStockResult = await pool.query(currentMonthStockQuery, [startOfMonthStr, selectedDateStr]);
+                
+                const previousMonthTotal = parseFloat(previousMonthStockResult.rows[0]?.total_previous_month) || 0;
+                const currentMonthTotal = parseFloat(currentMonthStockResult.rows[0]?.total_current_month) || 0;
+                const stockVariation = currentMonthTotal - previousMonthTotal;
+                
+                statusData[accountName].stockVivant = {
+                    latest_entries: stockVivantResult.rows.map(stock => ({
+                        date: stock.date_stock,
+                        category: stock.categorie,
+                        product: stock.produit,
+                        quantity: parseInt(stock.quantite) || 0,
+                        unit_price: parseFloat(stock.prix_unitaire) || 0,
+                        total: parseFloat(stock.total) || 0,
+                        comment: stock.commentaire
+                    })),
+                    monthly_variation: {
+                        previous_month_total: previousMonthTotal,
+                        current_month_total: currentMonthTotal,
+                        variation: stockVariation,
+                        variation_percentage: previousMonthTotal > 0 ? ((stockVariation / previousMonthTotal) * 100) : 0
+                    }
+                };
+            } catch (stockError) {
+                console.log(`⚠️ Erreur stock vivant pour compte ${accountName}:`, stockError.message);
+                statusData[accountName].stockVivant = {
+                    latest_entries: [],
+                    monthly_variation: {
+                        previous_month_total: 0,
+                        current_month_total: 0,
+                        variation: 0,
+                        variation_percentage: 0
+                    },
+                    error: "Table stock_vivant non disponible"
+                };
+            }
+
+            // ===== 4. LIVRAISON PARTENAIRE =====
+            try {
+                // Vérifier d'abord si la table existe
+                const tableExistsQuery = `
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'partner_deliveries'
+                    )
+                `;
+                const tableExistsResult = await pool.query(tableExistsQuery);
+                
+                if (tableExistsResult.rows[0].exists) {
+                    // Vérifier les colonnes disponibles
+                    const columnsQuery = `
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'partner_deliveries'
+                    `;
+                    const columnsResult = await pool.query(columnsQuery);
+                    const availableColumns = columnsResult.rows.map(row => row.column_name);
+                    
+                    const hasStatus = availableColumns.includes('status');
+                    
+                    const latestDeliveryQuery = `
+                        SELECT id, delivery_date, amount, description, validation_status, created_at
+                        FROM partner_deliveries 
+                        WHERE account_id = $1
+                        ORDER BY delivery_date DESC, created_at DESC
+                        LIMIT 1
+                    `;
+                    const latestDeliveryResult = await pool.query(latestDeliveryQuery, [accountId]);
+                    
+                    const totalDeliveriesQuery = `
+                        SELECT SUM(amount) as total_deliveries
+                        FROM partner_deliveries 
+                        WHERE account_id = $1 AND validation_status = 'fully_validated'
+                    `;
+                    const totalDeliveriesResult = await pool.query(totalDeliveriesQuery, [accountId]);
+                    const totalDeliveries = parseFloat(totalDeliveriesResult.rows[0]?.total_deliveries) || 0;
+                    const remainingDeliveryBalance = (parseFloat(account.current_balance) || 0) - totalDeliveries;
+                    
+                    statusData[accountName].livraisonPartenaire = {
+                        latest_delivery: latestDeliveryResult.rows[0] ? {
+                            id: latestDeliveryResult.rows[0].id,
+                            date: latestDeliveryResult.rows[0].delivery_date,
+                            amount: parseFloat(latestDeliveryResult.rows[0].amount) || 0,
+                            description: latestDeliveryResult.rows[0].description,
+                            status: latestDeliveryResult.rows[0].validation_status,
+                            created_at: latestDeliveryResult.rows[0].created_at
+                        } : null,
+                        total_validated_deliveries: totalDeliveries,
+                        remaining_balance: remainingDeliveryBalance
+                    };
+                } else {
+                    // Table n'existe pas
+                    statusData[accountName].livraisonPartenaire = {
+                        latest_delivery: null,
+                        total_validated_deliveries: 0,
+                        remaining_balance: parseFloat(account.current_balance) || 0,
+                        note: "Table partner_deliveries non disponible"
+                    };
+                }
+            } catch (deliveryError) {
+                console.log(`⚠️ Erreur livraisons pour compte ${accountName}:`, deliveryError.message);
+                statusData[accountName].livraisonPartenaire = {
+                    latest_delivery: null,
+                    total_validated_deliveries: 0,
+                    remaining_balance: parseFloat(account.current_balance) || 0,
+                    error: "Erreur lors de la récupération des livraisons"
+                };
+            }
+
+            // ===== 5. STOCK SOIR MATA =====
+            try {
+                const stockSoirQuery = `
+                    SELECT date, point_de_vente, produit, stock_matin, stock_soir, transfert
+                    FROM stock_mata 
+                    WHERE date = $1
+                    ORDER BY point_de_vente, produit
+                `;
+                const stockSoirResult = await pool.query(stockSoirQuery, [selectedDateStr]);
+                const totalStockSoir = stockSoirResult.rows.reduce((sum, stock) => sum + (parseFloat(stock.stock_soir) || 0), 0);
+                
+                statusData[accountName].stockSoirMata = {
+                    date: selectedDateStr,
+                    entries: stockSoirResult.rows.map(stock => ({
+                        point_de_vente: stock.point_de_vente,
+                        produit: stock.produit,
+                        stock_matin: parseFloat(stock.stock_matin) || 0,
+                        stock_soir: parseFloat(stock.stock_soir) || 0,
+                        transfert: parseFloat(stock.transfert) || 0
+                    })),
+                    total_value: totalStockSoir
+                };
+            } catch (stockSoirError) {
+                console.log(`⚠️ Erreur stock soir pour compte ${accountName}:`, stockSoirError.message);
+                statusData[accountName].stockSoirMata = {
+                    date: selectedDateStr,
+                    entries: [],
+                    total_value: 0,
+                    error: "Table stock_mata non disponible"
+                };
+            }
+
+            // ===== 6. DAILY CREANCE =====
+            if (account.account_type === 'creance') {
+                try {
+                    const dailyCreanceQuery = `
+                        SELECT cc.client_name, cc.client_phone, co.amount, co.operation_type, co.description
+                        FROM creance_operations co
+                        JOIN creance_clients cc ON co.client_id = cc.id
+                        WHERE co.operation_date = $1 AND co.account_id = $2
+                        ORDER BY cc.client_name
+                    `;
+                    const dailyCreanceResult = await pool.query(dailyCreanceQuery, [selectedDateStr, accountId]);
+                    const dailyCreanceTotal = dailyCreanceResult.rows.reduce((sum, creance) => {
+                        const amount = parseInt(creance.amount) || 0;
+                        return sum + (creance.operation_type === 'credit' ? amount : -amount);
+                    }, 0);
+                    
+                    statusData[accountName].dailyCreance = {
+                        entries: dailyCreanceResult.rows.map(creance => ({
+                            client_name: creance.client_name,
+                            phone: creance.client_phone,
+                            amount: parseInt(creance.amount) || 0,
+                            action: creance.operation_type,
+                            description: creance.description
+                        })),
+                        total_daily_creance: dailyCreanceTotal
+                    };
+                } catch (creanceError) {
+                    console.log(`⚠️ Erreur créance quotidienne pour compte ${accountName}:`, creanceError.message);
+                    statusData[accountName].dailyCreance = {
+                        entries: [],
+                        total_daily_creance: 0,
+                        error: "Tables créance non disponibles"
+                    };
+                }
+            }
+
+            // ===== 7. MONTHLY CREANCE =====
+            if (account.account_type === 'creance') {
+                try {
+                    const monthlyCreanceQuery = `
+                        SELECT SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE -co.amount END) as total_monthly
+                        FROM creance_operations co
+                        WHERE co.operation_date >= $1 AND co.operation_date <= $2 AND co.account_id = $3
+                    `;
+                    const monthlyCreanceResult = await pool.query(monthlyCreanceQuery, [startOfMonthStr, selectedDateStr, accountId]);
+                    const monthlyCreanceTotal = parseInt(monthlyCreanceResult.rows[0]?.total_monthly) || 0;
+                    
+                    statusData[accountName].monthlyCreance = {
+                        total_monthly_creance: monthlyCreanceTotal,
+                        period: `${startOfMonthStr} to ${selectedDateStr}`
+                    };
+                } catch (monthlyCreanceError) {
+                    console.log(`⚠️ Erreur créance mensuelle pour compte ${accountName}:`, monthlyCreanceError.message);
+                    statusData[accountName].monthlyCreance = {
+                        total_monthly_creance: 0,
+                        period: `${startOfMonthStr} to ${selectedDateStr}`,
+                        error: "Erreur lors du calcul des créances mensuelles"
+                    };
+                }
+            }
+        }
+
+        // ===== CALCULS GLOBAUX PL ET SOLDES =====
+        
+        // Récupération des données pour les calculs PL
+        const totalBalanceQuery = `
+            SELECT SUM(current_balance) as total_balance
+            FROM accounts 
+            WHERE is_active = true
+        `;
+        const totalBalanceResult = await pool.query(totalBalanceQuery);
+        const totalBalance = parseFloat(totalBalanceResult.rows[0]?.total_balance) || 0;
+
+        const monthlyExpensesGlobalQuery = `
+            SELECT SUM(total) as total_monthly_expenses
+            FROM expenses e
+            JOIN accounts a ON e.account_id = a.id
+            WHERE a.is_active = true AND e.expense_date >= $1 AND e.expense_date <= $2
+        `;
+        const monthlyExpensesGlobalResult = await pool.query(monthlyExpensesGlobalQuery, [startOfMonthStr, selectedDateStr]);
+        const totalMonthlyExpenses = parseFloat(monthlyExpensesGlobalResult.rows[0]?.total_monthly_expenses) || 0;
+
+        const weeklyExpensesQuery = `
+            SELECT SUM(total) as total_weekly_expenses
+            FROM expenses e
+            JOIN accounts a ON e.account_id = a.id
+            WHERE a.is_active = true AND e.expense_date >= $1 AND e.expense_date <= $2
+        `;
+        const weeklyExpensesResult = await pool.query(weeklyExpensesQuery, [startOfWeekStr, selectedDateStr]);
+        const totalWeeklyExpenses = parseFloat(weeklyExpensesResult.rows[0]?.total_weekly_expenses) || 0;
+
+        const totalCreanceQuery = `
+            SELECT SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE -co.amount END) as total_creance
+            FROM creance_operations co
+            WHERE co.operation_date >= $1 AND co.operation_date <= $2
+        `;
+        const totalCreanceResult = await pool.query(totalCreanceQuery, [startOfMonthStr, selectedDateStr]);
+        const totalCreance = parseInt(totalCreanceResult.rows[0]?.total_creance) || 0;
+
+        const totalDeliveriesGlobalQuery = `
+            SELECT SUM(amount) as total_deliveries
+            FROM partner_deliveries 
+            WHERE validation_status = 'fully_validated' AND delivery_date >= $1 AND delivery_date <= $2
+        `;
+        const totalDeliveriesGlobalResult = await pool.query(totalDeliveriesGlobalQuery, [startOfMonthStr, selectedDateStr]);
+        const totalDeliveriesMonth = parseFloat(totalDeliveriesGlobalResult.rows[0]?.total_deliveries) || 0;
+
+        const currentStockVivantQuery = `
+            SELECT SUM(total) as current_stock_total
+            FROM stock_vivant 
+            WHERE date_stock >= $1 AND date_stock <= $2
+        `;
+        const currentStockVivantResult = await pool.query(currentStockVivantQuery, [startOfMonthStr, selectedDateStr]);
+        const currentStockVivantTotal = parseFloat(currentStockVivantResult.rows[0]?.current_stock_total) || 0;
+
+        const previousStockVivantQuery = `
+            SELECT SUM(total) as previous_stock_total
+            FROM stock_vivant 
+            WHERE date_stock >= $1 AND date_stock <= $2
+        `;
+        const previousStockVivantResult = await pool.query(previousStockVivantQuery, [previousMonthStr, endOfPreviousMonthStr]);
+        const previousStockVivantTotal = parseFloat(previousStockVivantResult.rows[0]?.previous_stock_total) || 0;
+        const stockVivantVariation = currentStockVivantTotal - previousStockVivantTotal;
+
+        const totalStockSoirQuery = `
+            SELECT SUM(stock_soir) as total_stock_soir
+            FROM stock_mata 
+            WHERE date = $1
+        `;
+        const totalStockSoirResult = await pool.query(totalStockSoirQuery, [selectedDateStr]);
+        const totalStockSoir = parseFloat(totalStockSoirResult.rows[0]?.total_stock_soir) || 0;
+
+        // Constantes pour le calcul PL (à ajuster selon les besoins)
+        const estimatedMonthlyFixedCharges = 500000; // 500k FCFA estimé
+
+        // Calculs PL
+        const brutPL = totalBalance + totalCreance + totalStockSoir + stockVivantVariation - totalMonthlyExpenses - totalDeliveriesMonth;
+        const estimatedPL = brutPL - estimatedMonthlyFixedCharges;
+
+        const globalMetrics = {
+            profitAndLoss: {
+                brutPL: {
+                    value: brutPL,
+                    components: {
+                        cash_bictorys: totalBalance,
+                        creances: totalCreance,
+                        stock_pv: totalStockSoir,
+                        ecart_stock_vivant_mensuel: stockVivantVariation,
+                        cash_burn: -totalMonthlyExpenses,
+                        livraisons_partenaire: -totalDeliveriesMonth
+                    }
+                },
+                estimatedProfitAndLoss: {
+                    value: estimatedPL,
+                    components: {
+                        brut_pl: brutPL,
+                        estimated_fixed_charges: -estimatedMonthlyFixedCharges
+                    }
+                },
+                chargesFixesTotales: estimatedMonthlyFixedCharges
+            },
+            balances: {
+                balance_du_mois: totalBalance,
+                cash_disponible: totalBalance - totalMonthlyExpenses,
+                cash_burn_du_mois: totalMonthlyExpenses,
+                cash_bictorys_du_mois: totalBalance,
+                cash_burn_depuis_lundi: totalWeeklyExpenses
+            }
+        };
+
+        // ===== RESTRUCTURATION PAR TYPE DE COMPTE =====
+        const accountsByType = {};
+        
+        // Grouper les comptes par type
+        Object.keys(statusData).forEach(accountName => {
+            const account = statusData[accountName];
+            const accountType = account.accountInfo.type;
+            
+            if (!accountsByType[accountType]) {
+                accountsByType[accountType] = {};
+            }
+            
+            accountsByType[accountType][accountName] = account;
+        });
+
+        const response = {
+            success: true,
+            date_selected: selectedDateStr,
+            period_info: {
+                selected_date: selectedDateStr,
+                start_of_month: startOfMonthStr,
+                start_of_week: startOfWeekStr,
+                previous_month_period: `${previousMonthStr} to ${endOfPreviousMonthStr}`
+            },
+            accounts: accountsByType,
+            global_metrics: globalMetrics,
+            metadata: {
+                total_accounts: accounts.length,
+                accounts_processed: Object.keys(statusData).length,
+                calculation_date: new Date().toISOString(),
+                api_version: "1.0.0"
+            }
+        };
+
+        console.log(`✅ EXTERNAL: API Status générée avec succès - ${accounts.length} comptes traités`);
+        res.json(response);
+
+    } catch (error) {
+        console.error('❌ EXTERNAL: Erreur lors de la génération de l\'API status:', error);
+        res.status(500).json({ 
+            error: 'Erreur serveur lors de la génération des données status',
+            code: 'STATUS_API_ERROR',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
 });
 
 // Démarrage du serveur

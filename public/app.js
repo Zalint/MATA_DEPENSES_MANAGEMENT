@@ -1906,12 +1906,27 @@ async function deselectAllExpenses() {
 }
 
 async function generateInvoicesPDF() {
+    let timeoutId, progressInterval;
+    
     try {
         showNotification('Génération du PDF en cours...', 'info');
         
+        // Créer un AbortController pour gérer le timeout
+        const controller = new AbortController();
+        timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutes timeout
+        
+        // Afficher un indicateur de progression
+        progressInterval = setInterval(() => {
+            showNotification('Génération du PDF en cours... (patientez)', 'info');
+        }, 10000); // Mettre à jour toutes les 10 secondes
+        
         const response = await fetch('/api/expenses/generate-invoices-pdf', {
-            method: 'POST'
+            method: 'POST',
+            signal: controller.signal
         });
+        
+        clearTimeout(timeoutId); // Nettoyer le timeout si la requête réussit
+        clearInterval(progressInterval); // Nettoyer l'intervalle de progression
         
         if (response.ok) {
             const blob = await response.blob();
@@ -1932,7 +1947,16 @@ async function generateInvoicesPDF() {
         }
     } catch (error) {
         console.error('Erreur génération PDF:', error);
-        showNotification(`Erreur: ${error.message}`, 'error');
+        
+        // Nettoyer les timeouts et intervalles en cas d'erreur
+        if (timeoutId) clearTimeout(timeoutId);
+        if (progressInterval) clearInterval(progressInterval);
+        
+        if (error.name === 'AbortError') {
+            showNotification('Erreur: La génération du PDF a pris trop de temps. Veuillez réessayer ou réduire le nombre de dépenses sélectionnées.', 'error');
+        } else {
+            showNotification(`Erreur: ${error.message}`, 'error');
+        }
     }
 }
 
