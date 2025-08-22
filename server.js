@@ -2898,6 +2898,30 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
     }
 });
 
+// Route de test pour vérifier la génération PDF
+app.get('/api/test-pdf', (req, res) => {
+    try {
+        const doc = new PDFDocument({ 
+            margin: 0,
+            size: 'A4'
+        });
+        
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename="test.pdf"');
+        
+        doc.pipe(res);
+        
+        doc.fontSize(24).text('Test PDF Generation', 50, 50);
+        doc.fontSize(12).text('Ceci est un test de génération PDF', 50, 100);
+        doc.fontSize(12).text(`Généré le: ${new Date().toLocaleString('fr-FR')}`, 50, 120);
+        
+        doc.end();
+    } catch (error) {
+        console.error('Erreur test PDF:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
 // Route pour récupérer une dépense spécifique
 app.get('/api/expenses/:id', requireAuth, async (req, res) => {
     try {
