@@ -3120,33 +3120,116 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
             }
         }
         
-        // PARTIE 2: Ajouter les templates MATA (version simplifiée)
+        // PARTIE 2: Ajouter les templates MATA complets
         expensesWithoutJustification.forEach((expense, index) => {
             if (!isFirstPage || index > 0) {
                 doc.addPage();
             }
             
-            // Template MATA simplifié
+            // === EN-TÊTE MATA ===
             doc.fontSize(24).font('Helvetica-Bold').fillColor('#1e3a8a').text('MATA', 50, 50);
+            
+            doc.fontSize(9).font('Helvetica').fillColor('black');
+            doc.text('Mirage, Apt Nord 603D, Résidence Aquanique', 50, 80);
+            doc.text('A : 01387695 2Y3 / RC : SN DKR 2024 B 29149', 50, 95);
+            doc.text('Ouest foire : 78 480 95 95', 50, 110);
+            doc.text('Grand Mbao / cité Aliou Sow : 77 858 96 96', 50, 125);
+            
             doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a').text('FACTURE', 275, 55);
             
-            const currentDate = new Date().toLocaleDateString('fr-FR');
             doc.fontSize(10).font('Helvetica').fillColor('black');
-            doc.text(`Date : ${currentDate}`, 450, 50);
+            // Utiliser la date de la dépense au lieu de la date actuelle
+            const expenseDate = expense.expense_date ? new Date(expense.expense_date).toLocaleDateString('fr-FR') : new Date().toLocaleDateString('fr-FR');
+            doc.text(`Date : ${expenseDate}`, 450, 50);
             doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626');
             doc.text(`N° : ${expense.id.toString().padStart(8, '0')}`, 450, 70);
             
-            // Tableau simplifié
-            let yPos = 200;
+            doc.moveTo(50, 160).lineTo(545, 160).stroke('#1e3a8a').lineWidth(1);
+            
+            let yPos = 180;
             doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
             doc.text('Dépenses', 50, yPos);
             yPos += 30;
             
-            doc.fontSize(12).text(`Désignation: ${expense.designation || 'Dépense'}`, 50, yPos);
-            yPos += 20;
-            doc.text(`Montant: ${(expense.total || expense.amount || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`, 50, yPos);
-            yPos += 20;
-            doc.text(`Utilisateur: ${expense.user_name || expense.username}`, 50, yPos);
+            // Tableau complet
+            const tableStartY = yPos;
+            const colPositions = [50, 110, 330, 430];
+            
+            doc.rect(50, tableStartY, 495, 25).fill('#1e3a8a');
+            doc.fontSize(11).font('Helvetica-Bold').fillColor('white');
+            doc.text('QUANTITÉ', colPositions[0] + 5, tableStartY + 8);
+            doc.text('DÉSIGNATION', colPositions[1] + 5, tableStartY + 8);
+            doc.text('P. UNITAIRE', colPositions[2] + 5, tableStartY + 8);
+            doc.text('PRIX TOTAL', colPositions[3] + 5, tableStartY + 8);
+            
+            yPos = tableStartY + 25;
+            
+            doc.rect(50, yPos, 495, 30).fill('#f8f9fa').stroke('#dee2e6');
+            doc.fontSize(10).font('Helvetica').fillColor('black');
+            
+            const quantity = expense.quantity || '1.00';
+            doc.text(quantity, colPositions[0] + 5, yPos + 10);
+            
+            let designation = expense.designation || 'Dépense';
+            if (expense.subcategory) {
+                designation = expense.subcategory;
+            }
+            doc.text(designation, colPositions[1] + 5, yPos + 10, { width: 200, height: 20 });
+            
+            const unitPrice = expense.unit_price || expense.total || expense.amount || 0;
+            const formattedUnitPrice = unitPrice.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            doc.text(formattedUnitPrice, colPositions[2] + 5, yPos + 10);
+            
+            const total = expense.total || expense.amount || 0;
+            const formattedTotal = total.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            doc.text(formattedTotal, colPositions[3] + 5, yPos + 10);
+            
+            yPos += 30;
+            
+            // Lignes vides
+            for (let i = 0; i < 6; i++) {
+                doc.rect(50, yPos, 495, 25).stroke('#dee2e6');
+                yPos += 25;
+            }
+            
+            // Montant total
+            doc.rect(50, yPos, 495, 3).fill('#1e3a8a');
+            yPos += 10;
+            
+            doc.rect(50, yPos, 360, 30).fill('#1e3a8a');
+            doc.fontSize(14).font('Helvetica-Bold').fillColor('white');
+            doc.text('MONTANT TOTAL', 60, yPos + 10);
+            
+            doc.rect(410, yPos, 135, 30).stroke('#1e3a8a').lineWidth(2);
+            doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a');
+            const finalTotal = total.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+            doc.text(`${finalTotal} F`, 420, yPos + 8);
+            
+            yPos += 60;
+            
+            doc.fontSize(10).font('Helvetica').fillColor('black');
+            doc.text(`Dépense effectuée par : ${expense.user_name || expense.username}`, 50, yPos);
+            yPos += 15;
+            
+            if (expense.supplier) {
+                doc.text(`Fournisseur : ${expense.supplier}`, 50, yPos);
+                yPos += 15;
+            }
+            
+            // Cachet MATA
+            const cachetPath = path.join(__dirname, 'public', 'images', 'CachetMata.jpg');
+            if (fs.existsSync(cachetPath)) {
+                try {
+                    doc.image(cachetPath, 400, doc.page.height - 180, { width: 120, height: 120 });
+                } catch (error) {
+                    doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e3a8a');
+                    doc.text('CACHET MATA', 450, doc.page.height - 100);
+                }
+            } else {
+                doc.rect(400, doc.page.height - 180, 120, 120).stroke('#1e3a8a').lineWidth(2);
+                doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
+                doc.text('CACHET\nMATA', 440, doc.page.height - 130, { align: 'center' });
+            }
             
             isFirstPage = false;
         });
