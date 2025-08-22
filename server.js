@@ -2903,6 +2903,176 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
     }
 });
 
+// Route GET pour génération et service direct du PDF (contourne les restrictions de Chrome)
+app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, res) => {
+    // Configuration spécifique pour cette route
+    req.setTimeout(300000); // 5 minutes
+    res.setTimeout(300000); // 5 minutes
+    
+    try {
+        const userId = req.session.user.id;
+        const filename = req.query.filename || `factures_${new Date().toISOString().split('T')[0]}.pdf`;
+        
+        console.log('🔍 PDF GENERATION DIRECT: Début de la génération de factures');
+        console.log('🔍 PDF GENERATION DIRECT: Utilisateur:', req.session.user.username, 'Role:', req.session.user.role);
+        
+        // Récupérer les dépenses sélectionnées (même logique que POST)
+        let query = `
+                        SELECT e.*, 
+                   u.full_name as user_name, 
+                   u.username, 
+                   u.role as user_role,
+                   a.account_name,
+                   CASE 
+                       WHEN e.expense_type IS NOT NULL THEN 
+                           CONCAT(e.expense_type, ' > ', e.category, ' > ', e.subcategory,
+                                  CASE WHEN e.social_network_detail IS NOT NULL AND e.social_network_detail != '' 
+                                       THEN CONCAT(' (', e.social_network_detail, ')') 
+                                       ELSE '' END)
+                       ELSE 'Catégorie non définie'
+                   END as category_name
+            FROM expenses e
+            JOIN users u ON e.user_id = u.id
+            LEFT JOIN accounts a ON e.account_id = a.id
+            WHERE e.selected_for_invoice = true
+        `;
+        let params = [];
+        
+        // Les directeurs voient leurs propres dépenses ET les dépenses du DG/PCA sur leurs comptes
+        if (req.session.user.role === 'directeur') {
+            query += ` AND (e.user_id = $1 OR (
+                SELECT a.user_id FROM accounts a WHERE a.id = e.account_id
+            ) = $1)`;
+            params.push(userId);
+        }
+        
+        query += ' ORDER BY e.expense_date DESC';
+        
+        const result = await pool.query(query, params);
+        
+        if (result.rows.length === 0) {
+            return res.status(400).json({ error: 'Aucune dépense sélectionnée pour la génération de factures.' });
+        }
+        
+        // Séparer les dépenses avec et sans justificatifs
+        const expensesWithJustification = [];
+        const expensesWithoutJustification = [];
+        
+        result.rows.forEach(expense => {
+            if (expense.justification_filename && expense.justification_filename.trim() !== '') {
+                expensesWithJustification.push(expense);
+            } else {
+                expensesWithoutJustification.push(expense);
+            }
+        });
+        
+        // Créer le PDF
+        const doc = new PDFDocument({ 
+            margin: 0,
+            size: 'A4'
+        });
+        
+        // Headers pour téléchargement direct
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Cache-Control', 'no-cache');
+        
+        doc.pipe(res);
+        
+        let isFirstPage = true;
+        
+        // PARTIE 1: Ajouter tous les justificatifs (même logique que POST)
+        for (let i = 0; i < expensesWithJustification.length; i++) {
+            const expense = expensesWithJustification[i];
+            
+            let justificationPath;
+            if (expense.justification_path) {
+                const normalizedPath = expense.justification_path.replace(/\\/g, '/');
+                justificationPath = path.join(__dirname, normalizedPath);
+            } else {
+                justificationPath = path.join(__dirname, 'uploads', expense.justification_filename);
+            }
+            
+            if (fs.existsSync(justificationPath)) {
+                try {
+                    if (!isFirstPage) {
+                        doc.addPage();
+                    }
+                    
+                    const fileExtension = path.extname(expense.justification_filename).toLowerCase();
+                    
+                    if (['.jpg', '.jpeg', '.png'].includes(fileExtension)) {
+                        doc.image(justificationPath, 0, 0, { 
+                            fit: [doc.page.width, doc.page.height],
+                            align: 'center',
+                            valign: 'center'
+                        });
+                    } else if (fileExtension === '.pdf') {
+                        doc.fontSize(16).fillColor('black').text(
+                            `Justificatif PDF pour la dépense #${expense.id}`, 
+                            50, 100, { width: doc.page.width - 100 }
+                        );
+                        doc.fontSize(12).text(`Désignation: ${expense.designation || 'N/A'}`, 50, 150);
+                        doc.text(`Montant: ${(expense.total || expense.amount || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`, 50, 170);
+                        doc.text(`Fichier: ${expense.justification_filename}`, 50, 190);
+                        doc.text('Note: Le justificatif PDF original doit être consulté séparément.', 50, 220, { width: doc.page.width - 100 });
+                    }
+                    
+                    isFirstPage = false;
+                } catch (error) {
+                    console.error('Erreur lors de l\'ajout du justificatif:', error);
+                    if (!isFirstPage) {
+                        doc.addPage();
+                    }
+                    doc.fontSize(16).fillColor('red').text(
+                        `Erreur: Impossible de charger le justificatif pour la dépense #${expense.id}`, 
+                        50, 100, { width: doc.page.width - 100 }
+                    );
+                    isFirstPage = false;
+                }
+            }
+        }
+        
+        // PARTIE 2: Ajouter les templates MATA (version simplifiée)
+        expensesWithoutJustification.forEach((expense, index) => {
+            if (!isFirstPage || index > 0) {
+                doc.addPage();
+            }
+            
+            // Template MATA simplifié
+            doc.fontSize(24).font('Helvetica-Bold').fillColor('#1e3a8a').text('MATA', 50, 50);
+            doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a').text('FACTURE', 275, 55);
+            
+            const currentDate = new Date().toLocaleDateString('fr-FR');
+            doc.fontSize(10).font('Helvetica').fillColor('black');
+            doc.text(`Date : ${currentDate}`, 450, 50);
+            doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626');
+            doc.text(`N° : ${expense.id.toString().padStart(8, '0')}`, 450, 70);
+            
+            // Tableau simplifié
+            let yPos = 200;
+            doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
+            doc.text('Dépenses', 50, yPos);
+            yPos += 30;
+            
+            doc.fontSize(12).text(`Désignation: ${expense.designation || 'Dépense'}`, 50, yPos);
+            yPos += 20;
+            doc.text(`Montant: ${(expense.total || expense.amount || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} FCFA`, 50, yPos);
+            yPos += 20;
+            doc.text(`Utilisateur: ${expense.user_name || expense.username}`, 50, yPos);
+            
+            isFirstPage = false;
+        });
+        
+        console.log('✅ PDF GENERATION DIRECT: Génération terminée, envoi du PDF...');
+        doc.end();
+        
+    } catch (error) {
+        console.error('Erreur génération PDF direct:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
 // Route pour récupérer une dépense spécifique
 app.get('/api/expenses/:id', requireAuth, async (req, res) => {
     try {

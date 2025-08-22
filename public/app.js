@@ -1929,39 +1929,19 @@ async function generateInvoicesPDF() {
         clearInterval(progressInterval); // Nettoyer l'intervalle de progression
         
         if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
+            // Rediriger vers un endpoint GET qui génère et sert directement le PDF
+            const fileName = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
+            const downloadUrl = `/api/expenses/generate-invoices-pdf-direct?filename=${encodeURIComponent(fileName)}`;
             
-            // Ouvrir dans un nouvel onglet pour éviter les restrictions de Chrome
-            const newWindow = window.open(url, '_blank');
+            // Ouvrir dans un nouvel onglet pour éviter les restrictions de sandbox
+            const newWindow = window.open(downloadUrl, '_blank');
+            
             if (newWindow) {
-                // Tentative de téléchargement direct aussi
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                
                 showNotification('PDF des factures généré avec succès ! Le PDF s\'ouvre dans un nouvel onglet.', 'success');
             } else {
-                // Si le popup est bloqué, forcer le téléchargement
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = `factures_${new Date().toISOString().split('T')[0]}.pdf`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                
-                showNotification('PDF des factures généré avec succès !', 'success');
+                // Si les popups sont bloqués, proposer un lien de téléchargement
+                showNotification(`PDF généré ! <a href="${downloadUrl}" target="_blank" style="color: #007bff; text-decoration: underline;">Cliquez ici pour télécharger</a>`, 'success');
             }
-            
-            // Nettoyer l'URL après un délai
-            setTimeout(() => {
-                window.URL.revokeObjectURL(url);
-            }, 1000);
         } else {
             const error = await response.json();
             throw new Error(error.error);
