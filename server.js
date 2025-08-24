@@ -5633,139 +5633,11 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 remaining_balance: remainingMonthlyBalance
             };
 
-            // ===== 4. STOCK VIVANT =====
-            try {
-                const stockVivantQuery = `
-                    SELECT date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire
-                    FROM stock_vivant 
-                    WHERE date_stock <= $1
-                    ORDER BY date_stock DESC, categorie, produit
-                    LIMIT 50
-                `;
-                const stockVivantResult = await pool.query(stockVivantQuery, [selectedDateStr]);
-                
-                // Calcul de la variation par rapport au mois précédent
-                const previousMonthStockQuery = `
-                    SELECT SUM(total) as total_previous_month
-                    FROM stock_vivant 
-                    WHERE date_stock >= $1 AND date_stock <= $2
-                `;
-                const previousMonthStockResult = await pool.query(previousMonthStockQuery, [previousMonthStr, endOfPreviousMonthStr]);
-                const currentMonthStockQuery = `
-                    SELECT SUM(total) as total_current_month
-                    FROM stock_vivant 
-                    WHERE date_stock >= $1 AND date_stock <= $2
-                `;
-                const currentMonthStockResult = await pool.query(currentMonthStockQuery, [startOfMonthStr, selectedDateStr]);
-                
-                const previousMonthTotal = parseFloat(previousMonthStockResult.rows[0]?.total_previous_month) || 0;
-                const currentMonthTotal = parseFloat(currentMonthStockResult.rows[0]?.total_current_month) || 0;
-                const stockVariation = currentMonthTotal - previousMonthTotal;
-                
-                statusData[accountName].stockVivant = {
-                    latest_entries: stockVivantResult.rows.map(stock => ({
-                        date: stock.date_stock,
-                        category: stock.categorie,
-                        product: stock.produit,
-                        quantity: parseInt(stock.quantite) || 0,
-                        unit_price: parseFloat(stock.prix_unitaire) || 0,
-                        total: parseFloat(stock.total) || 0,
-                        comment: stock.commentaire
-                    })),
-                    monthly_variation: {
-                        previous_month_total: previousMonthTotal,
-                        current_month_total: currentMonthTotal,
-                        variation: stockVariation,
-                        variation_percentage: previousMonthTotal > 0 ? ((stockVariation / previousMonthTotal) * 100) : 0
-                    }
-                };
-            } catch (stockError) {
-                console.log(`⚠️ Erreur stock vivant pour compte ${accountName}:`, stockError.message);
-                statusData[accountName].stockVivant = {
-                    latest_entries: [],
-                    monthly_variation: {
-                        previous_month_total: 0,
-                        current_month_total: 0,
-                        variation: 0,
-                        variation_percentage: 0
-                    },
-                    error: "Table stock_vivant non disponible"
-                };
-            }
 
-            // ===== 5. LIVRAISON PARTENAIRE =====
-            try {
-                // Vérifier d'abord si la table existe
-                const tableExistsQuery = `
-                    SELECT EXISTS (
-                        SELECT FROM information_schema.tables 
-                        WHERE table_name = 'partner_deliveries'
-                    )
-                `;
-                const tableExistsResult = await pool.query(tableExistsQuery);
-                
-                if (tableExistsResult.rows[0].exists) {
-                    // Vérifier les colonnes disponibles
-                    const columnsQuery = `
-                        SELECT column_name 
-                        FROM information_schema.columns 
-                        WHERE table_name = 'partner_deliveries'
-                    `;
-                    const columnsResult = await pool.query(columnsQuery);
-                    const availableColumns = columnsResult.rows.map(row => row.column_name);
-                    
-                    const hasStatus = availableColumns.includes('status');
-                    
-                    const latestDeliveryQuery = `
-                        SELECT id, delivery_date, amount, description, validation_status, created_at
-                        FROM partner_deliveries 
-                        WHERE account_id = $1
-                        ORDER BY delivery_date DESC, created_at DESC
-                        LIMIT 1
-                    `;
-                    const latestDeliveryResult = await pool.query(latestDeliveryQuery, [accountId]);
-                    
-                    const totalDeliveriesQuery = `
-                        SELECT SUM(amount) as total_deliveries
-                        FROM partner_deliveries 
-                        WHERE account_id = $1 AND validation_status = 'fully_validated'
-                    `;
-                    const totalDeliveriesResult = await pool.query(totalDeliveriesQuery, [accountId]);
-                    const totalDeliveries = parseFloat(totalDeliveriesResult.rows[0]?.total_deliveries) || 0;
-                    const remainingDeliveryBalance = (parseFloat(account.current_balance) || 0) - totalDeliveries;
-                    
-                    statusData[accountName].livraisonPartenaire = {
-                        latest_delivery: latestDeliveryResult.rows[0] ? {
-                            id: latestDeliveryResult.rows[0].id,
-                            date: latestDeliveryResult.rows[0].delivery_date,
-                            amount: parseFloat(latestDeliveryResult.rows[0].amount) || 0,
-                            description: latestDeliveryResult.rows[0].description,
-                            status: latestDeliveryResult.rows[0].validation_status,
-                            created_at: latestDeliveryResult.rows[0].created_at
-                        } : null,
-                        total_validated_deliveries: totalDeliveries,
-                        remaining_balance: remainingDeliveryBalance
-                    };
-                } else {
-                    // Table n'existe pas
-                    statusData[accountName].livraisonPartenaire = {
-                        latest_delivery: null,
-                        total_validated_deliveries: 0,
-                        remaining_balance: parseFloat(account.current_balance) || 0,
-                        note: "Table partner_deliveries non disponible"
-                    };
-                }
-            } catch (deliveryError) {
-                console.log(`⚠️ Erreur livraisons pour compte ${accountName}:`, deliveryError.message);
-                statusData[accountName].livraisonPartenaire = {
-                    latest_delivery: null,
-                    total_validated_deliveries: 0,
-                    remaining_balance: parseFloat(account.current_balance) || 0,
-                    error: "Erreur lors de la récupération des livraisons"
-                };
-            }
 
-            // ===== 6. STOCK SOIR MATA =====
+
+
+            // ===== 4. STOCK SOIR MATA =====
             try {
                 const stockSoirQuery = `
                     SELECT date, point_de_vente, produit, stock_matin, stock_soir, transfert
@@ -5797,7 +5669,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 };
             }
 
-            // ===== 7. DAILY CREANCE =====
+            // ===== 5. DAILY CREANCE =====
             if (account.account_type === 'creance') {
                 try {
                     const dailyCreanceQuery = `
@@ -5833,7 +5705,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 }
             }
 
-            // ===== 7. MONTHLY CREANCE =====
+            // ===== 6. MONTHLY CREANCE =====
             if (account.account_type === 'creance') {
                 try {
                     const monthlyCreanceQuery = `
@@ -5857,6 +5729,249 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     };
                 }
             }
+        }
+
+        // ===== STOCK VIVANT GLOBAL =====
+        let globalStockVivantData = {
+            latest_entries: [],
+            delta: {
+                previous_date: null,
+                current_date: null,
+                difference: 0,
+                percentage_change: 0
+            }
+        };
+
+        try {
+            // Récupérer les deux dernières dates distinctes dans stock_vivant
+            const latestDatesQuery = `
+                SELECT DISTINCT date_stock
+                FROM stock_vivant 
+                ORDER BY date_stock DESC
+                LIMIT 2
+            `;
+            const latestDatesResult = await pool.query(latestDatesQuery);
+            
+            if (latestDatesResult.rows.length >= 2) {
+                const currentDate = latestDatesResult.rows[0].date_stock;
+                const previousDate = latestDatesResult.rows[1].date_stock;
+                
+                // Récupérer les entrées de la date la plus récente
+                const latestEntriesQuery = `
+                    SELECT date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire
+                    FROM stock_vivant 
+                    WHERE date_stock = $1
+                    ORDER BY categorie, produit
+                `;
+                const latestEntriesResult = await pool.query(latestEntriesQuery, [currentDate]);
+                
+                // Calculer les totaux pour les deux dates
+                const currentTotalQuery = `
+                    SELECT SUM(total) as total_current
+                    FROM stock_vivant 
+                    WHERE date_stock = $1
+                `;
+                const currentTotalResult = await pool.query(currentTotalQuery, [currentDate]);
+                const currentTotal = parseFloat(currentTotalResult.rows[0]?.total_current) || 0;
+                
+                const previousTotalQuery = `
+                    SELECT SUM(total) as total_previous
+                    FROM stock_vivant 
+                    WHERE date_stock = $1
+                `;
+                const previousTotalResult = await pool.query(previousTotalQuery, [previousDate]);
+                const previousTotal = parseFloat(previousTotalResult.rows[0]?.total_previous) || 0;
+                
+                const difference = currentTotal - previousTotal;
+                const percentageChange = previousTotal > 0 ? ((difference / previousTotal) * 100) : 0;
+                
+                // Récupérer les détails des produits qui ont bougé
+                const productChangesQuery = `
+                    SELECT 
+                        COALESCE(c1.categorie, c2.categorie) as categorie,
+                        COALESCE(c1.produit, c2.produit) as produit,
+                        c1.quantite as current_quantity,
+                        c2.quantite as previous_quantity,
+                        c1.prix_unitaire as current_unit_price,
+                        c2.prix_unitaire as previous_unit_price,
+                        c1.total as current_total,
+                        c2.total as previous_total,
+                        (c1.quantite - c2.quantite) as quantity_change,
+                        (c1.total - c2.total) as total_change
+                    FROM (
+                        SELECT categorie, produit, quantite, prix_unitaire, total
+                        FROM stock_vivant 
+                        WHERE date_stock = $1
+                    ) c1
+                    FULL OUTER JOIN (
+                        SELECT categorie, produit, quantite, prix_unitaire, total
+                        FROM stock_vivant 
+                        WHERE date_stock = $2
+                    ) c2 ON c1.categorie = c2.categorie AND c1.produit = c2.produit
+                    WHERE c1.quantite IS DISTINCT FROM c2.quantite 
+                       OR c1.prix_unitaire IS DISTINCT FROM c2.prix_unitaire
+                       OR c1.total IS DISTINCT FROM c2.total
+                    ORDER BY COALESCE(c1.categorie, c2.categorie), COALESCE(c1.produit, c2.produit)
+                `;
+                const productChangesResult = await pool.query(productChangesQuery, [currentDate, previousDate]);
+                
+                const productChanges = productChangesResult.rows.map(change => ({
+                    category: change.categorie,
+                    product: change.produit,
+                    current_quantity: parseInt(change.current_quantity) || 0,
+                    previous_quantity: parseInt(change.previous_quantity) || 0,
+                    current_unit_price: parseFloat(change.current_unit_price) || 0,
+                    previous_unit_price: parseFloat(change.previous_unit_price) || 0,
+                    current_total: parseFloat(change.current_total) || 0,
+                    previous_total: parseFloat(change.previous_total) || 0,
+                    quantity_change: parseInt(change.quantity_change) || 0,
+                    total_change: parseFloat(change.total_change) || 0
+                }));
+                
+                globalStockVivantData = {
+                    latest_entries: latestEntriesResult.rows.map(stock => ({
+                        date: stock.date_stock,
+                        category: stock.categorie,
+                        product: stock.produit,
+                        quantity: parseInt(stock.quantite) || 0,
+                        unit_price: parseFloat(stock.prix_unitaire) || 0,
+                        total: parseFloat(stock.total) || 0,
+                        comment: stock.commentaire
+                    })),
+                    delta: {
+                        previous_date: previousDate,
+                        current_date: currentDate,
+                        previous_total: previousTotal,
+                        current_total: currentTotal,
+                        difference: difference,
+                        percentage_change: percentageChange,
+                        product_changes: productChanges
+                    }
+                };
+            } else if (latestDatesResult.rows.length === 1) {
+                // Une seule date disponible
+                const currentDate = latestDatesResult.rows[0].date_stock;
+                
+                const latestEntriesQuery = `
+                    SELECT date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire
+                    FROM stock_vivant 
+                    WHERE date_stock = $1
+                    ORDER BY categorie, produit
+                `;
+                const latestEntriesResult = await pool.query(latestEntriesQuery, [currentDate]);
+                
+                const currentTotalQuery = `
+                    SELECT SUM(total) as total_current
+                    FROM stock_vivant 
+                    WHERE date_stock = $1
+                `;
+                const currentTotalResult = await pool.query(currentTotalQuery, [currentDate]);
+                const currentTotal = parseFloat(currentTotalResult.rows[0]?.total_current) || 0;
+                
+                globalStockVivantData = {
+                    latest_entries: latestEntriesResult.rows.map(stock => ({
+                        date: stock.date_stock,
+                        category: stock.categorie,
+                        product: stock.produit,
+                        quantity: parseInt(stock.quantite) || 0,
+                        unit_price: parseFloat(stock.prix_unitaire) || 0,
+                        total: parseFloat(stock.total) || 0,
+                        comment: stock.commentaire
+                    })),
+                    delta: {
+                        previous_date: null,
+                        current_date: currentDate,
+                        previous_total: 0,
+                        current_total: currentTotal,
+                        difference: 0,
+                        percentage_change: 0,
+                        product_changes: []
+                    }
+                };
+            }
+        } catch (stockError) {
+            console.log('⚠️ Erreur stock vivant global:', stockError.message);
+            globalStockVivantData = {
+                latest_entries: [],
+                delta: {
+                    previous_date: null,
+                    current_date: null,
+                    previous_total: 0,
+                    current_total: 0,
+                    difference: 0,
+                    percentage_change: 0,
+                    product_changes: []
+                },
+                error: "Table stock_vivant non disponible"
+            };
+        }
+
+        // ===== LIVRAISON PARTENAIRE GLOBALE =====
+        let globalLivraisonPartenaireData = {};
+
+        try {
+            // Vérifier d'abord si la table existe
+            const tableExistsQuery = `
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = 'partner_deliveries'
+                )
+            `;
+            const tableExistsResult = await pool.query(tableExistsQuery);
+            
+            if (tableExistsResult.rows[0].exists) {
+                // Récupérer tous les comptes partenaires
+                const partnerAccountsQuery = `
+                    SELECT id, account_name, current_balance
+                    FROM accounts 
+                    WHERE account_type = 'partenaire' AND is_active = true
+                    ORDER BY account_name
+                `;
+                const partnerAccountsResult = await pool.query(partnerAccountsQuery);
+                
+                for (const partnerAccount of partnerAccountsResult.rows) {
+                    const accountId = partnerAccount.id;
+                    const accountName = partnerAccount.account_name;
+                    
+                    // Récupérer la dernière livraison pour ce compte
+                    const latestDeliveryQuery = `
+                        SELECT id, delivery_date, amount, description, validation_status, created_at
+                        FROM partner_deliveries 
+                        WHERE account_id = $1
+                        ORDER BY delivery_date DESC, created_at DESC
+                        LIMIT 1
+                    `;
+                    const latestDeliveryResult = await pool.query(latestDeliveryQuery, [accountId]);
+                    
+                    // Calculer le total des livraisons validées pour ce compte
+                    const totalDeliveriesQuery = `
+                        SELECT SUM(amount) as total_deliveries
+                        FROM partner_deliveries 
+                        WHERE account_id = $1 AND validation_status = 'fully_validated'
+                    `;
+                    const totalDeliveriesResult = await pool.query(totalDeliveriesQuery, [accountId]);
+                    const totalDeliveries = parseFloat(totalDeliveriesResult.rows[0]?.total_deliveries) || 0;
+                    const remainingBalance = (parseFloat(partnerAccount.current_balance) || 0) - totalDeliveries;
+                    
+                    globalLivraisonPartenaireData[accountName] = {
+                        latest_delivery: latestDeliveryResult.rows[0] ? {
+                            id: latestDeliveryResult.rows[0].id,
+                            date: latestDeliveryResult.rows[0].delivery_date,
+                            amount: parseFloat(latestDeliveryResult.rows[0].amount) || 0,
+                            description: latestDeliveryResult.rows[0].description,
+                            status: latestDeliveryResult.rows[0].validation_status,
+                            created_at: latestDeliveryResult.rows[0].created_at
+                        } : null,
+                        total_validated_deliveries: totalDeliveries,
+                        remaining_balance: remainingBalance
+                    };
+                }
+            }
+        } catch (deliveryError) {
+            console.log('⚠️ Erreur livraisons partenaires globales:', deliveryError.message);
+            globalLivraisonPartenaireData = {
+                error: "Erreur lors de la récupération des livraisons partenaires"
+            };
         }
 
         // ===== CALCULS GLOBAUX PL ET SOLDES =====
@@ -5983,25 +6098,11 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         });
 
         // ===== EXTRACTION DES DONNÉES GLOBALES =====
-        // Extraire les données stockVivant, livraisonPartenaire et stockSoirMata au niveau racine
-        const globalStockVivant = {};
-        const globalLivraisonPartenaire = {};
+        // Extraire les données stockSoirMata au niveau racine
         const globalStockSoirMata = {};
 
         Object.keys(statusData).forEach(accountName => {
             const account = statusData[accountName];
-            
-            // Extraire stockVivant
-            if (account.stockVivant) {
-                globalStockVivant[accountName] = account.stockVivant;
-                delete account.stockVivant; // Supprimer du niveau compte
-            }
-            
-            // Extraire livraisonPartenaire
-            if (account.livraisonPartenaire) {
-                globalLivraisonPartenaire[accountName] = account.livraisonPartenaire;
-                delete account.livraisonPartenaire; // Supprimer du niveau compte
-            }
             
             // Extraire stockSoirMata
             if (account.stockSoirMata) {
@@ -6020,8 +6121,8 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 previous_month_period: `${previousMonthStr} to ${endOfPreviousMonthStr}`
             },
             accounts: accountsByType,
-            stockVivant: globalStockVivant,
-            livraisonPartenaire: globalLivraisonPartenaire,
+            stockVivant: globalStockVivantData,
+            livraisonPartenaire: globalLivraisonPartenaireData,
             stockSoirMata: globalStockSoirMata,
             global_metrics: globalMetrics,
             metadata: {
