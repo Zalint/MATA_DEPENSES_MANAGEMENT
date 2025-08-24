@@ -5637,39 +5637,9 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
 
 
 
-            // ===== 4. STOCK SOIR MATA =====
-            try {
-                const stockSoirQuery = `
-                    SELECT date, point_de_vente, produit, stock_matin, stock_soir, transfert
-                    FROM stock_mata 
-                    WHERE date = $1
-                    ORDER BY point_de_vente, produit
-                `;
-                const stockSoirResult = await pool.query(stockSoirQuery, [selectedDateStr]);
-                const totalStockSoir = stockSoirResult.rows.reduce((sum, stock) => sum + (parseFloat(stock.stock_soir) || 0), 0);
-                
-                statusData[accountName].stockSoirMata = {
-                    date: selectedDateStr,
-                    entries: stockSoirResult.rows.map(stock => ({
-                        point_de_vente: stock.point_de_vente,
-                        produit: stock.produit,
-                        stock_matin: parseFloat(stock.stock_matin) || 0,
-                        stock_soir: parseFloat(stock.stock_soir) || 0,
-                        transfert: parseFloat(stock.transfert) || 0
-                    })),
-                    total_value: totalStockSoir
-                };
-            } catch (stockSoirError) {
-                console.log(`⚠️ Erreur stock soir pour compte ${accountName}:`, stockSoirError.message);
-                statusData[accountName].stockSoirMata = {
-                    date: selectedDateStr,
-                    entries: [],
-                    total_value: 0,
-                    error: "Table stock_mata non disponible"
-                };
-            }
 
-            // ===== 5. DAILY CREANCE =====
+
+            // ===== 4. DAILY CREANCE =====
             if (account.account_type === 'creance') {
                 try {
                     const dailyCreanceQuery = `
@@ -5705,7 +5675,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 }
             }
 
-            // ===== 6. MONTHLY CREANCE =====
+            // ===== 5. MONTHLY CREANCE =====
             if (account.account_type === 'creance') {
                 try {
                     const monthlyCreanceQuery = `
@@ -5974,6 +5944,44 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             };
         }
 
+        // ===== STOCK SOIR MATA GLOBAL =====
+        let globalStockSoirMataData = {
+            date: selectedDateStr,
+            entries: [],
+            total_value: 0
+        };
+
+        try {
+            const stockSoirQuery = `
+                SELECT date, point_de_vente, produit, stock_matin, stock_soir, transfert
+                FROM stock_mata 
+                WHERE date = $1
+                ORDER BY point_de_vente, produit
+            `;
+            const stockSoirResult = await pool.query(stockSoirQuery, [selectedDateStr]);
+            const totalStockSoir = stockSoirResult.rows.reduce((sum, stock) => sum + (parseFloat(stock.stock_soir) || 0), 0);
+            
+            globalStockSoirMataData = {
+                date: selectedDateStr,
+                entries: stockSoirResult.rows.map(stock => ({
+                    point_de_vente: stock.point_de_vente,
+                    produit: stock.produit,
+                    stock_matin: parseFloat(stock.stock_matin) || 0,
+                    stock_soir: parseFloat(stock.stock_soir) || 0,
+                    transfert: parseFloat(stock.transfert) || 0
+                })),
+                total_value: totalStockSoir
+            };
+        } catch (stockSoirError) {
+            console.log('⚠️ Erreur stock soir global:', stockSoirError.message);
+            globalStockSoirMataData = {
+                date: selectedDateStr,
+                entries: [],
+                total_value: 0,
+                error: "Table stock_mata non disponible"
+            };
+        }
+
         // ===== CALCULS GLOBAUX PL ET SOLDES =====
         
         // Récupération des données pour les calculs PL
@@ -6098,18 +6106,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         });
 
         // ===== EXTRACTION DES DONNÉES GLOBALES =====
-        // Extraire les données stockSoirMata au niveau racine
-        const globalStockSoirMata = {};
-
-        Object.keys(statusData).forEach(accountName => {
-            const account = statusData[accountName];
-            
-            // Extraire stockSoirMata
-            if (account.stockSoirMata) {
-                globalStockSoirMata[accountName] = account.stockSoirMata;
-                delete account.stockSoirMata; // Supprimer du niveau compte
-            }
-        });
+        // Aucune extraction nécessaire car toutes les données globales sont déjà traitées
 
         const response = {
             success: true,
@@ -6123,7 +6120,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             accounts: accountsByType,
             stockVivant: globalStockVivantData,
             livraisonPartenaire: globalLivraisonPartenaireData,
-            stockSoirMata: globalStockSoirMata,
+            stockSoirMata: globalStockSoirMataData,
             global_metrics: globalMetrics,
             metadata: {
                 total_accounts: accounts.length,
