@@ -5892,7 +5892,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             if (tableExistsResult.rows[0].exists) {
                 // Récupérer tous les comptes partenaires
                 const partnerAccountsQuery = `
-                    SELECT id, account_name, current_balance
+                    SELECT id, account_name, current_balance, total_credited
                     FROM accounts 
                     WHERE account_type = 'partenaire' AND is_active = true
                     ORDER BY account_name
