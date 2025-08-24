@@ -6066,22 +6066,61 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         const totalDeliveriesGlobalResult = await pool.query(totalDeliveriesGlobalQuery, [startOfMonthStr, selectedDateStr]);
         const totalDeliveriesMonth = parseFloat(totalDeliveriesGlobalResult.rows[0]?.total_deliveries) || 0;
 
-        const currentStockVivantQuery = `
-            SELECT SUM(total) as current_stock_total
-            FROM stock_vivant 
-            WHERE date_stock >= $1 AND date_stock <= $2
-        `;
-        const currentStockVivantResult = await pool.query(currentStockVivantQuery, [startOfMonthStr, selectedDateStr]);
-        const currentStockVivantTotal = parseFloat(currentStockVivantResult.rows[0]?.current_stock_total) || 0;
-
-        const previousStockVivantQuery = `
-            SELECT SUM(total) as previous_stock_total
-            FROM stock_vivant 
-            WHERE date_stock >= $1 AND date_stock <= $2
-        `;
-        const previousStockVivantResult = await pool.query(previousStockVivantQuery, [previousMonthStr, endOfPreviousMonthStr]);
-        const previousStockVivantTotal = parseFloat(previousStockVivantResult.rows[0]?.previous_stock_total) || 0;
-        const stockVivantVariation = currentStockVivantTotal - previousStockVivantTotal;
+        // Calcul de l'écart stock vivant (même logique que l'interface)
+        let stockVivantVariation = 0;
+        try {
+            const currentDate = new Date(selectedDateStr);
+            const currentYear = currentDate.getFullYear();
+            const currentMonth = currentDate.getMonth() + 1;
+            
+            let previousYear = currentYear;
+            let previousMonth = currentMonth - 1;
+            if (previousMonth === 0) {
+                previousMonth = 12;
+                previousYear = currentYear - 1;
+            }
+            
+            const firstDayOfCurrentMonth = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`;
+            
+            // 1. Récupérer le stock de la dernière date disponible AVANT le mois actuel
+            let previousStock = 0;
+            const lastDateBeforeCurrentMonth = await pool.query(`
+                SELECT MAX(date_stock) as last_date
+                FROM stock_vivant
+                WHERE date_stock < $1::date
+            `, [firstDayOfCurrentMonth]);
+            
+            if (lastDateBeforeCurrentMonth.rows[0]?.last_date) {
+                const previousStockResult = await pool.query(`
+                    SELECT SUM(quantite * prix_unitaire * (1 - COALESCE(decote, 0))) as total_stock
+                    FROM stock_vivant 
+                    WHERE date_stock = $1
+                `, [lastDateBeforeCurrentMonth.rows[0].last_date]);
+                
+                previousStock = Math.round(previousStockResult.rows[0]?.total_stock || 0);
+            }
+            
+            // 2. Récupérer le stock le plus proche de la date sélectionnée
+            const currentStockQuery = `
+                SELECT SUM(quantite * prix_unitaire * (1 - COALESCE(decote, 0))) as total_stock
+                FROM stock_vivant
+                WHERE date_stock <= $1::date
+                AND date_stock = (
+                    SELECT MAX(date_stock) 
+                    FROM stock_vivant 
+                    WHERE date_stock <= $1::date
+                )
+            `;
+            const currentStockResult = await pool.query(currentStockQuery, [selectedDateStr]);
+            
+            const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
+            
+            // 3. Calculer l'écart : stock actuel - stock précédent
+            stockVivantVariation = currentStock - previousStock;
+        } catch (error) {
+            console.error('Erreur calcul écart stock vivant:', error);
+            stockVivantVariation = 0;
+        }
 
         const totalStockSoirQuery = `
             SELECT SUM(stock_soir) as total_stock_soir
