@@ -15,6 +15,36 @@ function formatCurrency(amount) {
     return parseInt(amount).toLocaleString('fr-FR') + ' FCFA';
 }
 
+// Fonction utilitaire pour nettoyer l'encodage des caractères français
+function cleanEncoding(obj) {
+    if (typeof obj === 'string') {
+        // Remplacer les caractères mal encodés
+        return obj
+            .replace(/├⌐/g, 'é')
+            .replace(/├á/g, 'à')
+            .replace(/├©/g, 'è')
+            .replace(/├®/g, 'ê')
+            .replace(/├¬/g, 'ì')
+            .replace(/├│/g, 'ò')
+            .replace(/├╣/g, 'ù')
+            .replace(/├ç/g, 'ç')
+            .replace(/├ü/g, 'ü')
+            .replace(/├ö/g, 'ö')
+            .replace(/├ä/g, 'ä')
+            .replace(/├ï/g, 'ï')
+            .replace(/├ë/g, 'ë');
+    } else if (Array.isArray(obj)) {
+        return obj.map(cleanEncoding);
+    } else if (obj && typeof obj === 'object') {
+        const cleaned = {};
+        for (const [key, value] of Object.entries(obj)) {
+            cleaned[key] = cleanEncoding(value);
+        }
+        return cleaned;
+    }
+    return obj;
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -4603,13 +4633,17 @@ app.post('/api/partner/deliveries/:deliveryId/reject', requireAuth, async (req, 
         const delivery = deliveryResult.rows[0];
         const accountId = delivery.account_id;
         
-        // Vérifier que la livraison est en première validation
-        if (delivery.validation_status !== 'first_validated') {
-            return res.status(400).json({ error: 'Cette livraison doit être en première validation pour être rejetée' });
+        // Vérifier que la livraison peut être rejetée (pending ou first_validated, mais pas déjà rejetée ou fully_validated)
+        if (delivery.validation_status === 'rejected') {
+            return res.status(400).json({ error: 'Cette livraison est déjà rejetée' });
         }
         
-        // Vérifier que ce n'est pas le même directeur
-        if (delivery.first_validated_by === rejected_by) {
+        if (delivery.validation_status === 'fully_validated') {
+            return res.status(400).json({ error: 'Cette livraison est déjà validée définitivement et ne peut plus être rejetée' });
+        }
+        
+        // Si la livraison est en first_validated, vérifier que ce n'est pas le même directeur
+        if (delivery.validation_status === 'first_validated' && delivery.first_validated_by === rejected_by) {
             return res.status(400).json({ error: 'Vous ne pouvez pas rejeter votre propre validation' });
         }
         
@@ -5567,7 +5601,23 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
 
             statusData[accountName].dailyExpenses = dailyExpensesStructure;
 
-            // ===== 2. MONTHLY EXPENSES =====
+            // ===== 2. WEEKLY EXPENSES =====
+            const weeklyExpensesQuery = `
+                SELECT SUM(total) as total_weekly
+                FROM expenses 
+                WHERE account_id = $1 AND expense_date >= $2 AND expense_date <= $3
+            `;
+            const weeklyExpensesResult = await pool.query(weeklyExpensesQuery, [accountId, startOfWeekStr, selectedDateStr]);
+            const weeklyExpensesTotal = parseFloat(weeklyExpensesResult.rows[0]?.total_weekly) || 0;
+            const remainingWeeklyBalance = (parseFloat(account.current_balance) || 0) - weeklyExpensesTotal;
+            
+            statusData[accountName].weeklyExpenses = {
+                total_weekly_expenses: weeklyExpensesTotal,
+                period: `${startOfWeekStr} to ${selectedDateStr}`,
+                remaining_balance: remainingWeeklyBalance
+            };
+
+            // ===== 3. MONTHLY EXPENSES =====
             const monthlyExpensesQuery = `
                 SELECT SUM(total) as total_monthly
                 FROM expenses 
@@ -5583,7 +5633,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 remaining_balance: remainingMonthlyBalance
             };
 
-            // ===== 3. STOCK VIVANT =====
+            // ===== 4. STOCK VIVANT =====
             try {
                 const stockVivantQuery = `
                     SELECT date_stock, categorie, produit, quantite, prix_unitaire, total, commentaire
@@ -5643,7 +5693,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 };
             }
 
-            // ===== 4. LIVRAISON PARTENAIRE =====
+            // ===== 5. LIVRAISON PARTENAIRE =====
             try {
                 // Vérifier d'abord si la table existe
                 const tableExistsQuery = `
@@ -5715,7 +5765,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 };
             }
 
-            // ===== 5. STOCK SOIR MATA =====
+            // ===== 6. STOCK SOIR MATA =====
             try {
                 const stockSoirQuery = `
                     SELECT date, point_de_vente, produit, stock_matin, stock_soir, transfert
@@ -5747,7 +5797,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 };
             }
 
-            // ===== 6. DAILY CREANCE =====
+            // ===== 7. DAILY CREANCE =====
             if (account.account_type === 'creance') {
                 try {
                     const dailyCreanceQuery = `
@@ -5986,7 +6036,10 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         
         // Gestion de l'encodage pour les caractères spéciaux
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.json(response);
+        
+        // Nettoyer l'encodage de la réponse
+        const cleanedResponse = cleanEncoding(response);
+        res.json(cleanedResponse);
 
     } catch (error) {
         console.error('❌ EXTERNAL: Erreur lors de la génération de l\'API status:', error);
@@ -7196,7 +7249,11 @@ app.get('/api/stock-vivant', requireStockVivantAuth, async (req, res) => {
         query += ' ORDER BY date_stock DESC, categorie, produit';
         
         const result = await pool.query(query, params);
-        res.json(result.rows);
+        
+        // Nettoyer l'encodage et retourner les données
+        const cleanedData = cleanEncoding(result.rows);
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.json(cleanedData);
     } catch (error) {
         console.error('Erreur récupération stock vivant:', error);
         res.status(500).json({ error: 'Erreur serveur' });

@@ -21,6 +21,10 @@
               "name": "Alimentation"
             },
             {
+              "id": "abats",
+              "name": "Abats"
+            },
+            {
               "id": "trans",
               "name": "Transport"
             }
