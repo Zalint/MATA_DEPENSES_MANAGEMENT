@@ -5985,13 +5985,60 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         // ===== CALCULS GLOBAUX PL ET SOLDES =====
         
         // Récupération des données pour les calculs PL
-        const totalBalanceQuery = `
-            SELECT SUM(current_balance) as total_balance
-            FROM accounts 
-            WHERE is_active = true
-        `;
-        const totalBalanceResult = await pool.query(totalBalanceQuery);
-        const totalBalance = parseFloat(totalBalanceResult.rows[0]?.total_balance) || 0;
+        // Calculer la somme des balances mensuelles (même logique que l'interface)
+        let totalBalance = 0;
+        try {
+            const monthlyBalanceQuery = `
+                SELECT 
+                    a.account_type,
+                    COALESCE(SUM(e.total), 0) as monthly_credits,
+                    COALESCE(SUM(exp.total), 0) as spent,
+                    COALESCE(SUM(CASE WHEN t.transfer_type = 'in' THEN t.amount ELSE -t.amount END), 0) as net_transfers,
+                    COALESCE(mdm.montant, 0) as montant_debut_mois
+                FROM accounts a
+                LEFT JOIN expenses e ON a.id = e.account_id 
+                    AND e.expense_date >= $1 
+                    AND e.expense_date <= $2
+                LEFT JOIN expenses exp ON a.id = exp.account_id 
+                    AND exp.expense_date >= $1 
+                    AND exp.expense_date <= $2
+                LEFT JOIN transfers t ON (a.id = t.from_account_id OR a.id = t.to_account_id)
+                    AND t.transfer_date >= $1 
+                    AND t.transfer_date <= $2
+                LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id 
+                    AND mdm.month_year = $3
+                WHERE a.is_active = true
+                GROUP BY a.id, a.account_type, mdm.montant
+            `;
+            
+            const monthlyBalanceResult = await pool.query(monthlyBalanceQuery, [startOfMonthStr, selectedDateStr, monthYear]);
+            
+            monthlyBalanceResult.rows.forEach(row => {
+                const monthlyCredits = parseInt(row.monthly_credits || 0);
+                const spent = parseInt(row.spent || 0);
+                const netTransfers = parseInt(row.net_transfers || 0);
+                const montantDebutMois = parseInt(row.montant_debut_mois || 0);
+                
+                let monthlyBalance;
+                if (row.account_type === 'classique') {
+                    monthlyBalance = monthlyCredits - spent + netTransfers + montantDebutMois;
+                } else {
+                    monthlyBalance = monthlyCredits - spent + netTransfers;
+                }
+                
+                totalBalance += monthlyBalance;
+            });
+        } catch (error) {
+            console.error('Erreur calcul balance mensuelle:', error);
+            // Fallback au calcul simple
+            const totalBalanceQuery = `
+                SELECT SUM(current_balance) as total_balance
+                FROM accounts 
+                WHERE is_active = true
+            `;
+            const totalBalanceResult = await pool.query(totalBalanceQuery);
+            totalBalance = parseFloat(totalBalanceResult.rows[0]?.total_balance) || 0;
+        }
 
         // Récupérer la vraie valeur Cash Bictorys du mois (même logique que l'application)
         const monthYear = selectedDateStr.substring(0, 7); // Format YYYY-MM
@@ -6041,13 +6088,19 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         const monthlyExpensesGlobalResult = await pool.query(monthlyExpensesGlobalQuery, [startOfMonthStr, selectedDateStr]);
         const totalMonthlyExpenses = parseFloat(monthlyExpensesGlobalResult.rows[0]?.total_monthly_expenses) || 0;
 
+        // Calculer Cash Burn depuis lundi (même logique que l'interface)
+        const now = new Date();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - now.getDay() + 1);
+        const mondayStr = monday.toISOString().split('T')[0];
+        
         const weeklyExpensesQuery = `
             SELECT SUM(total) as total_weekly_expenses
             FROM expenses e
             JOIN accounts a ON e.account_id = a.id
             WHERE a.is_active = true AND e.expense_date >= $1 AND e.expense_date <= $2
         `;
-        const weeklyExpensesResult = await pool.query(weeklyExpensesQuery, [startOfWeekStr, selectedDateStr]);
+        const weeklyExpensesResult = await pool.query(weeklyExpensesQuery, [mondayStr, selectedDateStr]);
         const totalWeeklyExpenses = parseFloat(weeklyExpensesResult.rows[0]?.total_weekly_expenses) || 0;
 
         // Calcul des créances (même logique que l'interface)
@@ -6184,13 +6237,64 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             totalStockSoir = 0;
         }
 
-        // Constantes pour le calcul PL (à ajuster selon les besoins)
-        const estimatedMonthlyFixedCharges = 500000; // 500k FCFA estimé
+        // Lire l'estimation des charges fixes depuis le fichier JSON (même logique que l'interface)
+        let estimatedMonthlyFixedCharges = 0;
+        try {
+            const configPath = path.join(__dirname, 'financial_settings.json');
+            if (fs.existsSync(configPath)) {
+                const configData = fs.readFileSync(configPath, 'utf8');
+                const financialConfig = JSON.parse(configData);
+                estimatedMonthlyFixedCharges = parseFloat(financialConfig.charges_fixes_estimation) || 0;
+            } else {
+                console.log('⚠️ Fichier financial_settings.json non trouvé, estimation = 0');
+                estimatedMonthlyFixedCharges = 0;
+            }
+        } catch (configError) {
+            console.error('Erreur lecture config financière:', configError);
+            estimatedMonthlyFixedCharges = 0;
+        }
 
+        // Calculer le prorata des charges fixes basé sur les jours écoulés (hors dimanche) - même logique que l'interface
+        let chargesProrata = 0;
+        let joursOuvrablesEcoules = 0;
+        let totalJoursOuvrables = 0;
+        
+        if (estimatedMonthlyFixedCharges > 0) {
+            const currentDate = new Date(selectedDateStr);
+            const currentDay = currentDate.getDate();
+            const currentMonth = currentDate.getMonth() + 1;
+            const currentYear = currentDate.getFullYear();
+            
+            // Calculer le nombre de jours ouvrables écoulés dans le mois (lundi à samedi)
+            // Du début du mois jusqu'à la date de référence (inclus)
+            joursOuvrablesEcoules = 0;
+            for (let day = 1; day <= currentDay; day++) {
+                const date = new Date(currentYear, currentMonth - 1, day);
+                const dayOfWeek = date.getDay(); // 0 = dimanche, 1 = lundi, ..., 6 = samedi
+                if (dayOfWeek !== 0) { // Exclure les dimanches
+                    joursOuvrablesEcoules++;
+                }
+            }
+            
+            // Calculer le nombre total de jours ouvrables dans le mois
+            const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+            totalJoursOuvrables = 0;
+            for (let day = 1; day <= daysInMonth; day++) {
+                const date = new Date(currentYear, currentMonth - 1, day);
+                const dayOfWeek = date.getDay();
+                if (dayOfWeek !== 0) { // Exclure les dimanches
+                    totalJoursOuvrables++;
+                }
+            }
+            
+            // Calculer le prorata
+            chargesProrata = (estimatedMonthlyFixedCharges * joursOuvrablesEcoules) / totalJoursOuvrables;
+        }
+        
         // Calculs PL (même logique que l'interface)
         const plSansStockCharges = cashBictorysValue + totalCreance + totalStockSoir - totalMonthlyExpenses;
         const brutPL = plSansStockCharges + stockVivantVariation - totalDeliveriesMonth;
-        const estimatedPL = plSansStockCharges + stockVivantVariation - estimatedMonthlyFixedCharges - totalDeliveriesMonth;
+        const estimatedPL = plSansStockCharges + stockVivantVariation - chargesProrata - totalDeliveriesMonth;
 
         const globalMetrics = {
             profitAndLoss: {
@@ -6210,14 +6314,20 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     value: estimatedPL,
                     components: {
                         brut_pl: brutPL,
-                        estimated_fixed_charges: -estimatedMonthlyFixedCharges
+                        charges_prorata: -chargesProrata
                     }
                 },
-                chargesFixesTotales: estimatedMonthlyFixedCharges
+                chargesFixesTotales: estimatedMonthlyFixedCharges,
+                chargesProrata: {
+                    value: chargesProrata,
+                    jours_ouvrables_ecoules: joursOuvrablesEcoules,
+                    total_jours_ouvrables: totalJoursOuvrables,
+                    pourcentage: totalJoursOuvrables > 0 ? Math.round((joursOuvrablesEcoules / totalJoursOuvrables) * 100) : 0
+                }
             },
             balances: {
                 balance_du_mois: totalBalance,
-                cash_disponible: totalBalance - totalMonthlyExpenses,
+                cash_disponible: totalCreditedGeneral - totalMonthlyExpenses,
                 cash_burn_du_mois: totalMonthlyExpenses,
                 cash_bictorys_du_mois: cashBictorysValue,
                 cash_burn_depuis_lundi: totalWeeklyExpenses
