@@ -6050,13 +6050,27 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         const weeklyExpensesResult = await pool.query(weeklyExpensesQuery, [startOfWeekStr, selectedDateStr]);
         const totalWeeklyExpenses = parseFloat(weeklyExpensesResult.rows[0]?.total_weekly_expenses) || 0;
 
-        const totalCreanceQuery = `
-            SELECT SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE -co.amount END) as total_creance
-            FROM creance_operations co
-            WHERE co.operation_date >= $1 AND co.operation_date <= $2
-        `;
-        const totalCreanceResult = await pool.query(totalCreanceQuery, [startOfMonthStr, selectedDateStr]);
-        const totalCreance = parseInt(totalCreanceResult.rows[0]?.total_creance) || 0;
+        // Calcul des créances (même logique que l'interface)
+        let totalCreance = 0;
+        try {
+            const creancesQuery = `
+                SELECT COALESCE(SUM(co.amount), 0) as creances_mois
+                FROM creance_operations co
+                JOIN creance_clients cc ON co.client_id = cc.id
+                JOIN accounts a ON cc.account_id = a.id
+                WHERE co.operation_type = 'credit'
+                AND co.operation_date >= $1
+                AND co.operation_date <= $2
+                AND a.account_type = 'creance' 
+                AND a.is_active = true 
+                AND cc.is_active = true
+            `;
+            const creancesResult = await pool.query(creancesQuery, [startOfMonthStr, selectedDateStr]);
+            totalCreance = parseInt(creancesResult.rows[0]?.creances_mois) || 0;
+        } catch (error) {
+            console.error('Erreur calcul créances:', error);
+            totalCreance = 0;
+        }
 
         const totalDeliveriesGlobalQuery = `
             SELECT SUM(amount) as total_deliveries
@@ -6122,13 +6136,53 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             stockVivantVariation = 0;
         }
 
-        const totalStockSoirQuery = `
-            SELECT SUM(stock_soir) as total_stock_soir
-            FROM stock_mata 
-            WHERE date = $1
-        `;
-        const totalStockSoirResult = await pool.query(totalStockSoirQuery, [selectedDateStr]);
-        const totalStockSoir = parseFloat(totalStockSoirResult.rows[0]?.total_stock_soir) || 0;
+        // Calcul de l'écart stock mata (même logique que l'interface)
+        let totalStockSoir = 0;
+        try {
+            const currentDate = new Date(selectedDateStr);
+            const currentYear = currentDate.getFullYear();
+            const currentMonth = currentDate.getMonth() + 1;
+            const firstDayOfCurrentMonth = `${currentYear}-${currentMonth.toString().padStart(2, '0')}-01`;
+            
+            // 1. Trouver la dernière date de stock mata AVANT le mois actuel
+            let previousStockMata = 0;
+            const lastDateBeforeCurrentMonth = await pool.query(`
+                SELECT MAX(date) as last_date 
+                FROM stock_mata 
+                WHERE date < $1
+            `, [firstDayOfCurrentMonth]);
+            
+            if (lastDateBeforeCurrentMonth.rows[0]?.last_date) {
+                const previousStockMataResult = await pool.query(`
+                    SELECT COALESCE(SUM(stock_soir), 0) as total_stock
+                    FROM stock_mata 
+                    WHERE date = $1
+                `, [lastDateBeforeCurrentMonth.rows[0].last_date]);
+                
+                previousStockMata = Math.round(previousStockMataResult.rows[0]?.total_stock || 0);
+            }
+            
+            // 2. Récupérer le stock mata le plus proche de la date sélectionnée
+            const currentStockMataQuery = `
+                SELECT COALESCE(SUM(stock_soir), 0) as total_stock
+                FROM stock_mata
+                WHERE date <= $1::date
+                AND date = (
+                    SELECT MAX(date) 
+                    FROM stock_mata 
+                    WHERE date <= $1::date
+                )
+            `;
+            const currentStockMataResult = await pool.query(currentStockMataQuery, [selectedDateStr]);
+            
+            const currentStockMata = Math.round(currentStockMataResult.rows[0]?.total_stock || 0);
+            
+            // 3. Calculer l'écart : stock actuel - stock précédent
+            totalStockSoir = currentStockMata - previousStockMata;
+        } catch (error) {
+            console.error('Erreur calcul écart stock mata:', error);
+            totalStockSoir = 0;
+        }
 
         // Constantes pour le calcul PL (à ajuster selon les besoins)
         const estimatedMonthlyFixedCharges = 500000; // 500k FCFA estimé
