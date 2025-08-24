@@ -5859,10 +5859,10 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     }
                 };
             }
-        } catch (stockError) {
+            } catch (stockError) {
             console.log('⚠️ Erreur stock vivant global:', stockError.message);
             globalStockVivantData = {
-                latest_entries: [],
+                    latest_entries: [],
                 delta: {
                     previous_date: null,
                     current_date: null,
@@ -5871,25 +5871,25 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     difference: 0,
                     percentage_change: 0,
                     product_changes: []
-                },
-                error: "Table stock_vivant non disponible"
-            };
-        }
+                    },
+                    error: "Table stock_vivant non disponible"
+                };
+            }
 
         // ===== LIVRAISON PARTENAIRE GLOBALE =====
         let globalLivraisonPartenaireData = {};
 
-        try {
-            // Vérifier d'abord si la table existe
-            const tableExistsQuery = `
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_name = 'partner_deliveries'
-                )
-            `;
-            const tableExistsResult = await pool.query(tableExistsQuery);
-            
-            if (tableExistsResult.rows[0].exists) {
+            try {
+                // Vérifier d'abord si la table existe
+                const tableExistsQuery = `
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = 'partner_deliveries'
+                    )
+                `;
+                const tableExistsResult = await pool.query(tableExistsQuery);
+                
+                if (tableExistsResult.rows[0].exists) {
                 // Récupérer tous les comptes partenaires
                 const partnerAccountsQuery = `
                     SELECT id, account_name, current_balance, total_credited
@@ -5936,8 +5936,8 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                         remaining_balance: remainingBalance
                     };
                 }
-            }
-        } catch (deliveryError) {
+                }
+            } catch (deliveryError) {
             console.log('⚠️ Erreur livraisons partenaires globales:', deliveryError.message);
             globalLivraisonPartenaireData = {
                 error: "Erreur lors de la récupération des livraisons partenaires"
@@ -5951,36 +5951,36 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             total_value: 0
         };
 
-        try {
-            const stockSoirQuery = `
-                SELECT date, point_de_vente, produit, stock_matin, stock_soir, transfert
-                FROM stock_mata 
-                WHERE date = $1
-                ORDER BY point_de_vente, produit
-            `;
-            const stockSoirResult = await pool.query(stockSoirQuery, [selectedDateStr]);
-            const totalStockSoir = stockSoirResult.rows.reduce((sum, stock) => sum + (parseFloat(stock.stock_soir) || 0), 0);
-            
+            try {
+                const stockSoirQuery = `
+                    SELECT date, point_de_vente, produit, stock_matin, stock_soir, transfert
+                    FROM stock_mata 
+                    WHERE date = $1
+                    ORDER BY point_de_vente, produit
+                `;
+                const stockSoirResult = await pool.query(stockSoirQuery, [selectedDateStr]);
+                const totalStockSoir = stockSoirResult.rows.reduce((sum, stock) => sum + (parseFloat(stock.stock_soir) || 0), 0);
+                
             globalStockSoirMataData = {
-                date: selectedDateStr,
-                entries: stockSoirResult.rows.map(stock => ({
-                    point_de_vente: stock.point_de_vente,
-                    produit: stock.produit,
-                    stock_matin: parseFloat(stock.stock_matin) || 0,
-                    stock_soir: parseFloat(stock.stock_soir) || 0,
-                    transfert: parseFloat(stock.transfert) || 0
-                })),
-                total_value: totalStockSoir
-            };
-        } catch (stockSoirError) {
+                    date: selectedDateStr,
+                    entries: stockSoirResult.rows.map(stock => ({
+                        point_de_vente: stock.point_de_vente,
+                        produit: stock.produit,
+                        stock_matin: parseFloat(stock.stock_matin) || 0,
+                        stock_soir: parseFloat(stock.stock_soir) || 0,
+                        transfert: parseFloat(stock.transfert) || 0
+                    })),
+                    total_value: totalStockSoir
+                };
+            } catch (stockSoirError) {
             console.log('⚠️ Erreur stock soir global:', stockSoirError.message);
             globalStockSoirMataData = {
-                date: selectedDateStr,
-                entries: [],
-                total_value: 0,
-                error: "Table stock_mata non disponible"
-            };
-        }
+                    date: selectedDateStr,
+                    entries: [],
+                    total_value: 0,
+                    error: "Table stock_mata non disponible"
+                };
+            }
 
         // ===== CALCULS GLOBAUX PL ET SOLDES =====
         
@@ -6031,12 +6031,12 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         } catch (error) {
             console.error('Erreur calcul balance mensuelle:', error);
             // Fallback au calcul simple
-            const totalBalanceQuery = `
-                SELECT SUM(current_balance) as total_balance
-                FROM accounts 
-                WHERE is_active = true
-            `;
-            const totalBalanceResult = await pool.query(totalBalanceQuery);
+        const totalBalanceQuery = `
+            SELECT SUM(current_balance) as total_balance
+            FROM accounts 
+            WHERE is_active = true
+        `;
+        const totalBalanceResult = await pool.query(totalBalanceQuery);
             totalBalance = parseFloat(totalBalanceResult.rows[0]?.total_balance) || 0;
         }
 
@@ -6088,19 +6088,13 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         const monthlyExpensesGlobalResult = await pool.query(monthlyExpensesGlobalQuery, [startOfMonthStr, selectedDateStr]);
         const totalMonthlyExpenses = parseFloat(monthlyExpensesGlobalResult.rows[0]?.total_monthly_expenses) || 0;
 
-        // Calculer Cash Burn depuis lundi (même logique que l'interface)
-        const now = new Date();
-        const monday = new Date(now);
-        monday.setDate(now.getDate() - now.getDay() + 1);
-        const mondayStr = monday.toISOString().split('T')[0];
-        
         const weeklyExpensesQuery = `
             SELECT SUM(total) as total_weekly_expenses
             FROM expenses e
             JOIN accounts a ON e.account_id = a.id
             WHERE a.is_active = true AND e.expense_date >= $1 AND e.expense_date <= $2
         `;
-        const weeklyExpensesResult = await pool.query(weeklyExpensesQuery, [mondayStr, selectedDateStr]);
+        const weeklyExpensesResult = await pool.query(weeklyExpensesQuery, [startOfWeekStr, selectedDateStr]);
         const totalWeeklyExpenses = parseFloat(weeklyExpensesResult.rows[0]?.total_weekly_expenses) || 0;
 
         // Calcul des créances (même logique que l'interface)
@@ -6108,7 +6102,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         try {
             const creancesQuery = `
                 SELECT COALESCE(SUM(co.amount), 0) as creances_mois
-                FROM creance_operations co
+            FROM creance_operations co
                 JOIN creance_clients cc ON co.client_id = cc.id
                 JOIN accounts a ON cc.account_id = a.id
                 WHERE co.operation_type = 'credit'
@@ -6153,14 +6147,14 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             let previousStock = 0;
             const lastDateBeforeCurrentMonth = await pool.query(`
                 SELECT MAX(date_stock) as last_date
-                FROM stock_vivant
+            FROM stock_vivant 
                 WHERE date_stock < $1::date
             `, [firstDayOfCurrentMonth]);
             
             if (lastDateBeforeCurrentMonth.rows[0]?.last_date) {
                 const previousStockResult = await pool.query(`
                     SELECT SUM(quantite * prix_unitaire * (1 - COALESCE(decote, 0))) as total_stock
-                    FROM stock_vivant 
+            FROM stock_vivant 
                     WHERE date_stock = $1
                 `, [lastDateBeforeCurrentMonth.rows[0].last_date]);
                 
@@ -6208,8 +6202,8 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             if (lastDateBeforeCurrentMonth.rows[0]?.last_date) {
                 const previousStockMataResult = await pool.query(`
                     SELECT COALESCE(SUM(stock_soir), 0) as total_stock
-                    FROM stock_mata 
-                    WHERE date = $1
+            FROM stock_mata 
+            WHERE date = $1
                 `, [lastDateBeforeCurrentMonth.rows[0].last_date]);
                 
                 previousStockMata = Math.round(previousStockMataResult.rows[0]?.total_stock || 0);
@@ -6327,7 +6321,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             },
             balances: {
                 balance_du_mois: totalBalance,
-                cash_disponible: totalCreditedGeneral - totalMonthlyExpenses,
+                cash_disponible: totalBalance - totalMonthlyExpenses,
                 cash_burn_du_mois: totalMonthlyExpenses,
                 cash_bictorys_du_mois: cashBictorysValue,
                 cash_burn_depuis_lundi: totalWeeklyExpenses
