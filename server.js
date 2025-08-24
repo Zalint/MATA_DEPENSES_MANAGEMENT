@@ -5921,7 +5921,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     `;
                     const totalDeliveriesResult = await pool.query(totalDeliveriesQuery, [accountId]);
                     const totalDeliveries = parseFloat(totalDeliveriesResult.rows[0]?.total_deliveries) || 0;
-                    const remainingBalance = (parseFloat(partnerAccount.current_balance) || 0) - totalDeliveries;
+                    const remainingBalance = (parseFloat(partnerAccount.total_credited) || 0) - totalDeliveries;
                     
                     globalLivraisonPartenaireData[accountName] = {
                         latest_delivery: latestDeliveryResult.rows[0] ? {
