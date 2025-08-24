@@ -5993,6 +5993,45 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         const totalBalanceResult = await pool.query(totalBalanceQuery);
         const totalBalance = parseFloat(totalBalanceResult.rows[0]?.total_balance) || 0;
 
+        // Récupérer la vraie valeur Cash Bictorys du mois (même logique que l'application)
+        const monthYear = selectedDateStr.substring(0, 7); // Format YYYY-MM
+        const cashBictorysQuery = `
+            SELECT amount
+            FROM cash_bictorys
+            WHERE date = (
+                SELECT MAX(date)
+                FROM cash_bictorys
+                WHERE amount != 0 
+                AND month_year = $1
+                AND date <= $2
+            )
+            AND amount != 0
+            AND month_year = $1
+            AND date <= $2
+        `;
+        const cashBictorysResult = await pool.query(cashBictorysQuery, [monthYear, selectedDateStr]);
+        let cashBictorysValue = 0;
+        
+        if (cashBictorysResult.rows.length > 0) {
+            cashBictorysValue = parseInt(cashBictorysResult.rows[0].amount) || 0;
+        } else {
+            // Si aucune valeur non-nulle trouvée, prendre la dernière valeur (même si 0)
+            const fallbackCashBictorysQuery = `
+                SELECT amount
+                FROM cash_bictorys
+                WHERE date = (
+                    SELECT MAX(date)
+                    FROM cash_bictorys
+                    WHERE month_year = $1
+                    AND date <= $2
+                )
+                AND month_year = $1
+                AND date <= $2
+            `;
+            const fallbackCashBictorysResult = await pool.query(fallbackCashBictorysQuery, [monthYear, selectedDateStr]);
+            cashBictorysValue = fallbackCashBictorysResult.rows.length > 0 ? parseInt(fallbackCashBictorysResult.rows[0].amount) || 0 : 0;
+        }
+
         const monthlyExpensesGlobalQuery = `
             SELECT SUM(total) as total_monthly_expenses
             FROM expenses e
@@ -6055,20 +6094,22 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         // Constantes pour le calcul PL (à ajuster selon les besoins)
         const estimatedMonthlyFixedCharges = 500000; // 500k FCFA estimé
 
-        // Calculs PL
-        const brutPL = totalBalance + totalCreance + totalStockSoir + stockVivantVariation - totalMonthlyExpenses - totalDeliveriesMonth;
-        const estimatedPL = brutPL - estimatedMonthlyFixedCharges;
+        // Calculs PL (même logique que l'interface)
+        const plSansStockCharges = cashBictorysValue + totalCreance + totalStockSoir - totalMonthlyExpenses;
+        const brutPL = plSansStockCharges + stockVivantVariation - totalDeliveriesMonth;
+        const estimatedPL = plSansStockCharges + stockVivantVariation - estimatedMonthlyFixedCharges - totalDeliveriesMonth;
 
         const globalMetrics = {
             profitAndLoss: {
                 brutPL: {
                     value: brutPL,
                     components: {
-                        cash_bictorys: totalBalance,
+                        cash_bictorys: cashBictorysValue,
                         creances: totalCreance,
                         stock_pv: totalStockSoir,
-                        ecart_stock_vivant_mensuel: stockVivantVariation,
                         cash_burn: -totalMonthlyExpenses,
+                        pl_sans_stock_charges: plSansStockCharges,
+                        ecart_stock_vivant_mensuel: stockVivantVariation,
                         livraisons_partenaire: -totalDeliveriesMonth
                     }
                 },
@@ -6085,7 +6126,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 balance_du_mois: totalBalance,
                 cash_disponible: totalBalance - totalMonthlyExpenses,
                 cash_burn_du_mois: totalMonthlyExpenses,
-                cash_bictorys_du_mois: totalBalance,
+                cash_bictorys_du_mois: cashBictorysValue,
                 cash_burn_depuis_lundi: totalWeeklyExpenses
             }
         };
