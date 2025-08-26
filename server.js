@@ -5703,6 +5703,8 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
 
         // ===== STOCK VIVANT GLOBAL =====
         let globalStockVivantData = {
+            date: selectedDateStr,
+            latest_date_update: null,
             latest_entries: [],
             delta: {
                 previous_date: null,
@@ -5799,14 +5801,14 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 }));
                 
                 globalStockVivantData = {
+                    latest_date_update: currentDate.toISOString().split('T')[0],
                     latest_entries: latestEntriesResult.rows.map(stock => ({
                         date: stock.date_stock,
                         category: stock.categorie,
                         product: stock.produit,
                         quantity: parseInt(stock.quantite) || 0,
                         unit_price: parseFloat(stock.prix_unitaire) || 0,
-                        total: parseFloat(stock.total) || 0,
-                        comment: stock.commentaire
+                        total: parseFloat(stock.total) || 0
                     })),
                     delta: {
                         previous_date: previousDate,
@@ -5839,14 +5841,14 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 const currentTotal = parseFloat(currentTotalResult.rows[0]?.total_current) || 0;
                 
                 globalStockVivantData = {
+                    latest_date_update: currentDate.toISOString().split('T')[0],
                     latest_entries: latestEntriesResult.rows.map(stock => ({
                         date: stock.date_stock,
                         category: stock.categorie,
                         product: stock.produit,
                         quantity: parseInt(stock.quantite) || 0,
                         unit_price: parseFloat(stock.prix_unitaire) || 0,
-                        total: parseFloat(stock.total) || 0,
-                        comment: stock.commentaire
+                        total: parseFloat(stock.total) || 0
                     })),
                     delta: {
                         previous_date: null,
@@ -5862,6 +5864,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             } catch (stockError) {
             console.log('⚠️ Erreur stock vivant global:', stockError.message);
             globalStockVivantData = {
+                    latest_date_update: null,
                     latest_entries: [],
                 delta: {
                     previous_date: null,
@@ -5877,7 +5880,9 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             }
 
         // ===== LIVRAISON PARTENAIRE GLOBALE =====
-        let globalLivraisonPartenaireData = {};
+        let globalLivraisonPartenaireData = {
+            latest_delivery_date: null
+        };
 
             try {
                 // Vérifier d'abord si la table existe
@@ -5926,20 +5931,34 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     globalLivraisonPartenaireData[accountName] = {
                         latest_delivery: latestDeliveryResult.rows[0] ? {
                             id: latestDeliveryResult.rows[0].id,
-                            date: latestDeliveryResult.rows[0].delivery_date,
+                            date: latestDeliveryResult.rows[0].delivery_date.toISOString().split('T')[0],
                             amount: parseFloat(latestDeliveryResult.rows[0].amount) || 0,
                             description: latestDeliveryResult.rows[0].description,
                             status: latestDeliveryResult.rows[0].validation_status,
-                            created_at: latestDeliveryResult.rows[0].created_at
+                            created_at: latestDeliveryResult.rows[0].created_at.toISOString()
                         } : null,
                         total_validated_deliveries: totalDeliveries,
                         remaining_balance: remainingBalance
                     };
                 }
+                
+                // Récupérer la date de livraison la plus récente parmi tous les comptes partenaires
+                const globalLatestDeliveryQuery = `
+                    SELECT MAX(delivery_date) as latest_delivery_date
+                    FROM partner_deliveries pd
+                    JOIN accounts a ON pd.account_id = a.id
+                    WHERE a.account_type = 'partenaire' AND a.is_active = true
+                `;
+                const globalLatestDeliveryResult = await pool.query(globalLatestDeliveryQuery);
+                
+                if (globalLatestDeliveryResult.rows[0]?.latest_delivery_date) {
+                    globalLivraisonPartenaireData.latest_delivery_date = globalLatestDeliveryResult.rows[0].latest_delivery_date.toISOString().split('T')[0];
+                }
                 }
             } catch (deliveryError) {
             console.log('⚠️ Erreur livraisons partenaires globales:', deliveryError.message);
             globalLivraisonPartenaireData = {
+                latest_delivery_date: null,
                 error: "Erreur lors de la récupération des livraisons partenaires"
             };
         }
