@@ -2862,9 +2862,8 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                 doc.text(quantity, colPositions[0] + 5, yPos + 10);
                 
                 let designation = expense.designation || 'Dépense';
-                if (expense.subcategory) {
-                    designation = expense.subcategory;
-                }
+                // Utiliser toujours la designation, pas la subcategory
+                // La subcategory est un code technique, pas une description utilisateur
                 doc.text(designation, colPositions[1] + 5, yPos + 10, { width: 200, height: 20 });
                 
                 const unitPrice = expense.unit_price || expense.total || expense.amount || 0;
@@ -3225,9 +3224,8 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
             doc.text(quantity, colPositions[0] + 5, yPos + 10);
             
             let designation = expense.designation || 'Dépense';
-            if (expense.subcategory) {
-                designation = expense.subcategory;
-            }
+            // Utiliser toujours la designation, pas la subcategory
+            // La subcategory est un code technique, pas une description utilisateur
             doc.text(designation, colPositions[1] + 5, yPos + 10, { width: 200, height: 20 });
             
             const unitPrice = expense.unit_price || expense.total || expense.amount || 0;
