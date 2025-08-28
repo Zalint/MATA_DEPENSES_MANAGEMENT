@@ -645,12 +645,11 @@ function calculateTotal() {
     }
 }
 
-// Fonction pour valider le montant par rapport au solde disponible
+// BYPASS TEMPORAIRE - FONCTION DE VALIDATION COMPLÈTEMENT DÉSACTIVÉE
 async function validateExpenseAmount() {
     try {
         const totalField = document.getElementById('expense-total');
-        const amount = parseFloat(totalField.value) || 0;
-        const submitButton = document.getElementById('expense-submit');
+        const submitButton = document.querySelector('#expense-form button[type="submit"]');
         
         // Supprimer l'ancien message d'erreur s'il existe
         let errorDiv = document.getElementById('balance-error');
@@ -658,116 +657,11 @@ async function validateExpenseAmount() {
             errorDiv.remove();
         }
         
-        if (!selectedAccount || amount <= 0) {
-            return;
-        }
+        // BYPASS TEMPORAIRE - TOUTES LES VALIDATIONS DÉSACTIVÉES
+        console.log('✅ BYPASS: Validation de solde désactivée temporairement');
         
-        // Pour les comptes de type statut, pas de validation de solde
-        if (selectedAccount.account_type === 'statut') {
-            submitButton.disabled = false;
-            submitButton.style.opacity = '1';
-            submitButton.style.cursor = 'pointer';
-            return;
-        }
-        
-        // S'assurer que toutes les valeurs numériques sont bien des nombres
-        console.log(`📊 [validateExpenseAmount] Données brutes du compte "${selectedAccount.account_name}":`);
-        console.log(`   🔍 current_balance brut: "${selectedAccount.current_balance}" [type: ${typeof selectedAccount.current_balance}]`);
-        console.log(`   🔍 total_credited brut: "${selectedAccount.total_credited}" [type: ${typeof selectedAccount.total_credited}]`);
-        console.log(`   🔍 total_spent brut: "${selectedAccount.total_spent}" [type: ${typeof selectedAccount.total_spent}]`);
-        
-        const currentBalance = parseFloat(selectedAccount.current_balance) || 0;
-        const totalCredited = parseFloat(selectedAccount.total_credited) || 0;
-        
-        console.log(`📊 [validateExpenseAmount] Données converties du compte:`);
-        console.log(`   💳 Budget total alloué (totalCredited): ${totalCredited.toLocaleString()} FCFA`);
-        console.log(`   💰 Solde actuel disponible: ${currentBalance.toLocaleString()} FCFA`);
-        console.log(`   📋 Type de compte: ${selectedAccount.account_type}`);
-        
-        // Créer le div d'erreur s'il n'existe pas
-        errorDiv = document.createElement('div');
-        errorDiv.id = 'balance-error';
-        errorDiv.style.marginTop = '10px';
-        errorDiv.style.padding = '10px';
-        errorDiv.style.borderRadius = '5px';
-        errorDiv.style.fontSize = '14px';
-        
-        let hasError = false;
-        
-        // Vérifier d'abord le solde disponible
-        if (amount > currentBalance) {
-            console.log(`❌ [validateExpenseAmount] SOLDE INSUFFISANT! Manque ${(amount - currentBalance).toLocaleString()} FCFA`);
-            errorDiv.style.backgroundColor = '#fee';
-            errorDiv.style.color = '#c33';
-            errorDiv.style.border = '1px solid #fcc';
-            errorDiv.innerHTML = `
-                <strong>⚠️ Solde insuffisant!</strong><br>
-                Solde disponible: <strong>${currentBalance.toLocaleString()} FCFA</strong><br>
-                Montant demandé: <strong>${amount.toLocaleString()} FCFA</strong><br>
-                Manque: <strong>${(amount - currentBalance).toLocaleString()} FCFA</strong>
-            `;
-            hasError = true;
-        } else if (totalCredited > 0) {
-            // UTILISER LA VALEUR STOCKÉE EN BASE (synchronisée) au lieu de recalculer
-            const currentTotalSpent = parseFloat(selectedAccount.total_spent) || 0;
-            const newTotalSpent = Number(currentTotalSpent) + Number(amount);
-            
-            console.log(`📈 [validateExpenseAmount] Calcul budgétaire:`);
-            console.log(`   💸 Montant déjà dépensé (currentTotalSpent): ${currentTotalSpent.toLocaleString()} FCFA [type: ${typeof currentTotalSpent}]`);
-            console.log(`   💰 Nouveau montant saisi (amount): ${amount.toLocaleString()} FCFA [type: ${typeof amount}]`);
-            console.log(`   🧮 Total après cette dépense: ${newTotalSpent.toLocaleString()} FCFA [type: ${typeof newTotalSpent}]`);
-            console.log(`   📊 Budget disponible: ${(totalCredited - newTotalSpent).toLocaleString()} FCFA`);
-            
-            if (newTotalSpent > totalCredited) {
-                console.log(`❌ [validateExpenseAmount] BUDGET DÉPASSÉ! Dépassement de ${(newTotalSpent - totalCredited).toLocaleString()} FCFA`);
-                errorDiv.style.backgroundColor = '#fee';
-                errorDiv.style.color = '#c33';
-                errorDiv.style.border = '1px solid #fcc';
-                errorDiv.innerHTML = `
-                    <strong>⚠️ Budget dépassé!</strong><br>
-                    Budget total: <strong>${totalCredited.toLocaleString()} FCFA</strong><br>
-                    Déjà dépensé: <strong>${currentTotalSpent.toLocaleString()} FCFA</strong><br>
-                    Nouveau montant: <strong>${amount.toLocaleString()} FCFA</strong><br>
-                    Total après: <strong>${newTotalSpent.toLocaleString()} FCFA</strong><br>
-                    Dépassement: <strong>${(newTotalSpent - totalCredited).toLocaleString()} FCFA</strong>
-                `;
-                hasError = true;
-            } else {
-                // Seulement si pas de dépassement, afficher le message de budget OK
-                const remainingBudget = totalCredited - newTotalSpent;
-                const percentageUsed = (newTotalSpent / totalCredited) * 100;
-                
-                if (percentageUsed >= 80) {
-                    console.log(`⚡ [validateExpenseAmount] ATTENTION! Utilisation de ${percentageUsed.toFixed(1)}% du budget`);
-                    errorDiv.style.backgroundColor = '#fff3cd';
-                    errorDiv.style.color = '#856404';
-                    errorDiv.style.border = '1px solid #ffeaa7';
-                    errorDiv.innerHTML = `
-                        <strong>⚡ Attention!</strong> Vous utilisez ${percentageUsed.toFixed(1)}% de votre budget.<br>
-                        Budget restant après cette dépense: <strong>${remainingBudget.toLocaleString()} FCFA</strong>
-                    `;
-                } else {
-                    console.log(`✅ [validateExpenseAmount] BUDGET OK! ${percentageUsed.toFixed(1)}% du budget utilisé`);
-                    errorDiv.style.backgroundColor = '#d4edda';
-                    errorDiv.style.color = '#155724';
-                    errorDiv.style.border = '1px solid #c3e6cb';
-                    errorDiv.innerHTML = `
-                        <strong>✓ Budget OK</strong><br>
-                        Budget restant après cette dépense: <strong>${remainingBudget.toLocaleString()} FCFA</strong>
-                    `;
-                }
-            }
-        }
-        
-        // Ajouter le div après le champ total
-        totalField.parentNode.appendChild(errorDiv);
-        
-        // Désactiver/activer le bouton de soumission selon la présence d'erreur
-        if (hasError) {
-            submitButton.disabled = true;
-            submitButton.style.opacity = '0.5';
-            submitButton.style.cursor = 'not-allowed';
-        } else {
+        // Activer le bouton sans condition (avec vérification de sécurité)
+        if (submitButton) {
             submitButton.disabled = false;
             submitButton.style.opacity = '1';
             submitButton.style.cursor = 'pointer';
@@ -5116,11 +5010,13 @@ function calculateEditTotal() {
         totalField.value = total;
     }
     
-    // Désactiver le bouton si le total est 0 ou invalide
+    // Désactiver le bouton si le total est 0 ou invalide (avec vérification de sécurité)
     const currentTotal = parseFloat(totalField.value) || 0;
     if (currentTotal <= 0) {
-        submitButton.disabled = true;
-        submitButton.style.opacity = '0.5';
+        if (submitButton) {
+            submitButton.disabled = true;
+            submitButton.style.opacity = '0.5';
+        }
         
         // Afficher un message d'erreur
         let errorDiv = document.getElementById('edit-total-error');
@@ -5133,8 +5029,10 @@ function calculateEditTotal() {
         }
         errorDiv.textContent = 'Le montant total doit être supérieur à zéro';
     } else {
-        submitButton.disabled = false;
-        submitButton.style.opacity = '1';
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.style.opacity = '1';
+        }
         
         // Supprimer le message d'erreur s'il existe
         const errorDiv = document.getElementById('edit-total-error');
@@ -5148,6 +5046,7 @@ function calculateEditTotal() {
 }
 
 // Fonction pour valider le montant lors de l'édition
+// BYPASS TEMPORAIRE - FONCTION DE VALIDATION D'ÉDITION COMPLÈTEMENT DÉSACTIVÉE
 async function validateEditExpenseAmount() {
     try {
         const accountSelect = document.getElementById('edit-expense-account');
@@ -5174,6 +5073,8 @@ async function validateEditExpenseAmount() {
             return;
         }
         
+        // BYPASS TEMPORAIRE - TOUTE LA LOGIQUE DE VALIDATION DÉSACTIVÉE
+        /*
         // Récupérer les informations du compte
         const response = await fetch('/api/accounts');
         const accounts = await response.json();
@@ -5199,7 +5100,10 @@ async function validateEditExpenseAmount() {
         errorDiv.style.fontSize = '14px';
         
         let hasError = false;
+        */
         
+        // BYPASS TEMPORAIRE - VÉRIFICATION DE SOLDE POUR ÉDITION DÉSACTIVÉE
+        /*
         // Si on augmente le montant, vérifier le solde
         if (difference > 0 && difference > currentBalance) {
             errorDiv.style.backgroundColor = '#fee';
@@ -5212,7 +5116,9 @@ async function validateEditExpenseAmount() {
                 Manque: <strong>${(difference - currentBalance).toLocaleString()} FCFA</strong>
             `;
             hasError = true;
-        } else if (totalCredited > 0) {
+        } else
+        */
+        if (totalCredited > 0) {
             // Calculer les dépenses existantes (excluant la dépense en cours d'édition)
             const expensesResponse = await fetch(`/api/accounts/${selectedAccount.account_name}/expenses`);
             const expensesData = await expensesResponse.json();
@@ -5259,6 +5165,8 @@ async function validateEditExpenseAmount() {
             }
         }
         
+        // BYPASS TEMPORAIRE - BOUTON TOUJOURS ACTIVÉ
+        /*
         // Ajouter le div après le champ total
         totalField.parentNode.appendChild(errorDiv);
         
@@ -5272,6 +5180,12 @@ async function validateEditExpenseAmount() {
             submitButton.style.opacity = '1';
             submitButton.style.cursor = 'pointer';
         }
+        */
+        
+        // BYPASS TEMPORAIRE - BOUTON TOUJOURS ACTIVÉ
+        submitButton.disabled = false;
+        submitButton.style.opacity = '1';
+        submitButton.style.cursor = 'pointer';
         
     } catch (error) {
         console.error('Erreur validation solde modification:', error);
@@ -8129,12 +8043,15 @@ async function handleTransfertSubmit(e) {
     const destOpt = form['transfert-destination'].options[form['transfert-destination'].selectedIndex];
     const solde = parseInt(sourceOpt.dataset.solde) || 0;
     console.log('[Transfert] Solde source affiché:', solde);
+    // BYPASS TEMPORAIRE - VÉRIFICATION DE SOLDE POUR TRANSFERTS DÉSACTIVÉE
+    /*
     if (montant > solde) {
         notif.textContent = 'Le montant dépasse le solde disponible.';
         notif.className = 'notification error';
         notif.style.display = 'block';
         return;
     }
+    */
     
     // Pop-up de confirmation
     const sourceAccountName = sourceOpt.textContent.split(' (')[0];
@@ -12454,119 +12371,24 @@ function populateExpenseConfirmationSummary() {
         fileRow.style.display = 'none';
     }
 }
+// BYPASS TEMPORAIRE - FONCTION DE VALIDATION BUDGET DANS MODAL COMPLÈTEMENT DÉSACTIVÉE
 async function displayBudgetValidationInModal() {
     try {
         const budgetContainer = document.getElementById('budget-validation');
-        budgetContainer.innerHTML = '';
+        const confirmBtn = document.getElementById('confirm-expense-btn');
         
-        if (!window.pendingExpenseFormData) return;
+        // BYPASS TEMPORAIRE - TOUTE LA VALIDATION DÉSACTIVÉE
+        console.log('✅ BYPASS: Validation budget dans modal désactivée temporairement');
         
-        const accountId = window.pendingExpenseFormData.get('account_id');
-        const amount = parseInt(window.pendingExpenseFormData.get('total')) || 0;
-        
-        if (!accountId || amount <= 0) return;
-        
-        // Récupérer les informations du compte
-        const accountsResponse = await fetch('/api/accounts');
-        const accounts = await accountsResponse.json();
-        const selectedAccount = accounts.find(acc => acc.id.toString() === accountId);
-        
-        if (!selectedAccount) {
-            console.warn('Compte non trouvé pour la validation');
-            return;
-        }
-        
-        // Pour les comptes de type statut, pas de validation - toujours autoriser
-        if (selectedAccount.account_type === 'statut') {
-            const confirmBtn = document.getElementById('confirm-expense-btn');
-            confirmBtn.disabled = false;
-            confirmBtn.style.opacity = '1';
-            confirmBtn.style.cursor = 'pointer';
-            
-            budgetContainer.className = 'budget-validation budget-ok';
-            budgetContainer.innerHTML = `
-                <strong>✓ Compte statut - Validation désactivée</strong><br>
-                Les comptes de type statut peuvent avoir un solde négatif.
-            `;
-            return;
-        }
-        
-        const balance = {
-            current_balance: selectedAccount.current_balance,
-            total_credited: selectedAccount.total_credited,
-            total_spent: selectedAccount.total_spent
-        };
-        
-        // Calculer les nouveaux totaux
-        const currentBalance = parseFloat(balance.current_balance) || 0;
-        const totalCredited = parseFloat(balance.total_credited) || 0;
-        const currentTotalSpent = parseFloat(balance.total_spent) || 0;
-        const newTotalSpent = currentTotalSpent + amount;
-        
-        let validationClass = 'budget-ok';
-        let validationIcon = '✓';
-        let validationTitle = 'Budget validé';
-        let validationMessage = '';
-        
-        // Vérifier le solde disponible
-        if (currentBalance < amount) {
-            validationClass = 'budget-error';
-            validationIcon = '❌';
-            validationTitle = 'Solde insuffisant';
-            validationMessage = `
-                Solde disponible: <strong>${formatCurrency(currentBalance)}</strong><br>
-                Montant demandé: <strong>${formatCurrency(amount)}</strong><br>
-                Déficit: <strong>${formatCurrency(amount - currentBalance)}</strong>
-            `;
-        }
-        // Vérifier le dépassement du budget total
-        else if (totalCredited > 0 && newTotalSpent > totalCredited) {
-            validationClass = 'budget-error';
-            validationIcon = '❌';
-            validationTitle = 'Dépassement du budget';
-            validationMessage = `
-                Budget total: <strong>${formatCurrency(totalCredited)}</strong><br>
-                Déjà dépensé: <strong>${formatCurrency(currentTotalSpent)}</strong><br>
-                Nouveau total après: <strong>${formatCurrency(newTotalSpent)}</strong><br>
-                Dépassement: <strong>${formatCurrency(newTotalSpent - totalCredited)}</strong>
-            `;
-        }
-        // Avertissement si proche de la limite
-        else {
-            const remainingBudget = totalCredited - newTotalSpent;
-            const percentageUsed = totalCredited > 0 ? (newTotalSpent / totalCredited) * 100 : 0;
-            
-            if (totalCredited > 0 && percentageUsed >= 80) {
-                validationClass = 'budget-warning';
-                validationIcon = '⚡';
-                validationTitle = 'Attention - Budget élevé';
-                validationMessage = `
-                    Utilisation du budget: <strong>${percentageUsed.toFixed(1)}%</strong><br>
-                    Budget restant après: <strong>${formatCurrency(remainingBudget)}</strong>
-                `;
-            } else {
-                validationMessage = totalCredited > 0 ? `
-                    Budget restant après: <strong>${formatCurrency(remainingBudget)}</strong><br>
-                    Utilisation: <strong>${percentageUsed.toFixed(1)}%</strong>
-                ` : `
-                    Solde disponible: <strong>${formatCurrency(currentBalance)}</strong>
-                `;
-            }
-        }
-        
-        budgetContainer.className = `budget-validation ${validationClass}`;
+        // Toujours afficher un message positif
+        budgetContainer.className = 'budget-validation budget-ok';
         budgetContainer.innerHTML = `
-            <strong>${validationIcon} ${validationTitle}</strong><br>
-            ${validationMessage}
+            <strong>✅ Validation temporairement désactivée</strong><br>
+            Vous pouvez procéder à l'ajout de cette dépense.
         `;
         
-        // Désactiver le bouton de confirmation si erreur
-        const confirmBtn = document.getElementById('confirm-expense-btn');
-        if (validationClass === 'budget-error') {
-            confirmBtn.disabled = true;
-            confirmBtn.style.opacity = '0.5';
-            confirmBtn.style.cursor = 'not-allowed';
-        } else {
+        // Toujours activer le bouton de confirmation
+        if (confirmBtn) {
             confirmBtn.disabled = false;
             confirmBtn.style.opacity = '1';
             confirmBtn.style.cursor = 'pointer';

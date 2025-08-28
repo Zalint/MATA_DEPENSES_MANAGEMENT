@@ -472,13 +472,18 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
             console.log('  - Montant demandé:', finalAmount);
             
             const currentBalance = account.current_balance;
+            // BYPASS TEMPORAIRE - VÉRIFICATION DE SOLDE DÉSACTIVÉE
+            /*
             if (currentBalance < finalAmount) {
                 console.log('❌ ERREUR 400: Solde insuffisant');
                 return res.status(400).json({ 
                     error: `Solde insuffisant. Solde disponible: ${currentBalance.toLocaleString()} FCFA, Montant demandé: ${finalAmount.toLocaleString()} FCFA` 
                 });
             }
+            */
             
+            // BYPASS TEMPORAIRE - VÉRIFICATION DU BUDGET TOTAL DÉSACTIVÉE
+            /*
             // Vérification supplémentaire : le total des dépenses ne doit pas dépasser le total crédité
             if (account.total_credited > 0) {
                 console.log('💳 Vérification du budget total crédité');
@@ -501,6 +506,7 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
                     });
                 }
             }
+            */
         }
         
         console.log('🚀 Début de la transaction pour ajouter la dépense');
@@ -2351,6 +2357,8 @@ app.post('/api/admin/adjustment-expense', requireAdminAuth, async (req, res) => 
             return res.status(400).json({ error: 'Le montant doit être positif' });
         }
         
+        await pool.query('BEGIN');
+        
         // Vérifier si le compte Ajustement existe
         let adjustmentAccount = await pool.query(`
             SELECT id FROM accounts WHERE account_name = 'Ajustement'
@@ -2405,6 +2413,8 @@ app.post('/api/admin/adjustment-expense', requireAdminAuth, async (req, res) => 
         
         console.log(`Ajustement créé: ${adjustment_amount} FCFA - ${adjustment_comment}`);
         
+        await pool.query('COMMIT');
+        
         res.json({
             success: true,
             message: 'Ajustement comptable créé avec succès',
@@ -2414,6 +2424,7 @@ app.post('/api/admin/adjustment-expense', requireAdminAuth, async (req, res) => 
         });
         
     } catch (error) {
+        await pool.query('ROLLBACK');
         console.error('Erreur création ajustement:', error);
         res.status(500).json({ error: 'Erreur serveur lors de la création de l\'ajustement' });
     }
@@ -7572,9 +7583,12 @@ app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
         if (!source.is_active || !dest.is_active || !allowedTypes.includes(source.account_type) || !allowedTypes.includes(dest.account_type)) {
             return res.status(400).json({ error: 'Type ou statut de compte non autorisé' });
         }
+        // BYPASS TEMPORAIRE - VÉRIFICATION DE SOLDE POUR TRANSFERTS DÉSACTIVÉE
+        /*
         if (source.current_balance < montantInt) {
             return res.status(400).json({ error: 'Solde insuffisant sur le compte source' });
         }
+        */
         // Début transaction
         await pool.query('BEGIN');
         // Débiter le compte source
