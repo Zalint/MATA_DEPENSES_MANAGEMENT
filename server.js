@@ -625,20 +625,244 @@ app.get('/api/accounts/for-credit', requireAdminAuth, async (req, res) => {
     }
 });
 
-// Route pour l'historique des crédits
+// Route pour l'historique des crédits avec pagination et filtres
 app.get('/api/credit-history', requireAdminAuth, async (req, res) => {
     try {
-        const result = await pool.query(`
-            SELECT ch.*, u.username as user_name, ub.username as credited_by_name, a.account_name
-            FROM credit_history ch
-            JOIN accounts a ON ch.account_id = a.id
-            JOIN users u ON a.user_id = u.id
-            JOIN users ub ON ch.credited_by = ub.id
-            ORDER BY ch.created_at DESC
-        `);
-        res.json(result.rows);
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 50;
+        const offset = (page - 1) * limit;
+        const accountFilter = req.query.account || '';
+        const typeFilter = req.query.type || '';
+        
+        console.log('🔍 API: Filtres reçus:', { accountFilter, typeFilter, page, limit, offset });
+        
+        // Requête simple avec filtres
+        let whereConditions = [];
+        let queryParams = [];
+        let paramIndex = 1;
+        
+        if (accountFilter) {
+            whereConditions.push(`account_name = $${paramIndex++}`);
+            queryParams.push(accountFilter);
+        }
+        
+        if (typeFilter) {
+            whereConditions.push(`type_operation = $${paramIndex++}`);
+            queryParams.push(typeFilter);
+        }
+        
+        const whereClause = whereConditions.length > 0 ? 'WHERE ' + whereConditions.join(' AND ') : '';
+        
+        // Requête unifiée simple
+        const query = `
+            SELECT 
+                id, created_at, amount, description, account_name, credited_by_name,
+                source_table, type_operation, account_id
+            FROM (
+                SELECT 
+                    ch.id, ch.created_at, ch.amount, ch.description,
+                    a.account_name, u.full_name as credited_by_name,
+                    'credit_history' as source_table, 'CRÉDIT RÉGULIER' as type_operation,
+                    ch.account_id
+                FROM credit_history ch
+                JOIN accounts a ON ch.account_id = a.id
+                JOIN users u ON ch.credited_by = u.id
+                
+                UNION ALL
+                
+                SELECT 
+                    sch.id, sch.created_at, sch.amount, sch.comment as description,
+                    a.account_name, u.full_name as credited_by_name,
+                    'special_credit_history' as source_table,
+                    CASE WHEN sch.is_balance_override THEN 'CRÉDIT STATUT' ELSE 'CRÉDIT SPÉCIAL' END as type_operation,
+                    sch.account_id
+                FROM special_credit_history sch
+                JOIN accounts a ON sch.account_id = a.id
+                JOIN users u ON sch.credited_by = u.id
+                
+                UNION ALL
+                
+                SELECT 
+                    co.id, co.created_at, co.amount, co.description,
+                    a.account_name, u.full_name as credited_by_name,
+                    'creance_operations' as source_table,
+                    CASE WHEN co.operation_type = 'credit' THEN 'CRÉDIT CRÉANCE' ELSE 'DÉBIT CRÉANCE' END as type_operation,
+                    cc.account_id
+                FROM creance_operations co
+                JOIN creance_clients cc ON co.client_id = cc.id
+                JOIN accounts a ON cc.account_id = a.id
+                JOIN users u ON co.created_by = u.id
+                WHERE co.operation_type = 'credit'
+            ) all_credits
+            ${whereClause}
+            ORDER BY created_at DESC
+            LIMIT $${paramIndex++} OFFSET $${paramIndex}
+        `;
+        
+        const finalParams = [...queryParams, limit, offset];
+        console.log('🔍 API: Requête finale:', query);
+        console.log('🔍 API: Paramètres:', finalParams);
+        
+        const result = await pool.query(query, finalParams);
+        
+        res.json({
+            credits: result.rows,
+            pagination: {
+                page,
+                limit,
+                total: result.rows.length, // Simplifié pour l'instant
+                totalPages: Math.ceil(result.rows.length / limit),
+                hasNext: result.rows.length === limit,
+                hasPrev: page > 1
+            }
+        });
     } catch (error) {
         console.error('Erreur récupération historique crédits:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour supprimer un crédit
+app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
+    try {
+        const creditId = req.params.id;
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+
+        if (!['admin', 'directeur_general', 'pca'].includes(userRole)) {
+            return res.status(403).json({ error: 'Accès non autorisé' });
+        }
+
+        console.log(`🔍 API: Suppression du crédit ${creditId} par ${req.session.user.username}`);
+
+        // Chercher le crédit dans les trois tables
+        let credit = null;
+        let accountId = null;
+        let sourceTable = null;
+
+        // Chercher dans credit_history
+        const creditHistoryResult = await pool.query(
+            'SELECT ch.*, a.account_name FROM credit_history ch JOIN accounts a ON ch.account_id = a.id WHERE ch.id = $1',
+            [creditId]
+        );
+        if (creditHistoryResult.rows.length > 0) {
+            credit = creditHistoryResult.rows[0];
+            accountId = credit.account_id;
+            sourceTable = 'credit_history';
+        }
+
+        // Chercher dans special_credit_history
+        if (!credit) {
+            const specialCreditResult = await pool.query(
+                'SELECT sch.*, a.account_name FROM special_credit_history sch JOIN accounts a ON sch.account_id = a.id WHERE sch.id = $1',
+                [creditId]
+            );
+            if (specialCreditResult.rows.length > 0) {
+                credit = specialCreditResult.rows[0];
+                accountId = credit.account_id;
+                sourceTable = 'special_credit_history';
+            }
+        }
+
+        // Chercher dans creance_operations
+        if (!credit) {
+            const creanceResult = await pool.query(
+                `SELECT co.*, a.account_name, cc.account_id
+                 FROM creance_operations co
+                 JOIN creance_clients cc ON co.client_id = cc.id
+                 JOIN accounts a ON cc.account_id = a.id
+                 WHERE co.id = $1 AND co.operation_type = 'credit'`,
+                [creditId]
+            );
+            if (creanceResult.rows.length > 0) {
+                credit = creanceResult.rows[0];
+                accountId = credit.account_id;
+                sourceTable = 'creance_operations';
+            }
+        }
+
+        if (!credit) {
+            return res.status(404).json({ error: 'Crédit non trouvé' });
+        }
+
+        const oldAmount = credit.amount;
+
+        // Démarrer la transaction
+        const client = await pool.connect();
+        
+        try {
+            await client.query('BEGIN');
+
+            // Supprimer le crédit selon sa table source
+            if (sourceTable === 'credit_history') {
+                await client.query('DELETE FROM credit_history WHERE id = $1', [creditId]);
+            } else if (sourceTable === 'special_credit_history') {
+                await client.query('DELETE FROM special_credit_history WHERE id = $1', [creditId]);
+            } else if (sourceTable === 'creance_operations') {
+                await client.query('DELETE FROM creance_operations WHERE id = $1', [creditId]);
+            }
+
+            // Recalculer le solde du compte
+            const accountStats = await client.query(`
+                UPDATE accounts
+                SET
+                    total_credited = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0) +
+                                   COALESCE((SELECT SUM(amount) FROM special_credit_history WHERE account_id = $1), 0),
+                    current_balance = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0) +
+                                    COALESCE((SELECT SUM(amount) FROM special_credit_history WHERE account_id = $1), 0) -
+                                    COALESCE((SELECT SUM(total) FROM expenses WHERE account_id = $1), 0)
+                WHERE id = $1
+                RETURNING account_name, current_balance, total_credited
+            `, [accountId]);
+
+            await client.query('COMMIT');
+
+            console.log(`✅ API: Crédit ${creditId} supprimé par ${req.session.user.username}: ${formatCurrency(oldAmount)}`);
+
+            res.json({
+                success: true,
+                message: `Crédit supprimé avec succès: ${formatCurrency(oldAmount)}`,
+                account: accountStats.rows[0]
+            });
+
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+
+    } catch (error) {
+        console.error('❌ Erreur suppression crédit:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+    }
+});
+
+// Route pour récupérer la liste des comptes pour le filtre
+app.get('/api/credit-accounts', requireAdminAuth, async (req, res) => {
+    try {
+        console.log('🔍 API: Récupération des comptes avec crédits...');
+        
+        const result = await pool.query(`
+            SELECT DISTINCT a.account_name, a.id
+            FROM accounts a
+            WHERE a.is_active = true 
+            AND (
+                EXISTS (SELECT 1 FROM credit_history ch WHERE ch.account_id = a.id)
+                OR EXISTS (SELECT 1 FROM special_credit_history sch WHERE sch.account_id = a.id)
+                OR EXISTS (
+                    SELECT 1 FROM creance_operations co 
+                    JOIN creance_clients cc ON co.client_id = cc.id 
+                    WHERE cc.account_id = a.id AND co.operation_type = 'credit'
+                )
+            )
+            ORDER BY a.account_name
+        `);
+        
+        const accounts = result.rows.map(row => row.account_name);
+        console.log(`✅ API: ${accounts.length} comptes trouvés:`, accounts);
+        
+        res.json(accounts);
+    } catch (error) {
+        console.error('❌ Erreur récupération comptes crédit:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
@@ -3634,6 +3858,129 @@ app.delete('/api/expenses/:id', requireAuth, async (req, res) => {
     }
 });
 
+// Route pour modifier un crédit (admin/DG/PCA seulement)
+app.put('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
+    try {
+        const creditId = req.params.id;
+        const { amount, description, source_table } = req.body;
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+        
+        // Vérifier les permissions
+        if (!['admin', 'directeur_general', 'pca'].includes(userRole)) {
+            return res.status(403).json({ error: 'Accès non autorisé' });
+        }
+        
+        // Vérifier que le crédit existe
+        let existingCredit;
+        let accountId;
+        
+        if (source_table === 'credit_history') {
+            const result = await pool.query(
+                'SELECT ch.*, a.account_name FROM credit_history ch JOIN accounts a ON ch.account_id = a.id WHERE ch.id = $1',
+                [creditId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Crédit non trouvé' });
+            }
+            existingCredit = result.rows[0];
+            accountId = existingCredit.account_id;
+        } else if (source_table === 'special_credit_history') {
+            const result = await pool.query(
+                'SELECT sch.*, a.account_name FROM special_credit_history sch JOIN accounts a ON sch.account_id = a.id WHERE sch.id = $1',
+                [creditId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Crédit non trouvé' });
+            }
+            existingCredit = result.rows[0];
+            accountId = existingCredit.account_id;
+        } else if (source_table === 'creance_operations') {
+            const result = await pool.query(
+                `SELECT co.*, a.account_name, cc.account_id 
+                 FROM creance_operations co 
+                 JOIN creance_clients cc ON co.client_id = cc.id 
+                 JOIN accounts a ON cc.account_id = a.id 
+                 WHERE co.id = $1 AND co.operation_type = 'credit'`,
+                [creditId]
+            );
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Crédit non trouvé' });
+            }
+            existingCredit = result.rows[0];
+            accountId = existingCredit.account_id;
+        } else {
+            return res.status(400).json({ error: 'Type de crédit invalide' });
+        }
+        
+        const oldAmount = existingCredit.amount;
+        const newAmount = parseInt(amount);
+        
+        if (isNaN(newAmount) || newAmount <= 0) {
+            return res.status(400).json({ error: 'Montant invalide' });
+        }
+        
+        await pool.query('BEGIN');
+        
+        try {
+            // Mettre à jour le crédit selon sa table source
+            if (source_table === 'credit_history') {
+                await pool.query(
+                    'UPDATE credit_history SET amount = $1, description = $2 WHERE id = $3',
+                    [newAmount, description || existingCredit.description, creditId]
+                );
+            } else if (source_table === 'special_credit_history') {
+                await pool.query(
+                    'UPDATE special_credit_history SET amount = $1, comment = $2 WHERE id = $3',
+                    [newAmount, description || existingCredit.comment, creditId]
+                );
+            } else if (source_table === 'creance_operations') {
+                await pool.query(
+                    'UPDATE creance_operations SET amount = $1, description = $2 WHERE id = $3',
+                    [newAmount, description || existingCredit.description, creditId]
+                );
+            }
+            
+            // Recalculer le solde du compte
+            const accountStats = await pool.query(`
+                UPDATE accounts 
+                SET 
+                    total_credited = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0) +
+                                   COALESCE((SELECT SUM(amount) FROM special_credit_history WHERE account_id = $1), 0),
+                    current_balance = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0) +
+                                    COALESCE((SELECT SUM(amount) FROM special_credit_history WHERE account_id = $1), 0) -
+                                    COALESCE((SELECT SUM(total) FROM expenses WHERE account_id = $1), 0)
+                WHERE id = $1
+                RETURNING account_name, current_balance, total_credited
+            `, [accountId]);
+            
+            await pool.query('COMMIT');
+            
+            console.log(`[Admin] Crédit ${creditId} modifié par ${req.session.user.username}: ${oldAmount} → ${newAmount}`);
+            
+            res.json({ 
+                success: true, 
+                message: `Crédit modifié avec succès: ${formatCurrency(oldAmount)} → ${formatCurrency(newAmount)}`,
+                account: accountStats.rows[0],
+                credit: {
+                    id: creditId,
+                    amount: newAmount,
+                    description: description || existingCredit.description,
+                    account_name: existingCredit.account_name
+                }
+            });
+            
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+        
+    } catch (error) {
+        console.error('Erreur modification crédit:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la modification' });
+    }
+});
+
 // Route pour supprimer un crédit (pour admin/DG/PCA)
 app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
     try {
@@ -3658,15 +4005,17 @@ app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
             return res.status(403).json({ error: 'Accès non autorisé' });
         }
         
-        // Supprimer le crédit et mettre à jour le solde du compte
-        await pool.query('BEGIN');
+        // Démarrer la transaction avec un client dédié
+        const client = await pool.connect();
         
         try {
+            await client.query('BEGIN');
+
             // Supprimer le crédit
-            await pool.query('DELETE FROM credit_history WHERE id = $1', [creditId]);
+            await client.query('DELETE FROM credit_history WHERE id = $1', [creditId]);
             
             // Recalculer le total crédité et le solde du compte
-            const accountStats = await pool.query(`
+            const accountStats = await client.query(`
                 UPDATE accounts 
                 SET 
                     total_credited = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0),
@@ -3676,7 +4025,7 @@ app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
                 RETURNING account_name, current_balance, total_credited
             `, [credit.account_id]);
             
-            await pool.query('COMMIT');
+            await client.query('COMMIT');
             
             console.log(`[Admin] Crédit ${creditId} supprimé par ${req.session.user.username}`);
             
@@ -3687,8 +4036,10 @@ app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
             });
             
         } catch (error) {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             throw error;
+        } finally {
+            client.release();
         }
         
     } catch (error) {
@@ -3737,15 +4088,17 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
             return res.status(403).json({ error: 'Accès non autorisé' });
         }
         
-        // Supprimer le crédit et mettre à jour le solde du compte
-        await pool.query('BEGIN');
+        // Démarrer la transaction avec un client dédié
+        const client = await pool.connect();
         
         try {
+            await client.query('BEGIN');
+
             // Supprimer le crédit
-            await pool.query('DELETE FROM special_credit_history WHERE id = $1', [creditId]);
+            await client.query('DELETE FROM special_credit_history WHERE id = $1', [creditId]);
             
             // Recalculer le solde du compte en prenant en compte tous les types de crédits
-            const accountStats = await pool.query(`
+            const accountStats = await client.query(`
                 UPDATE accounts 
                 SET 
                     total_credited = COALESCE((SELECT SUM(amount) FROM credit_history WHERE account_id = $1), 0) +
@@ -3757,7 +4110,7 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
                 RETURNING account_name, current_balance, total_credited
             `, [credit.account_id]);
             
-            await pool.query('COMMIT');
+            await client.query('COMMIT');
             
             console.log(`[Directeur] Crédit ${creditId} supprimé par ${req.session.user.username}`);
             
@@ -3768,8 +4121,10 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
             });
             
         } catch (error) {
-            await pool.query('ROLLBACK');
+            await client.query('ROLLBACK');
             throw error;
+        } finally {
+            client.release();
         }
         
     } catch (error) {

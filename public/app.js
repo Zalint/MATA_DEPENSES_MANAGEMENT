@@ -438,6 +438,14 @@ async function loadInitialData() {
     initTransfertModule();
     await initDirectorCreditModule();
     await initAuditFluxModule();
+    
+    // Initialiser les event listeners pour les filtres de crédit
+    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+        setupCreditFiltersEventListeners();
+        // Charger les comptes pour le filtre immédiatement
+        await loadCreditAccounts();
+    }
+    
     // Stock vivant sera initialisé seulement quand on clique sur le menu
     console.log('ℹ️ CLIENT: Stock vivant sera initialisé à la demande');
 }
@@ -3324,6 +3332,8 @@ async function deleteAccount(accountId) {
             await loadUsersWithoutAccount();
             if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
                 await loadAccountsForCredit();
+                console.log('🔍 CLIENT: Chargement des comptes pour le filtre...');
+                await loadCreditAccounts(); // Charger les comptes pour le filtre
                 await loadCreditHistory();
             }
         } else {
@@ -3336,12 +3346,55 @@ async function deleteAccount(accountId) {
 }
 
 // Fonction pour charger l'historique des crédits
-async function loadCreditHistory() {
+// Variables globales pour la pagination et les filtres
+let currentCreditPage = 1;
+let creditPagination = null;
+let creditFilters = {
+    account: '',
+    type: ''
+};
+
+async function loadCreditHistory(page = 1) {
     try {
-        const response = await fetch('/api/credit-history');
-        const credits = await response.json();
+        // Construire les paramètres de requête avec les filtres
+        const params = new URLSearchParams({
+            page: page,
+            limit: 50
+        });
         
-        displayCreditHistory(credits);
+        if (creditFilters.account) {
+            params.append('account', creditFilters.account);
+        }
+        if (creditFilters.type) {
+            params.append('type', creditFilters.type);
+        }
+        
+        console.log('🔍 CLIENT: Envoi de la requête avec params:', params.toString());
+        const response = await fetch(`/api/credit-history?${params.toString()}`, {
+            credentials: 'include' // S'assurer que les cookies sont envoyés
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`HTTP ${response.status}: ${errorData.error || 'Erreur serveur'}`);
+        }
+        
+        const data = await response.json();
+        console.log('🔍 CLIENT: Données reçues:', data);
+        
+        if (data.credits && Array.isArray(data.credits)) {
+            // Nouveau format avec pagination
+            displayCreditHistory(data.credits);
+            creditPagination = data.pagination;
+            currentCreditPage = page;
+            displayCreditPagination();
+        } else if (Array.isArray(data)) {
+            // Ancien format (rétrocompatibilité)
+            displayCreditHistory(data);
+        } else {
+            console.error('❌ CLIENT: Format de données invalide:', data);
+            throw new Error('Format de données invalide');
+        }
         
     } catch (error) {
         console.error('Erreur chargement historique crédits:', error);
@@ -3353,92 +3406,375 @@ function displayCreditHistory(credits) {
     tbody.innerHTML = '';
     
     if (credits.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center;">Aucun crédit trouvé</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Aucun crédit trouvé</td></tr>';
         return;
     }
     
     credits.forEach(credit => {
         const row = document.createElement('tr');
         
-        // Générer le bouton de suppression selon les permissions
-        const deleteButton = generateCreditDeleteButton(credit);
+        // Générer les boutons d'action selon les permissions
+        const actionButtons = generateCreditActionButtons(credit);
         
         row.innerHTML = `
             <td>${formatDate(credit.created_at)}</td>
             <td>${credit.account_name}</td>
+            <td><span class="badge badge-${getTypeBadgeClass(credit.type_operation)}">${credit.type_operation}</span></td>
             <td>${formatCurrency(parseInt(credit.amount))}</td>
             <td>${credit.credited_by_name}</td>
-            <td>${credit.description || 'N/A'}</td>
-            <td style="text-align: center;">${deleteButton}</td>
+            <td>${actionButtons}</td><td></td>
+             <td>${credit.description || 'N/A'}</td>
         `;
         tbody.appendChild(row);
     });
 }
 
-// Fonction pour générer le bouton de suppression d'un crédit
-function generateCreditDeleteButton(credit) {
-    let deleteButton = '';
-    
-    // Vérifier les permissions
-    const canDelete = canDeleteCredit(credit);
-    
-    if (canDelete.allowed) {
-        if (canDelete.timeWarning) {
-            // Avertissement - proche de la limite de 24h pour les directeurs
-            deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteCredit(${credit.id})" title="${canDelete.timeWarning}">
-                <i class="fas fa-trash" style="color: #fbbf24;"></i>
-            </button>`;
-        } else {
-            // Suppression normale
-            deleteButton = `<button class="btn btn-sm btn-danger" onclick="deleteCredit(${credit.id})" title="Supprimer ce crédit">
-                <i class="fas fa-trash"></i>
-            </button>`;
-        }
-    } else {
-        // Pas autorisé
-        deleteButton = `<span style="color: #dc3545;" title="${canDelete.reason}"><i class="fas fa-lock"></i></span>`;
+function getTypeBadgeClass(type) {
+    switch (type) {
+        case 'CRÉDIT RÉGULIER': return 'success';
+        case 'CRÉDIT SPÉCIAL': return 'primary';
+        case 'CRÉDIT STATUT': return 'warning';
+        case 'CRÉDIT CRÉANCE': return 'info';
+        default: return 'secondary';
     }
-    
-    return deleteButton;
 }
 
-// Fonction pour vérifier si un crédit peut être supprimé
-function canDeleteCredit(credit) {
-    // Admin, DG, PCA peuvent toujours supprimer
-    if (['admin', 'directeur_general', 'pca'].includes(currentUser.role)) {
-        return { allowed: true };
+function displayCreditPagination() {
+    const paginationContainer = document.getElementById('credit-pagination');
+    if (!paginationContainer || !creditPagination) return;
+    
+    const { page, totalPages, hasNext, hasPrev, total } = creditPagination;
+    
+    let paginationHTML = `
+        <div class="pagination-info">
+            Page ${page} sur ${totalPages} (${total} crédits au total)
+        </div>
+        <div class="pagination-controls">
+    `;
+    
+    if (hasPrev) {
+        paginationHTML += `<button class="btn btn-sm btn-outline-primary" onclick="loadCreditHistory(${page - 1})">
+            <i class="fas fa-chevron-left"></i> Précédent
+        </button>`;
     }
     
-    // Directeurs simples : vérifier s'ils ont les droits de crédit sur ce compte ET dans les 24h
-    if (currentUser.role === 'directeur') {
-        // TODO: Vérifier les permissions de crédit du directeur sur ce compte
-        // Pour l'instant, on vérifie juste les 24h
-        const creditDate = new Date(credit.created_at);
-        const now = new Date();
-        const hoursDifference = (now - creditDate) / (1000 * 60 * 60);
-        
-        if (hoursDifference > 24) {
-            return {
-                allowed: false,
-                reason: `Suppression non autorisée - Plus de 24 heures écoulées (${Math.floor(hoursDifference)}h)`
-            };
+    // Afficher les numéros de page
+    const startPage = Math.max(1, page - 2);
+    const endPage = Math.min(totalPages, page + 2);
+    
+    for (let i = startPage; i <= endPage; i++) {
+        if (i === page) {
+            paginationHTML += `<button class="btn btn-sm btn-primary" disabled>${i}</button>`;
+        } else {
+            paginationHTML += `<button class="btn btn-sm btn-outline-primary" onclick="loadCreditHistory(${i})">${i}</button>`;
         }
-        
-        const remainingHours = 24 - hoursDifference;
-        if (remainingHours <= 12) {
-            return {
-                allowed: true,
-                timeWarning: `⚠️ Il reste ${Math.floor(remainingHours)}h${Math.floor((remainingHours % 1) * 60)}min pour supprimer`
-            };
-        }
-        
-        return { allowed: true };
     }
     
-    return {
-        allowed: false,
-        reason: 'Suppression non autorisée pour votre rôle'
-    };
+    if (hasNext) {
+        paginationHTML += `<button class="btn btn-sm btn-outline-primary" onclick="loadCreditHistory(${page + 1})">
+            Suivant <i class="fas fa-chevron-right"></i>
+        </button>`;
+    }
+    
+    paginationHTML += '</div>';
+    paginationContainer.innerHTML = paginationHTML;
+}
+
+// Fonction pour charger les comptes pour le filtre
+async function loadCreditAccounts() {
+    try {
+        console.log('🔍 CLIENT: Chargement des comptes pour le filtre...');
+        
+        const response = await fetch('/api/credit-accounts');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const accounts = await response.json();
+        console.log('✅ CLIENT: Comptes reçus:', accounts);
+        
+        const select = document.getElementById('credit-account-filter');
+        if (select) {
+            console.log('🔧 CLIENT: Mise à jour du select...');
+            
+            // Garder l'option "Tous les comptes"
+            select.innerHTML = '<option value="">Tous les comptes</option>';
+            
+            // Ajouter les comptes
+            accounts.forEach(account => {
+                const option = document.createElement('option');
+                option.value = account;
+                option.textContent = account;
+                select.appendChild(option);
+            });
+            
+            console.log(`✅ CLIENT: ${accounts.length} comptes ajoutés au filtre`);
+        } else {
+            console.error('❌ CLIENT: Select credit-account-filter non trouvé');
+        }
+    } catch (error) {
+        console.error('❌ CLIENT: Erreur chargement comptes:', error);
+    }
+}
+
+// Fonction pour appliquer les filtres
+function applyCreditFilters() {
+    const accountFilter = document.getElementById('credit-account-filter');
+    const typeFilter = document.getElementById('credit-type-filter');
+    
+    creditFilters.account = accountFilter ? accountFilter.value : '';
+    creditFilters.type = typeFilter ? typeFilter.value : '';
+    
+    // Recharger l'historique avec les filtres
+    loadCreditHistory(1);
+}
+
+// Fonction pour effacer les filtres
+function clearCreditFilters() {
+    const accountFilter = document.getElementById('credit-account-filter');
+    const typeFilter = document.getElementById('credit-type-filter');
+    
+    if (accountFilter) accountFilter.value = '';
+    if (typeFilter) typeFilter.value = '';
+    
+    creditFilters.account = '';
+    creditFilters.type = '';
+    
+    // Recharger l'historique sans filtres
+    loadCreditHistory(1);
+}
+
+// Fonction pour configurer les event listeners des filtres
+function setupCreditFiltersEventListeners() {
+    const accountFilter = document.getElementById('credit-account-filter');
+    const typeFilter = document.getElementById('credit-type-filter');
+    const clearFiltersBtn = document.getElementById('clear-credit-filters');
+    
+    if (accountFilter) {
+        accountFilter.addEventListener('change', applyCreditFilters);
+    }
+    if (typeFilter) {
+        typeFilter.addEventListener('change', applyCreditFilters);
+    }
+    if (clearFiltersBtn) {
+        clearFiltersBtn.addEventListener('click', clearCreditFilters);
+    }
+}
+
+// Fonction pour générer les boutons d'action d'un crédit
+function generateCreditActionButtons(credit) {
+    // FORCER l'affichage des deux boutons pour admin/DG/PCA
+    const buttons = `
+        <button class="btn btn-sm btn-warning me-1" onclick="editCredit(${credit.id}, '${credit.source_table}')" title="Modifier ce crédit" style="display: inline-flex !important;">
+            <i class="fas fa-edit"></i>
+        </button>
+        <button class="btn btn-sm btn-danger ms-1" onclick="deleteCredit(${credit.id})" title="Supprimer ce crédit" style="display: inline-flex !important; background-color: #dc3545 !important; color: white !important;">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
+    
+    return buttons;
+}
+
+
+
+// Fonction pour modifier un crédit
+async function editCredit(creditId, sourceTable) {
+    try {
+        // Récupérer les détails du crédit pour pré-remplir le formulaire
+        const response = await fetch(`/api/credit-history?page=1&limit=1000`);
+        const data = await response.json();
+        const credit = data.credits.find(c => c.id === creditId && c.source_table === sourceTable);
+        
+        if (!credit) {
+            showNotification('Crédit non trouvé', 'error');
+            return;
+        }
+        
+        // Afficher le modal de modification
+        showEditCreditModal(credit);
+        
+    } catch (error) {
+        console.error('Erreur récupération crédit:', error);
+        showNotification('Erreur lors de la récupération du crédit', 'error');
+    }
+}
+
+// Fonction pour afficher le modal de modification
+function showEditCreditModal(credit) {
+    const modal = document.getElementById('editCreditModal');
+    if (!modal) {
+        // Créer le modal s'il n'existe pas
+        createEditCreditModal();
+    }
+    
+    // Pré-remplir les champs
+    document.getElementById('edit-credit-id').value = credit.id;
+    document.getElementById('edit-credit-source-table').value = credit.source_table;
+    document.getElementById('edit-credit-amount').value = credit.amount;
+    document.getElementById('edit-credit-description').value = credit.description || '';
+    document.getElementById('edit-credit-account-name').textContent = credit.account_name;
+    document.getElementById('edit-credit-type').textContent = credit.type_operation;
+    document.getElementById('edit-credit-date').textContent = formatDate(credit.created_at);
+    
+    // Afficher le modal
+    const modalElement = document.getElementById('editCreditModal');
+    modalElement.style.display = 'flex';
+    modalElement.classList.add('show');
+    
+    // Ajouter l'overlay
+    const existingBackdrop = document.getElementById('editCreditModalBackdrop');
+    if (existingBackdrop) {
+        existingBackdrop.remove();
+    }
+    
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-backdrop';
+    overlay.id = 'editCreditModalBackdrop';
+    document.body.appendChild(overlay);
+    
+    // Empêcher le scroll du body
+    document.body.style.overflow = 'hidden';
+    
+    // Focus sur le premier champ
+    setTimeout(() => {
+        const amountInput = document.getElementById('edit-credit-amount');
+        if (amountInput) {
+            amountInput.focus();
+            amountInput.select();
+        }
+    }, 100);
+}
+
+// Fonction pour créer le modal de modification
+function createEditCreditModal() {
+    const modalHTML = `
+        <div class="modal" id="editCreditModal" tabindex="-1" aria-labelledby="editCreditModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="editCreditModalLabel">
+                            <i class="fas fa-edit"></i> Modifier un Crédit
+                        </h5>
+                        <button type="button" class="btn-close" onclick="closeEditCreditModal()" aria-label="Close">×</button>
+                    </div>
+                    <div class="modal-body">
+                        <form id="editCreditForm">
+                            <input type="hidden" id="edit-credit-id">
+                            <input type="hidden" id="edit-credit-source-table">
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Compte</label>
+                                    <div class="form-control-plaintext" id="edit-credit-account-name"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Type d'opération</label>
+                                    <div class="form-control-plaintext" id="edit-credit-type"></div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label class="form-label">Date de création</label>
+                                    <div class="form-control-plaintext" id="edit-credit-date"></div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="edit-credit-amount" class="form-label">Montant (FCFA) *</label>
+                                    <input type="number" class="form-control" id="edit-credit-amount" required min="1" step="1">
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="edit-credit-description" class="form-label">Description/Commentaire</label>
+                                <textarea class="form-control" id="edit-credit-description" rows="3" placeholder="Description du crédit..."></textarea>
+                            </div>
+                            
+                            <div class="alert alert-warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <strong>Attention :</strong> La modification d'un crédit affectera le solde du compte associé.
+                            </div>
+                        </form>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" onclick="closeEditCreditModal()">Annuler</button>
+                        <button type="button" class="btn btn-warning" onclick="saveCreditEdit()">
+                            <i class="fas fa-save"></i> Enregistrer
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+// Fonction pour fermer le modal
+function closeEditCreditModal() {
+    const modalElement = document.getElementById('editCreditModal');
+    const backdrop = document.getElementById('editCreditModalBackdrop');
+    
+    if (modalElement) {
+        modalElement.style.display = 'none';
+        modalElement.classList.remove('show');
+    }
+    
+    if (backdrop) {
+        backdrop.remove();
+    }
+    
+    // Restaurer le scroll du body
+    document.body.style.overflow = '';
+}
+
+// Fonction pour sauvegarder la modification
+async function saveCreditEdit() {
+    const creditId = document.getElementById('edit-credit-id').value;
+    const sourceTable = document.getElementById('edit-credit-source-table').value;
+    const amount = document.getElementById('edit-credit-amount').value;
+    const description = document.getElementById('edit-credit-description').value;
+    
+    if (!amount || amount <= 0) {
+        showNotification('Veuillez saisir un montant valide', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/credit-history/${creditId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                amount: parseInt(amount),
+                description: description,
+                source_table: sourceTable
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            showNotification(result.message, 'success');
+            
+            // Fermer le modal
+            closeEditCreditModal();
+            
+            // Recharger l'historique des crédits
+            await loadCreditHistory(currentCreditPage);
+            
+            // Recharger les comptes pour mettre à jour les soldes
+            if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+                await loadAccountsForCredit();
+            }
+        } else {
+            const error = await response.json();
+            throw new Error(error.error);
+        }
+    } catch (error) {
+        console.error('Erreur modification crédit:', error);
+        showNotification(`Erreur: ${error.message}`, 'error');
+    }
 }
 
 // Fonction pour supprimer un crédit
@@ -3452,13 +3788,14 @@ async function deleteCredit(creditId) {
     
     try {
         const response = await fetch(`/api/credit-history/${creditId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            credentials: 'include'
         });
         
         if (response.ok) {
             showNotification('Crédit supprimé avec succès !', 'success');
             // Recharger l'historique des crédits
-            await loadCreditHistory();
+            await loadCreditHistory(currentCreditPage);
             // Recharger les comptes pour mettre à jour les soldes
             if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
                 await loadAccountsForCredit();
@@ -3528,8 +3865,9 @@ async function createAccount(formData) {
             await loadAccounts();
             await loadUsersWithoutAccount();
             if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
-            await loadAccountsForCredit();
-            await loadCreditHistory();
+                await loadAccountsForCredit();
+                await loadCreditAccounts(); // Charger les comptes pour le filtre
+                await loadCreditHistory();
             }
         } else {
             const error = await response.json();
@@ -3556,6 +3894,7 @@ async function updateAccount(accountId, formData) {
             await loadUsersWithoutAccount();
             if (currentUser.role === 'directeur_general' || currentUser.role === 'pca' || currentUser.role === 'admin') {
                 await loadAccountsForCredit();
+                await loadCreditAccounts(); // Charger les comptes pour le filtre
                 await loadCreditHistory();
             }
         } else {
