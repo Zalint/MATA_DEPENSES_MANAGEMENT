@@ -16497,38 +16497,67 @@ function displayAuditResults(auditData) {
     
     console.log(`✅ AUDIT: Résultats d'audit affichés pour "${account.name}"`);
 }
-// Afficher le tableau des mouvements
+// Variable globale pour stocker tous les mouvements
+let allAuditMovements = [];
+
+// Afficher le tableau des mouvements avec filtrage
 function displayAuditMovementsTable(movements) {
+    // Stocker tous les mouvements pour le filtrage
+    allAuditMovements = movements || [];
+    
+    // Mettre à jour les compteurs
+    updateOperationCounts();
+    
+    // Afficher tous les mouvements initialement
+    renderMovementsTable(allAuditMovements);
+    
+    // Configurer les événements de filtrage
+    setupMovementFilters();
+}
+
+// Rendu du tableau de mouvements
+function renderMovementsTable(movements) {
     const tbody = document.getElementById('audit-movements-tbody');
     tbody.innerHTML = '';
     
     movements.forEach(movement => {
         const row = document.createElement('tr');
+        row.setAttribute('data-operation-type', movement.type_operation || movement.operation_type);
         
         // Date
         const dateCell = document.createElement('td');
-        const date = new Date(movement.date);
+        const date = new Date(movement.date_operation || movement.date);
         dateCell.textContent = date.toLocaleDateString('fr-FR');
         row.appendChild(dateCell);
         
         // Heure
         const timeCell = document.createElement('td');
-        timeCell.textContent = movement.time || '-';
+        timeCell.textContent = movement.heure_operation || movement.time || '-';
         row.appendChild(timeCell);
         
         // Type d'opération
         const typeCell = document.createElement('td');
         const span = document.createElement('span');
-        span.textContent = movement.type;
+        const operationType = movement.type_operation || movement.operation_type || movement.type;
+        span.textContent = operationType;
         span.className = 'operation-type';
         
-        // Couleur selon le type
-        if (movement.type.includes('CRÉDIT')) {
+        // Couleur et icône selon le type
+        if (operationType.includes('CRÉDIT')) {
             span.classList.add('credit');
-        } else if (movement.type.includes('DÉPENSE')) {
+            span.innerHTML = `<i class="fas fa-plus-circle"></i> ${operationType}`;
+        } else if (operationType.includes('DÉPENSE')) {
             span.classList.add('expense');
-        } else if (movement.type.includes('TRANSFERT')) {
+            span.innerHTML = `<i class="fas fa-minus-circle"></i> ${operationType}`;
+        } else if (operationType.includes('TRANSFERT ENTRANT')) {
+            span.classList.add('transfer-in');
+            span.innerHTML = `<i class="fas fa-arrow-right"></i> ${operationType}`;
+        } else if (operationType.includes('TRANSFERT SORTANT')) {
+            span.classList.add('transfer-out');
+            span.innerHTML = `<i class="fas fa-arrow-left"></i> ${operationType}`;
+        } else if (operationType.includes('TRANSFERT')) {
             span.classList.add('transfer');
+            span.innerHTML = `<i class="fas fa-exchange-alt"></i> ${operationType}`;
         }
         
         typeCell.appendChild(span);
@@ -16536,7 +16565,7 @@ function displayAuditMovementsTable(movements) {
         
         // Montant
         const amountCell = document.createElement('td');
-        const amount = parseFloat(movement.amount) || 0;
+        const amount = parseFloat(movement.montant || movement.amount) || 0;
         amountCell.textContent = `${amount.toLocaleString('fr-FR')} FCFA`;
         amountCell.className = amount >= 0 ? 'amount-positive' : 'amount-negative';
         row.appendChild(amountCell);
@@ -16549,14 +16578,15 @@ function displayAuditMovementsTable(movements) {
         
         // Effectué par
         const userCell = document.createElement('td');
-        userCell.textContent = movement.created_by || 'Système';
+        userCell.textContent = movement.effectue_par || movement.created_by || 'Système';
         row.appendChild(userCell);
         
         // Date de création
         const creationDateCell = document.createElement('td');
-        if (movement.date_creation) {
-            const creationDate = new Date(movement.date_creation);
-            creationDateCell.textContent = creationDate.toLocaleDateString('fr-FR');
+        const creationDate = movement.date_creation || movement.date_creation;
+        if (creationDate) {
+            const dateCreation = new Date(creationDate);
+            creationDateCell.textContent = dateCreation.toLocaleDateString('fr-FR');
         } else {
             creationDateCell.textContent = '-';
         }
@@ -16566,6 +16596,87 @@ function displayAuditMovementsTable(movements) {
     });
     
     console.log(`✅ AUDIT: Tableau de ${movements.length} mouvements affiché`);
+}
+
+// Configurer les événements de filtrage
+function setupMovementFilters() {
+    const operationTypeFilter = document.getElementById('operation-type-filter');
+    const resetFiltersBtn = document.getElementById('reset-filters-btn');
+    
+    // Filtre par type d'opération
+    if (operationTypeFilter) {
+        operationTypeFilter.addEventListener('change', function() {
+            applyMovementFilters();
+        });
+    }
+    
+    // Reset des filtres
+    if (resetFiltersBtn) {
+        resetFiltersBtn.addEventListener('click', function() {
+            resetMovementFilters();
+        });
+    }
+}
+
+// Appliquer les filtres aux mouvements
+function applyMovementFilters() {
+    const operationTypeFilter = document.getElementById('operation-type-filter');
+    const selectedType = operationTypeFilter ? operationTypeFilter.value : 'all';
+    
+    let filteredMovements = [...allAuditMovements];
+    
+    // Filtrer par type d'opération
+    if (selectedType !== 'all') {
+        filteredMovements = filteredMovements.filter(movement => {
+            const operationType = movement.type_operation || movement.operation_type || movement.type;
+            return operationType === selectedType;
+        });
+    }
+    
+    // Afficher les mouvements filtrés
+    renderMovementsTable(filteredMovements);
+    
+    // Mettre à jour les compteurs
+    updateFilteredCounts(filteredMovements.length);
+    
+    console.log(`🔍 FILTER: ${filteredMovements.length} mouvements affichés après filtrage`);
+}
+
+// Reset des filtres
+function resetMovementFilters() {
+    const operationTypeFilter = document.getElementById('operation-type-filter');
+    
+    if (operationTypeFilter) {
+        operationTypeFilter.value = 'all';
+    }
+    
+    // Réafficher tous les mouvements
+    renderMovementsTable(allAuditMovements);
+    updateFilteredCounts(allAuditMovements.length);
+    
+    console.log(`🔄 FILTER: Filtres réinitialisés - ${allAuditMovements.length} mouvements affichés`);
+}
+
+// Mettre à jour les compteurs d'opérations
+function updateOperationCounts() {
+    const totalOperationsFilter = document.getElementById('total-operations-filter');
+    const visibleOperations = document.getElementById('visible-operations');
+    
+    if (totalOperationsFilter) {
+        totalOperationsFilter.textContent = allAuditMovements.length;
+    }
+    if (visibleOperations) {
+        visibleOperations.textContent = allAuditMovements.length;
+    }
+}
+
+// Mettre à jour le compteur des opérations filtrées
+function updateFilteredCounts(visibleCount) {
+    const visibleOperations = document.getElementById('visible-operations');
+    
+    if (visibleOperations) {
+        visibleOperations.textContent = visibleCount;
+    }
 }
 
 // Exporter l'audit en CSV

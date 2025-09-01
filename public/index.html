@@ -2815,6 +2815,34 @@
                             </div>
                         </div>
                         
+                        <!-- Filtres pour l'historique -->
+                        <div class="audit-filters" style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+                            <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+                                <div style="display: flex; align-items: center; gap: 8px;">
+                                    <i class="fas fa-filter" style="color: #6c757d;"></i>
+                                    <label for="operation-type-filter" style="font-weight: 600; color: #495057;">
+                                        Filtrer par Type :
+                                    </label>
+                                </div>
+                                <select id="operation-type-filter" style="padding: 8px 12px; border: 1px solid #ced4da; border-radius: 6px; background: white; min-width: 200px;">
+                                    <option value="all">🔍 Tous les types</option>
+                                    <option value="CRÉDIT">💰 Crédits réguliers</option>
+                                    <option value="CRÉDIT SPÉCIAL">⭐ Crédits spéciaux</option>
+                                    <option value="DÉPENSE">💸 Dépenses</option>
+                                    <option value="TRANSFERT ENTRANT">📥 Transferts entrants</option>
+                                    <option value="TRANSFERT SORTANT">📤 Transferts sortants</option>
+                                </select>
+                                <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                                    <span id="filtered-count" style="color: #6c757d; font-size: 14px;">
+                                        Affichage : <strong id="visible-operations">0</strong> / <strong id="total-operations-filter">0</strong>
+                                    </span>
+                                    <button id="reset-filters-btn" style="padding: 6px 12px; background: #6c757d; color: white; border: none; border-radius: 4px; font-size: 12px;">
+                                        <i class="fas fa-undo"></i> Reset
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <div class="audit-summary">
                             <div class="summary-cards">
                                 <div class="summary-card positive">
@@ -2842,6 +2870,45 @@
                                     <div class="card-content">
                                         <h4>Solde Net</h4>
                                         <span class="card-value" id="audit-net-balance">0 FCFA</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Notes explicatives sur les différences comptables -->
+                        <div class="audit-info-note" style="margin: 20px 0; padding: 15px; background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%); border-left: 4px solid #2196f3; border-radius: 8px; font-size: 14px;">
+                            <div style="display: flex; align-items: flex-start; gap: 12px;">
+                                <i class="fas fa-info-circle" style="color: #2196f3; font-size: 18px; margin-top: 2px; flex-shrink: 0;"></i>
+                                <div>
+                                    <h4 style="margin: 0 0 12px 0; color: #1976d2; font-size: 16px; font-weight: 600;">
+                                        💡 Comprendre les différences comptables
+                                    </h4>
+                                    <div style="color: #424242; line-height: 1.5;">
+                                        <div style="margin-bottom: 16px;">
+                                            <h5 style="margin: 0 0 6px 0; color: #1976d2; font-size: 14px; font-weight: 600;">
+                                                📤 DÉBITS : Total Dépensé vs Total Débits
+                                            </h5>
+                                            <p style="margin: 0 0 4px 0;">
+                                                <strong>🔸 "Total Dépensé"</strong> = Dépenses opérationnelles uniquement (achats, frais, charges)
+                                            </p>
+                                            <p style="margin: 0 0 8px 0;">
+                                                <strong>🔸 "Total Débits"</strong> = Dépenses + Transferts sortants (vision comptable complète)
+                                            </p>
+                                        </div>
+                                        <div style="margin-bottom: 16px;">
+                                            <h5 style="margin: 0 0 6px 0; color: #1976d2; font-size: 14px; font-weight: 600;">
+                                                📥 CRÉDITS : Total Crédité vs Total Crédits
+                                            </h5>
+                                            <p style="margin: 0 0 4px 0;">
+                                                <strong>🔸 "Total Crédité"</strong> = Crédits opérationnels uniquement (injections d'argent, remboursements)
+                                            </p>
+                                            <p style="margin: 0 0 8px 0;">
+                                                <strong>🔸 "Total Crédits"</strong> = Crédits + Transferts entrants (vision comptable complète)
+                                            </p>
+                                        </div>
+                                        <p style="margin: 0; padding: 10px 12px; background: rgba(76, 175, 80, 0.15); border-radius: 6px; border-left: 3px solid #4CAF50;">
+                                            <strong>📊 Les différences</strong> correspondent aux <strong>transferts internes</strong> : mouvements d'argent entre comptes (pas des opérations avec l'extérieur).
+                                        </p>
                                     </div>
                                 </div>
                             </div>
