@@ -278,7 +278,7 @@ async function showSection(sectionName) {
             // La synthèse est chargée via le gestionnaire de menu, ne rien faire ici
             break;
         case 'transfert':
-            showTransfertMenuIfAllowed();
+            initTransfertModule();
             break;
         case 'stock-soir':
             await initStockModule();
@@ -8010,9 +8010,7 @@ function initTransfertModule() {
             showSection('transfert');
         });
     }
-    // Masquer la section au départ
-    const section = document.getElementById('transfert-section');
-    if (section) section.classList.remove('active');
+    // Ne plus masquer automatiquement la section - laissé au contrôle de showSection
     // Remplir les comptes
     loadTransfertAccounts();
     // Attacher l'écouteur du formulaire UNE SEULE FOIS
@@ -16032,6 +16030,58 @@ function setupAuditFluxEventListeners() {
         copySqlBtn.addEventListener('click', copyAuditSqlQuery);
     }
     
+    // Boutons d'audit de cohérence (pour ADMIN uniquement)
+    if (currentUser.role === 'admin') {
+        const detectBtn = document.getElementById('audit-detect-inconsistencies-btn');
+        const fixBtn = document.getElementById('audit-fix-inconsistencies-btn');
+        const fixAllBtn = document.getElementById('consistency-fix-all-btn');
+        const exportCsvBtn = document.getElementById('consistency-export-csv');
+        
+        if (detectBtn) {
+            detectBtn.addEventListener('click', detectAccountInconsistencies);
+        }
+        if (fixBtn) {
+            fixBtn.addEventListener('click', fixAllAccountInconsistencies);
+        }
+        if (fixAllBtn) {
+            fixAllBtn.addEventListener('click', fixAllAccountInconsistencies);
+        }
+        if (exportCsvBtn) {
+            exportCsvBtn.addEventListener('click', exportConsistencyToCSV);
+        }
+        
+        // Afficher les contrôles de cohérence
+        const consistencyControls = document.getElementById('audit-consistency-controls');
+        if (consistencyControls) {
+            consistencyControls.style.display = 'block';
+        }
+    }
+    
+    // Boutons de synchronisation sélective (pour ADMIN uniquement)
+    if (currentUser.role === 'admin') {
+        const syncAllBtn = document.getElementById('audit-sync-all-btn');
+        const syncSelectedBtn = document.getElementById('audit-sync-selected-btn');
+        const syncAccountSelect = document.getElementById('audit-sync-account-select');
+        
+        if (syncAllBtn) {
+            syncAllBtn.addEventListener('click', syncAllAccounts);
+        }
+        if (syncSelectedBtn) {
+            syncSelectedBtn.addEventListener('click', syncSelectedAccount);
+        }
+        if (syncAccountSelect) {
+            syncAccountSelect.addEventListener('change', updateSyncButton);
+            // Charger la liste des comptes pour la synchronisation
+            loadSyncAccountsList();
+        }
+        
+        // Afficher les contrôles de synchronisation
+        const syncControls = document.getElementById('audit-sync-controls');
+        if (syncControls) {
+            syncControls.style.display = 'block';
+        }
+    }
+    
     console.log('✅ AUDIT: Event listeners configurés');
 }
 
@@ -16113,6 +16163,9 @@ function applyAuditDateFilter() {
     showNotification(`Filtre appliqué: du ${startDate} au ${endDate}`, 'success');
 }
 
+// Variables globales pour l'audit de cohérence
+let currentConsistencyData = null;
+
 // Exécuter l'audit du compte sélectionné
 async function executeAccountAudit() {
     try {
@@ -16177,6 +16230,210 @@ async function executeAccountAudit() {
     }
 }
 
+// Détecter les incohérences dans tous les comptes
+async function detectAccountInconsistencies() {
+    try {
+        console.log('🔍 CONSISTENCY: Détection des incohérences...');
+        
+        // Afficher un indicateur de chargement
+        const detectBtn = document.getElementById('audit-detect-inconsistencies-btn');
+        const originalText = detectBtn.innerHTML;
+        detectBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Détection en cours...';
+        detectBtn.disabled = true;
+        
+        const response = await fetch('/api/audit/consistency/detect');
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Erreur lors de la détection');
+        }
+        
+        const data = await response.json();
+        currentConsistencyData = data;
+        
+        console.log(`✅ CONSISTENCY: ${data.total_issues} incohérences détectées`);
+        
+        // Afficher les résultats
+        displayConsistencyResults(data);
+        
+        showNotification(`${data.total_issues} incohérences détectées`, 'info');
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de la détection:', error);
+        showNotification('Erreur lors de la détection des incohérences', 'error');
+    } finally {
+        // Restaurer le bouton
+        const detectBtn = document.getElementById('audit-detect-inconsistencies-btn');
+        detectBtn.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Détecter les Incohérences';
+        detectBtn.disabled = false;
+    }
+}
+
+// Corriger toutes les incohérences
+async function fixAllAccountInconsistencies() {
+    try {
+        console.log('🔧 CONSISTENCY: Correction de toutes les incohérences...');
+        
+        // Demander confirmation
+        if (!confirm('Êtes-vous sûr de vouloir corriger toutes les incohérences détectées ? Cette action est irréversible.')) {
+            return;
+        }
+        
+        // Afficher un indicateur de chargement
+        const fixBtn = document.getElementById('audit-fix-inconsistencies-btn');
+        const originalText = fixBtn.innerHTML;
+        fixBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Correction en cours...';
+        fixBtn.disabled = true;
+        
+        const response = await fetch('/api/audit/consistency/fix-all', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Erreur lors de la correction');
+        }
+        
+        const data = await response.json();
+        
+        console.log(`✅ CONSISTENCY: Correction terminée, ${data.remaining_issues} incohérences restantes`);
+        
+        showNotification(`Correction terminée. ${data.remaining_issues} incohérences restantes.`, 'success');
+        
+        // Recharger les données si des incohérences ont été corrigées
+        if (data.remaining_issues < (currentConsistencyData?.total_issues || 0)) {
+            await detectAccountInconsistencies();
+        }
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de la correction:', error);
+        showNotification('Erreur lors de la correction des incohérences', 'error');
+    } finally {
+        // Restaurer le bouton
+        const fixBtn = document.getElementById('audit-fix-inconsistencies-btn');
+        fixBtn.innerHTML = '<i class="fas fa-wrench"></i> Corriger les Incohérences';
+        fixBtn.disabled = false;
+    }
+}
+
+// Afficher les résultats de cohérence
+function displayConsistencyResults(data) {
+    const resultsContainer = document.getElementById('audit-consistency-results');
+    const tbody = document.getElementById('consistency-issues-tbody');
+    const totalIssues = document.getElementById('consistency-total-issues');
+    
+    if (!resultsContainer || !tbody || !totalIssues) return;
+    
+    // Mettre à jour le compteur
+    totalIssues.textContent = data.total_issues;
+    
+    // Vider le tableau
+    tbody.innerHTML = '';
+    
+    if (data.inconsistencies.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="10" class="text-center text-success">
+                    <i class="fas fa-check-circle"></i> Aucune incohérence détectée
+                </td>
+            </tr>
+        `;
+    } else {
+        // Ajouter chaque incohérence
+        data.inconsistencies.forEach(issue => {
+            const row = document.createElement('tr');
+            
+            // Fonction pour formater les différences
+            const formatDifference = (diff) => {
+                if (diff === undefined || diff === null || isNaN(diff)) return '<span class="difference-error">--</span>';
+                if (diff === 0) return '<span class="difference-zero">0</span>';
+                if (diff > 0) return `<span class="difference-positive">+${diff.toLocaleString()}</span>`;
+                return `<span class="difference-negative">${diff.toLocaleString()}</span>`;
+            };
+            
+            // Fonction pour formater les nombres avec protection
+            const formatNumber = (num) => {
+                return (num !== undefined && num !== null && !isNaN(num)) ? parseFloat(num).toLocaleString() : '--';
+            };
+            
+            row.innerHTML = `
+                <td><strong>${issue.account_name || 'Compte inconnu'}</strong></td>
+                <td>${formatNumber(issue.stored_total_credited)}</td>
+                <td>${formatNumber(issue.calculated_total_credited)}</td>
+                <td>${formatDifference(issue.credited_difference)}</td>
+                <td>${formatNumber(issue.stored_total_spent)}</td>
+                <td>${formatNumber(issue.calculated_total_spent)}</td>
+                <td>${formatDifference(issue.spent_difference)}</td>
+                <td>${formatNumber(issue.stored_balance)}</td>
+                <td>${formatNumber(issue.calculated_balance)}</td>
+                <td>${formatDifference(issue.balance_difference)}</td>
+            `;
+            
+            tbody.appendChild(row);
+        });
+    }
+    
+    // Afficher la section
+    resultsContainer.style.display = 'block';
+}
+
+// Exporter les résultats de cohérence en CSV
+function exportConsistencyToCSV() {
+    if (!currentConsistencyData || !currentConsistencyData.inconsistencies.length) {
+        showNotification('Aucune donnée à exporter', 'warning');
+        return;
+    }
+    
+    try {
+        const headers = [
+            'Compte',
+            'Total Crédité (Stocké)',
+            'Total Crédité (Calculé)',
+            'Différence Crédits',
+            'Total Dépensé (Stocké)',
+            'Total Dépensé (Calculé)',
+            'Différence Dépenses',
+            'Solde (Stocké)',
+            'Solde (Calculé)',
+            'Différence Solde'
+        ];
+        
+        const csvContent = [
+            headers.join(','),
+            ...currentConsistencyData.inconsistencies.map(issue => [
+                `"${issue.account_name}"`,
+                issue.stored_total_credited,
+                issue.calculated_total_credited,
+                issue.total_credited_diff,
+                issue.stored_total_spent,
+                issue.calculated_total_spent,
+                issue.total_spent_diff,
+                issue.stored_balance,
+                issue.calculated_balance,
+                issue.balance_diff
+            ].join(','))
+        ].join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+        link.setAttribute('href', url);
+        link.setAttribute('download', `incoherences_comptes_${new Date().toISOString().split('T')[0]}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        showNotification('Export CSV réussi', 'success');
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de l\'export CSV:', error);
+        showNotification('Erreur lors de l\'export CSV', 'error');
+    }
+}
+
 // Afficher les informations du compte audité
 function displayAuditAccountInfo(account) {
     const accountInfo = document.getElementById('audit-account-info');
@@ -16186,6 +16443,20 @@ function displayAuditAccountInfo(account) {
     document.getElementById('audit-account-balance').textContent = `${account.current_balance.toLocaleString('fr-FR')} FCFA`;
     document.getElementById('audit-account-credited').textContent = `${account.total_credited.toLocaleString('fr-FR')} FCFA`;
     document.getElementById('audit-account-spent').textContent = `${account.total_spent.toLocaleString('fr-FR')} FCFA`;
+    
+    // Afficher les ajustements du mois courant seulement si différent de zéro
+    const adjustmentItem = document.getElementById('audit-adjustment-item');
+    const adjustmentValue = document.getElementById('audit-account-adjustment');
+    
+    if (account.current_month_adjustment && account.current_month_adjustment !== 0) {
+        const adjustment = parseFloat(account.current_month_adjustment);
+        adjustmentValue.textContent = `${adjustment.toLocaleString('fr-FR')} FCFA`;
+        adjustmentItem.style.display = 'block';
+        console.log(`💰 AUDIT: Ajustement mois courant affiché: ${adjustment} FCFA`);
+    } else {
+        adjustmentItem.style.display = 'none';
+        console.log(`💰 AUDIT: Aucun ajustement mois courant (${account.current_month_adjustment || 0})`);
+    }
     
     accountInfo.style.display = 'block';
     
@@ -16923,3 +17194,179 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 });
+
+// ====== FONCTIONS DE SYNCHRONISATION SÉLECTIVE ======
+
+// Charger la liste des comptes pour la synchronisation
+async function loadSyncAccountsList() {
+    try {
+        console.log('🔄 SYNC: Chargement de la liste des comptes');
+        
+        const response = await fetch('/api/admin/accounts-list');
+        if (!response.ok) {
+            throw new Error('Erreur lors du chargement des comptes');
+        }
+        
+        const data = await response.json();
+        const syncAccountSelect = document.getElementById('audit-sync-account-select');
+        
+        if (!syncAccountSelect || !data.success) return;
+        
+        syncAccountSelect.innerHTML = '<option value="">-- Choisir un compte --</option>';
+        
+        data.accounts.forEach(account => {
+            const option = document.createElement('option');
+            option.value = account.id;
+            const balance = parseFloat(account.current_balance).toLocaleString();
+            option.textContent = `${account.account_name} (${balance} FCFA)`;
+            option.dataset.accountName = account.account_name;
+            option.dataset.accountType = account.account_type;
+            option.dataset.balance = account.current_balance;
+            syncAccountSelect.appendChild(option);
+        });
+        
+        console.log(`✅ SYNC: ${data.accounts.length} comptes chargés pour la synchronisation`);
+        
+    } catch (error) {
+        console.error('❌ SYNC: Erreur chargement comptes:', error);
+        showNotification('Erreur lors du chargement des comptes pour la synchronisation', 'error');
+    }
+}
+
+// Mettre à jour le bouton de synchronisation sélective
+function updateSyncButton() {
+    const select = document.getElementById('audit-sync-account-select');
+    const btn = document.getElementById('audit-sync-selected-btn');
+    
+    if (select.value) {
+        btn.disabled = false;
+        const selectedOption = select.options[select.selectedIndex];
+        const accountName = selectedOption.dataset.accountName;
+        btn.innerHTML = `<i class="fas fa-sync me-2"></i>Synchroniser ${accountName}`;
+    } else {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-sync me-2"></i>Synchroniser';
+    }
+}
+
+// Synchroniser tous les comptes
+async function syncAllAccounts() {
+    const btn = document.getElementById('audit-sync-all-btn');
+    const results = document.getElementById('sync-results');
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Synchronisation en cours...';
+    
+    try {
+        const response = await fetch('/api/admin/force-sync-all-accounts', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showSyncResults(`
+                <div class="alert alert-success">
+                    <h6><i class="fas fa-check-circle me-2"></i>${data.message}</h6>
+                    <p class="mb-2">
+                        <strong>${data.data.total_corrected}</strong> comptes ont été corrigés sur 
+                        <strong>${data.data.total_accounts}</strong> comptes analysés.
+                    </p>
+                    <p class="mb-0">La page va se recharger automatiquement dans 3 secondes...</p>
+                </div>
+            `);
+            
+            showNotification(data.message, 'success');
+            setTimeout(() => location.reload(), 3000);
+            
+        } else {
+            throw new Error(data.message);
+        }
+        
+    } catch (error) {
+        showSyncResults(`
+            <div class="alert alert-danger">
+                <h6><i class="fas fa-exclamation-triangle me-2"></i>Erreur</h6>
+                <p class="mb-0">Erreur lors de la synchronisation: ${error.message}</p>
+            </div>
+        `);
+        showNotification('Erreur lors de la synchronisation globale', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-globe me-2"></i>Synchroniser TOUS les Comptes';
+    }
+}
+
+// Synchroniser un compte spécifique
+async function syncSelectedAccount() {
+    const select = document.getElementById('audit-sync-account-select');
+    const btn = document.getElementById('audit-sync-selected-btn');
+    
+    if (!select.value) {
+        showNotification('Veuillez sélectionner un compte', 'warning');
+        return;
+    }
+    
+    const accountId = select.value;
+    const selectedOption = select.options[select.selectedIndex];
+    const accountName = selectedOption.dataset.accountName;
+    
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Synchronisation...';
+    
+    try {
+        const response = await fetch(`/api/admin/force-sync-account/${accountId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showSyncResults(`
+                <div class="alert alert-success">
+                    <h6><i class="fas fa-check-circle me-2"></i>${data.message}</h6>
+                    <p class="mb-2">
+                        Le compte <strong>${accountName}</strong> a été synchronisé avec succès.
+                    </p>
+                    <p class="mb-0">La page va se recharger automatiquement dans 2 secondes...</p>
+                </div>
+            `);
+            
+            showNotification(`${accountName} synchronisé avec succès`, 'success');
+            setTimeout(() => location.reload(), 2000);
+            
+        } else {
+            throw new Error(data.message);
+        }
+        
+    } catch (error) {
+        showSyncResults(`
+            <div class="alert alert-danger">
+                <h6><i class="fas fa-exclamation-triangle me-2"></i>Erreur</h6>
+                <p class="mb-0">Erreur lors de la synchronisation: ${error.message}</p>
+            </div>
+        `);
+        showNotification('Erreur lors de la synchronisation du compte', 'error');
+    } finally {
+        btn.disabled = false;
+        updateSyncButton(); // Remet le bon texte du bouton
+    }
+}
+
+// Afficher les résultats de synchronisation
+function showSyncResults(html) {
+    const results = document.getElementById('sync-results');
+    if (results) {
+        results.style.display = 'block';
+        results.innerHTML = html;
+        results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+}
+
+// ====== FIN FONCTIONS SYNCHRONISATION ======

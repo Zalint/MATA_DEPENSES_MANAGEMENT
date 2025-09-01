@@ -45,6 +45,33 @@ function cleanEncoding(obj) {
     return obj;
 }
 
+// Fonction helper pour forcer la synchronisation de tous les comptes après modifications de crédit
+async function forceSyncAllAccountsAfterCreditOperation() {
+    try {
+        console.log('🔄 AUTO-SYNC: Synchronisation automatique des comptes après modification de crédit...');
+        
+        const result = await pool.query('SELECT force_sync_all_accounts_simple()');
+        const syncData = result.rows[0].force_sync_all_accounts_simple;
+        
+        console.log(`✅ AUTO-SYNC: Synchronisation terminée - ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
+        
+        return {
+            success: true,
+            message: `Synchronisation automatique: ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`,
+            data: syncData
+        };
+        
+    } catch (error) {
+        console.error('❌ AUTO-SYNC: Erreur lors de la synchronisation automatique:', error);
+        // Ne pas faire échouer la requête principale, juste logger l'erreur
+        return {
+            success: false,
+            message: 'Erreur lors de la synchronisation automatique',
+            error: error.message
+        };
+    }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -238,6 +265,47 @@ const requireAdminAuth = (req, res, next) => {
         console.log('❌ SERVER: Roles autorisés:', ['directeur_general', 'pca', 'admin']);
         console.log('❌ SERVER: Role match:', req.session?.user ? ['directeur_general', 'pca', 'admin'].includes(req.session.user.role) : false);
         return res.status(403).json({ error: 'Accès refusé - Privilèges insuffisants' });
+    }
+};
+
+// Middleware d'authentification stricte pour les utilisateurs ADMIN uniquement
+const requireSuperAdminOnly = (req, res, next) => {
+    console.log('🔐 SERVER: requireSuperAdminOnly appelé pour:', req.method, req.path);
+    
+    // Vérifier d'abord si une clé API est fournie
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.api_key;
+    
+    if (apiKey) {
+        // Authentification par clé API (considérée comme admin)
+        const validApiKey = process.env.API_KEY || '4f8d9a2b6c7e8f1a3b5c9d0e2f4g6h7i';
+        
+        if (apiKey === validApiKey) {
+            req.session = req.session || {};
+            req.session.user = {
+                id: 0,
+                username: 'api_user',
+                role: 'admin',
+                full_name: 'API User'
+            };
+            req.user = req.session.user;
+            console.log('🔑 SERVER: Authentification API pour Super Admin réussie');
+            return next();
+        } else {
+            return res.status(401).json({ error: 'Clé API invalide' });
+        }
+    }
+    
+    // Authentification par session - ADMIN UNIQUEMENT
+    console.log('🔐 SERVER: Session user:', req.session?.user);
+    console.log('🔐 SERVER: User role:', req.session?.user?.role);
+    
+    if (req.session?.user && req.session.user.role === 'admin') {
+        console.log('✅ SERVER: Authentification Super Admin réussie pour:', req.session.user.username);
+        req.user = req.session.user;
+        return next();
+    } else {
+        console.log('❌ SERVER: Accès refusé - Seuls les utilisateurs ADMIN sont autorisés');
+        return res.status(403).json({ error: 'Accès refusé - Privilèges Super Admin requis (rôle admin uniquement)' });
     }
 };
 
@@ -822,6 +890,12 @@ app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
             `, [accountId]);
 
             await client.query('COMMIT');
+            
+            // Vérifier si le compte est de type classique pour la synchronisation
+            const accountTypeCheck = await client.query('SELECT account_type FROM accounts WHERE id = $1', [accountId]);
+            if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
+                await forceSyncAllAccountsAfterCreditOperation();
+            }
 
             console.log(`✅ API: Crédit ${creditId} supprimé par ${req.session.user.username}: ${formatCurrency(oldAmount)}`);
 
@@ -3967,6 +4041,12 @@ app.put('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
             
             await pool.query('COMMIT');
             
+            // Vérifier si le compte modifié est de type classique pour la synchronisation
+            const accountTypeCheck = await pool.query('SELECT account_type FROM accounts WHERE id = $1', [accountId]);
+            if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
+                await forceSyncAllAccountsAfterCreditOperation();
+            }
+            
             console.log(`[Admin] Crédit ${creditId} modifié par ${req.session.user.username}: ${oldAmount} → ${newAmount}`);
             
             res.json({ 
@@ -4037,6 +4117,12 @@ app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
             `, [credit.account_id]);
             
             await client.query('COMMIT');
+            
+            // Vérifier si le compte est de type classique pour la synchronisation
+            const accountTypeCheck = await client.query('SELECT account_type FROM accounts WHERE id = $1', [credit.account_id]);
+            if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
+                await forceSyncAllAccountsAfterCreditOperation();
+            }
             
             console.log(`[Admin] Crédit ${creditId} supprimé par ${req.session.user.username}`);
             
@@ -4122,6 +4208,12 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
             `, [credit.account_id]);
             
             await client.query('COMMIT');
+            
+            // Vérifier si le compte est de type classique pour la synchronisation
+            const accountTypeCheck = await client.query('SELECT account_type FROM accounts WHERE id = $1', [credit.account_id]);
+            if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
+                await forceSyncAllAccountsAfterCreditOperation();
+            }
             
             console.log(`[Directeur] Crédit ${creditId} supprimé par ${req.session.user.username}`);
             
@@ -7798,10 +7890,10 @@ app.delete('/api/transfers/:transferId', requireSuperAdmin, async (req, res) => 
         const sourceAccount = accountsCheck.rows.find(a => a.id == transfer.source_id);
         const destAccount = accountsCheck.rows.find(a => a.id == transfer.destination_id);
         
-        // Vérifier que les comptes ont suffisamment de solde pour annuler le transfert
-        if (sourceAccount.current_balance < transfer.montant) {
+        // Vérifier que le compte destination a suffisamment de solde pour que l'argent en soit retiré
+        if (destAccount.current_balance < transfer.montant) {
             return res.status(400).json({ 
-                error: `Solde insuffisant sur le compte source (${sourceAccount.current_balance} FCFA) pour annuler le transfert de ${transfer.montant} FCFA` 
+                error: `Solde insuffisant sur le compte destination (${destAccount.current_balance} FCFA) pour annuler le transfert de ${transfer.montant} FCFA` 
             });
         }
         
@@ -11342,6 +11434,9 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                 LEFT JOIN accounts a ON cc.account_id = a.id
                 WHERE a.account_name = $1
                 
+                -- 7. MONTANT DÉBUT DE MOIS - IGNORÉ POUR AUDIT FLUX
+                -- (Commenté car l'utilisateur a demandé d'ignorer montant_debut_mois pour l'audit)
+                
             ) mouvements
             WHERE 1=1 ${dateFilter}
             ORDER BY timestamp_tri DESC
@@ -11371,6 +11466,20 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
         console.log(`📊 AUDIT: ${movements.length} mouvements trouvés pour ${account.account_name}`);
         console.log(`💰 AUDIT: Total crédits: ${totalCredits}, Total débits: ${totalDebits}, Solde net: ${netBalance}`);
 
+        // Récupérer les ajustements du mois courant
+        const currentMonth = new Date().getMonth() + 1;
+        const currentYear = new Date().getFullYear();
+        
+        const adjustmentResult = await pool.query(`
+            SELECT COALESCE(SUM(mdm.montant), 0) as current_month_adjustment
+            FROM montant_debut_mois mdm
+            WHERE mdm.account_id = $1 
+              AND mdm.year = $2 
+              AND mdm.month = $3
+        `, [account.id, currentYear, currentMonth]);
+        
+        const currentMonthAdjustment = parseFloat(adjustmentResult.rows[0]?.current_month_adjustment) || 0;
+
         res.json({
             account: {
                 id: account.id,
@@ -11379,6 +11488,7 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                 current_balance: parseInt(account.current_balance) || 0,
                 total_credited: parseInt(account.total_credited) || 0,
                 total_spent: parseInt(account.total_spent) || 0,
+                current_month_adjustment: currentMonthAdjustment,
                 user_name: account.user_name,
                 username: account.username
             },
@@ -11761,3 +11871,404 @@ Répondez en français de manière professionnelle.`;
         });
     }
 });
+
+// ===== ENDPOINTS AUDIT DE COHÉRENCE =====
+
+// Route pour détecter les incohérences dans les comptes
+app.get('/api/audit/consistency/detect', requireSuperAdminOnly, async (req, res) => {
+    try {
+        console.log('🔍 CONSISTENCY: Détection des incohérences demandée');
+        
+        // Calculer directement les incohérences avec la logique Audit Flux
+        const result = await pool.query(`
+            SELECT 
+                a.id as account_id,
+                a.account_name,
+                a.current_balance as stored_balance,
+                (
+                    COALESCE(
+                        (SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id), 0
+                    ) + 
+                    COALESCE(
+                        (SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id), 0
+                    ) - 
+                    COALESCE(
+                        (SELECT SUM(e.total) FROM expenses e WHERE e.account_id = a.id), 0
+                    ) + 
+                    COALESCE(
+                        (SELECT SUM(th.montant) FROM transfer_history th WHERE th.destination_id = a.id), 0
+                    ) - 
+                    COALESCE(
+                        (SELECT SUM(th.montant) FROM transfer_history th WHERE th.source_id = a.id), 0
+                    )
+                    -- Montant début de mois ignoré pour l'audit flux selon demande utilisateur
+                    -- + COALESCE((SELECT SUM(mdm.montant) FROM montant_debut_mois mdm WHERE mdm.account_id = a.id), 0)
+                ) as calculated_balance,
+                a.total_credited as stored_total_credited,
+                (
+                    COALESCE(
+                        (SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id), 0
+                    ) + 
+                    COALESCE(
+                        (SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id), 0
+                    )
+                ) as calculated_total_credited,
+                a.total_spent as stored_total_spent,
+                COALESCE(
+                    (SELECT SUM(e.total) FROM expenses e WHERE e.account_id = a.id), 0
+                ) as calculated_total_spent
+            FROM accounts a
+            WHERE a.account_name != 'Compte Ajustement'
+            ORDER BY a.account_name
+        `);
+        
+        // Filtrer les comptes avec des incohérences (différence > 0.01 FCFA)
+        const inconsistencies = result.rows.filter(account => {
+            const balanceDiff = Math.abs(parseFloat(account.stored_balance) - parseFloat(account.calculated_balance));
+            const creditedDiff = Math.abs(parseFloat(account.stored_total_credited) - parseFloat(account.calculated_total_credited));
+            const spentDiff = Math.abs(parseFloat(account.stored_total_spent) - parseFloat(account.calculated_total_spent));
+            
+            return balanceDiff > 0.01 || creditedDiff > 0.01 || spentDiff > 0.01;
+        }).map(account => ({
+            account_id: account.account_id,
+            account_name: account.account_name,
+            balance_difference: parseFloat(account.stored_balance) - parseFloat(account.calculated_balance),
+            credited_difference: parseFloat(account.stored_total_credited) - parseFloat(account.calculated_total_credited),
+            spent_difference: parseFloat(account.stored_total_spent) - parseFloat(account.calculated_total_spent),
+            stored_balance: parseFloat(account.stored_balance),
+            calculated_balance: parseFloat(account.calculated_balance),
+            stored_total_credited: parseFloat(account.stored_total_credited),
+            calculated_total_credited: parseFloat(account.calculated_total_credited),
+            stored_total_spent: parseFloat(account.stored_total_spent),
+            calculated_total_spent: parseFloat(account.calculated_total_spent)
+        }));
+        
+        console.log(`✅ CONSISTENCY: ${inconsistencies.length} incohérences détectées`);
+        
+        res.json({
+            success: true,
+            inconsistencies: inconsistencies,
+            total_issues: inconsistencies.length,
+            detected_at: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de la détection:', error);
+        res.status(500).json({ 
+            error: 'Erreur lors de la détection des incohérences',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// Route pour corriger toutes les incohérences
+app.post('/api/audit/consistency/fix-all', requireSuperAdminOnly, async (req, res) => {
+    try {
+        console.log('🔧 CONSISTENCY: Correction de toutes les incohérences demandée');
+        
+        // Exécuter la fonction de correction (utiliser la fonction existante)
+        const result = await pool.query('SELECT force_sync_all_accounts_simple()');
+        const syncData = result.rows[0].force_sync_all_accounts_simple;
+        
+        console.log(`✅ CONSISTENCY: Correction terminée, ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
+        
+        res.json({
+            success: true,
+            message: 'Correction des incohérences terminée',
+            total_accounts: syncData.total_accounts,
+            corrected_accounts: syncData.total_corrected,
+            corrected_at: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de la correction:', error);
+        res.status(500).json({ 
+            error: 'Erreur lors de la correction des incohérences',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// Route pour corriger un compte spécifique
+app.post('/api/audit/consistency/fix-account/:accountId', requireSuperAdminOnly, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        
+        console.log(`🔧 CONSISTENCY: Correction du compte ${accountId} demandée`);
+        
+        // Utiliser la fonction de synchronisation spécifique
+        const result = await pool.query('SELECT force_sync_account($1)', [accountId]);
+        const syncData = result.rows[0].force_sync_account;
+        
+        console.log(`✅ CONSISTENCY: Compte ${accountId} corrigé - ${syncData.account_name}: ${parseFloat(syncData.new_balance).toLocaleString()} FCFA`);
+        
+        res.json({
+            success: true,
+            account_id: accountId,
+            account_name: syncData.account_name,
+            old_balance: parseFloat(syncData.old_balance),
+            new_balance: parseFloat(syncData.new_balance),
+            status: syncData.status,
+            corrected_at: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de la correction du compte:', error);
+        res.status(500).json({ 
+            error: 'Erreur lors de la correction du compte',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// ====== ROUTES DE SYNCHRONISATION SÉLECTIVE ======
+
+// Route pour récupérer la liste de tous les comptes
+app.get('/api/admin/accounts-list', requireSuperAdminOnly, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT 
+                id, 
+                account_name, 
+                account_type,
+                current_balance
+            FROM accounts 
+            ORDER BY account_name
+        `);
+        
+        res.json({
+            success: true,
+            accounts: result.rows
+        });
+        
+    } catch (error) {
+        console.error('❌ Erreur récupération comptes:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la récupération des comptes',
+            error: error.message
+        });
+    }
+});
+
+// Route pour synchroniser tous les comptes
+app.post('/api/admin/force-sync-all-accounts', requireSuperAdminOnly, async (req, res) => {
+    try {
+        console.log('🔄 Synchronisation TOUS les comptes par:', req.user.username);
+        
+        const result = await pool.query('SELECT force_sync_all_accounts_simple()');
+        const syncData = result.rows[0].force_sync_all_accounts_simple;
+        
+        console.log(`✅ Synchronisation terminée: ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
+        
+        res.json({
+            success: true,
+            message: `Synchronisation terminée: ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`,
+            data: syncData
+        });
+        
+    } catch (error) {
+        console.error('❌ Erreur synchronisation:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la synchronisation',
+            error: error.message
+        });
+    }
+});
+
+// Route pour synchroniser UN compte spécifique
+app.post('/api/admin/force-sync-account/:accountId', requireSuperAdminOnly, async (req, res) => {
+    try {
+        const accountId = parseInt(req.params.accountId);
+        console.log(`🎯 Synchronisation compte ${accountId} par:`, req.user.username);
+        
+        // Vérifier que le compte existe
+        const accountCheck = await pool.query('SELECT account_name FROM accounts WHERE id = $1', [accountId]);
+        if (accountCheck.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Compte non trouvé' });
+        }
+        
+        const accountName = accountCheck.rows[0].account_name;
+        
+        // Synchroniser le compte
+        const result = await pool.query('SELECT force_sync_account($1)', [accountId]);
+        const syncData = result.rows[0].force_sync_account;
+        
+        console.log(`✅ ${accountName} synchronisé: ${parseFloat(syncData.new_balance).toLocaleString()} FCFA (${syncData.status})`);
+        
+        res.json({
+            success: true,
+            message: `${accountName} synchronisé: ${parseFloat(syncData.new_balance).toLocaleString()} FCFA (${syncData.status})`,
+            data: syncData
+        });
+        
+    } catch (error) {
+        console.error('❌ Erreur synchronisation compte:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la synchronisation du compte',
+            error: error.message
+        });
+    }
+});
+
+// ====== FIN ROUTES SYNCHRONISATION ======
+
+// ====== ROUTES DE DÉTECTION ET CORRECTION D'INCOHÉRENCES ======
+
+// Route pour détecter les incohérences dans les comptes
+app.get('/api/audit/consistency/detect', requireSuperAdminOnly, async (req, res) => {
+    try {
+        console.log('🔍 CONSISTENCY: Détection des incohérences demandée par:', req.user.username);
+        
+        // Vérifier la cohérence avec une requête directe (compatible avec structure locale)
+        const result = await pool.query(`
+            SELECT 
+                a.id as account_id,
+                a.account_name,
+                COALESCE(a.current_balance, 0) as stored_balance,
+                (
+                    COALESCE(
+                        (SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id), 0
+                    ) + 
+                    COALESCE(
+                        (SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id), 0
+                    ) - 
+                    COALESCE(
+                        (SELECT SUM(e.total) FROM expenses e WHERE e.account_id = a.id), 0
+                    ) + 
+                    COALESCE(
+                        (SELECT SUM(th.montant) FROM transfer_history th WHERE th.destination_id = a.id), 0
+                    ) - 
+                    COALESCE(
+                        (SELECT SUM(th.montant) FROM transfer_history th WHERE th.source_id = a.id), 0
+                    )
+                    -- Montant début de mois ignoré pour l'audit flux selon demande utilisateur
+                    -- + COALESCE((SELECT SUM(mdm.montant) FROM montant_debut_mois mdm WHERE mdm.account_id = a.id), 0)
+                ) as calculated_balance,
+                COALESCE(a.total_credited, 0) as stored_total_credited,
+                (
+                    COALESCE(
+                        (SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id), 0
+                    ) + 
+                    COALESCE(
+                        (SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id), 0
+                    )
+                ) as calculated_total_credited,
+                COALESCE(a.total_spent, 0) as stored_total_spent,
+                COALESCE(
+                    (SELECT SUM(e.total) FROM expenses e WHERE e.account_id = a.id), 0
+                ) as calculated_total_spent
+            FROM accounts a
+            WHERE a.account_name NOT IN ('Compte Ajustement', 'Ajustement')
+              AND a.id IS NOT NULL
+        `);
+        
+        // Filtrer les comptes avec des incohérences (différence > 0.01 FCFA)
+        const inconsistencies = result.rows.filter(account => {
+            const balanceDiff = Math.abs(parseFloat(account.stored_balance) - parseFloat(account.calculated_balance));
+            const creditedDiff = Math.abs(parseFloat(account.stored_total_credited) - parseFloat(account.calculated_total_credited));
+            const spentDiff = Math.abs(parseFloat(account.stored_total_spent) - parseFloat(account.calculated_total_spent));
+            
+            return balanceDiff > 0.01 || creditedDiff > 0.01 || spentDiff > 0.01;
+        });
+        
+        console.log(`✅ CONSISTENCY: ${inconsistencies.length} incohérences détectées sur ${result.rows.length} comptes`);
+        
+        // Formater les résultats pour l'affichage
+        const formattedInconsistencies = inconsistencies.map(account => ({
+            account_id: account.account_id,
+            account_name: account.account_name,
+            balance_difference: parseFloat(account.stored_balance) - parseFloat(account.calculated_balance),
+            credited_difference: parseFloat(account.stored_total_credited) - parseFloat(account.calculated_total_credited),
+            spent_difference: parseFloat(account.stored_total_spent) - parseFloat(account.calculated_total_spent),
+            stored_balance: parseFloat(account.stored_balance),
+            calculated_balance: parseFloat(account.calculated_balance),
+            stored_total_credited: parseFloat(account.stored_total_credited),
+            calculated_total_credited: parseFloat(account.calculated_total_credited),
+            stored_total_spent: parseFloat(account.stored_total_spent),
+            calculated_total_spent: parseFloat(account.calculated_total_spent)
+        }));
+        
+        res.json({
+            success: true,
+            total_accounts: result.rows.length,
+            inconsistent_accounts: inconsistencies.length,
+            inconsistencies: formattedInconsistencies,
+            detected_at: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de la détection:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Erreur lors de la détection des incohérences',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// Route pour corriger toutes les incohérences
+app.post('/api/audit/consistency/fix-all', requireSuperAdminOnly, async (req, res) => {
+    try {
+        console.log('🔧 CONSISTENCY: Correction de toutes les incohérences demandée par:', req.user.username);
+        
+        // Utiliser la fonction de synchronisation globale
+        const result = await pool.query('SELECT force_sync_all_accounts_simple()');
+        const syncData = result.rows[0].force_sync_all_accounts_simple;
+        
+        console.log(`✅ CONSISTENCY: Correction terminée, ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
+        
+        res.json({
+            success: true,
+            message: 'Correction des incohérences terminée',
+            total_accounts: syncData.total_accounts,
+            corrected_accounts: syncData.total_corrected,
+            corrected_at: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de la correction:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Erreur lors de la correction des incohérences',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// Route pour corriger un compte spécifique
+app.post('/api/audit/consistency/fix-account/:accountId', requireSuperAdminOnly, async (req, res) => {
+    try {
+        const { accountId } = req.params;
+        
+        console.log(`🔧 CONSISTENCY: Correction du compte ${accountId} demandée par:`, req.user.username);
+        
+        // Utiliser la fonction de synchronisation spécifique
+        const result = await pool.query('SELECT force_sync_account($1)', [accountId]);
+        const syncData = result.rows[0].force_sync_account;
+        
+        console.log(`✅ CONSISTENCY: Compte ${accountId} corrigé - ${syncData.account_name}: ${parseFloat(syncData.new_balance).toLocaleString()} FCFA`);
+        
+        res.json({
+            success: true,
+            account_id: accountId,
+            account_name: syncData.account_name,
+            old_balance: parseFloat(syncData.old_balance),
+            new_balance: parseFloat(syncData.new_balance),
+            status: syncData.status,
+            corrected_at: new Date().toISOString()
+        });
+        
+    } catch (error) {
+        console.error('❌ CONSISTENCY: Erreur lors de la correction du compte:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Erreur lors de la correction du compte',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// ====== FIN ROUTES INCOHÉRENCES ======

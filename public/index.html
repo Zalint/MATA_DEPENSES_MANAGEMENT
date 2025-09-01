@@ -2675,6 +2675,53 @@
                         <button id="audit-execute-btn" class="btn btn-primary" disabled>
                             <i class="fas fa-search"></i> Auditer le Compte
                         </button>
+                        
+                        <!-- Boutons d'audit de cohérence pour DG/PCA/Admin -->
+                        <div id="audit-consistency-controls" class="audit-consistency-controls" style="display: none;">
+                            <div class="consistency-buttons">
+                                <button id="audit-detect-inconsistencies-btn" class="btn btn-warning">
+                                    <i class="fas fa-exclamation-triangle"></i> Détecter les Incohérences
+                                </button>
+                                <button id="audit-fix-inconsistencies-btn" class="btn btn-danger">
+                                    <i class="fas fa-wrench"></i> Corriger les Incohérences
+                                </button>
+                            </div>
+                            <div class="consistency-info">
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle"></i> 
+                                    Ces boutons permettent de détecter et corriger automatiquement les incohérences 
+                                    entre les données stockées et les calculs réels des comptes.
+                                </small>
+                            </div>
+                        </div>
+
+                        <!-- Boutons de synchronisation sélective pour DG/PCA/Admin -->
+                        <div id="audit-sync-controls" class="audit-sync-controls" style="display: none;">
+                            <div class="sync-header">
+                                <h4><i class="fas fa-sync-alt"></i> Synchronisation des Comptes</h4>
+                            </div>
+                            <div class="sync-buttons">
+                                <button id="audit-sync-all-btn" class="btn btn-primary">
+                                    <i class="fas fa-globe"></i> Synchroniser TOUS les Comptes
+                                </button>
+                                <div class="sync-selective">
+                                    <select id="audit-sync-account-select" class="form-control" style="display: inline-block; width: auto; margin-right: 10px;">
+                                        <option value="">-- Choisir un compte --</option>
+                                    </select>
+                                    <button id="audit-sync-selected-btn" class="btn btn-warning" disabled>
+                                        <i class="fas fa-sync"></i> Synchroniser
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="sync-info">
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle"></i> 
+                                    Force la resynchronisation des comptes selon la logique Audit Flux.
+                                    Utilisez en cas de désynchronisation persistante.
+                                </small>
+                            </div>
+                            <div id="sync-results" class="sync-results" style="display: none; margin-top: 15px;"></div>
+                        </div>
                     </div>
                     
                     <!-- Informations du compte -->
@@ -2701,11 +2748,59 @@
                                 <span class="info-label">Total dépensé :</span>
                                 <span class="info-value" id="audit-account-spent">-</span>
                             </div>
+                            <div class="info-item" id="audit-adjustment-item" style="display: none;">
+                                <span class="info-label">Ajustement mois courant :</span>
+                                <span class="info-value" id="audit-account-adjustment">-</span>
+                            </div>
                         </div>
                     </div>
                     
                     <!-- Résultats de l'audit -->
                     <div id="audit-results" class="audit-results" style="display: none;">
+                        
+                        <!-- Section de détection d'incohérences -->
+                        <div id="audit-consistency-results" class="audit-consistency-results" style="display: none;">
+                            <div class="consistency-header">
+                                <h3><i class="fas fa-exclamation-triangle"></i> Détection d'Incohérences</h3>
+                                <div class="consistency-stats">
+                                    <span class="stat-item">
+                                        <i class="fas fa-exclamation-circle"></i>
+                                        <span id="consistency-total-issues">0</span> incohérences détectées
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            <div class="table-container">
+                                <table class="data-table" id="consistency-issues-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Compte</th>
+                                            <th>Total Crédité (Stocké)</th>
+                                            <th>Total Crédité (Calculé)</th>
+                                            <th>Différence Crédits</th>
+                                            <th>Total Dépensé (Stocké)</th>
+                                            <th>Total Dépensé (Calculé)</th>
+                                            <th>Différence Dépenses</th>
+                                            <th>Solde (Stocké)</th>
+                                            <th>Solde (Calculé)</th>
+                                            <th>Différence Solde</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="consistency-issues-tbody">
+                                        <!-- Les incohérences seront ajoutées ici -->
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <div class="consistency-actions">
+                                <button id="consistency-export-csv" class="btn btn-secondary">
+                                    <i class="fas fa-download"></i> Exporter en CSV
+                                </button>
+                                <button id="consistency-fix-all-btn" class="btn btn-danger">
+                                    <i class="fas fa-wrench"></i> Corriger Toutes les Incohérences
+                                </button>
+                            </div>
+                        </div>
                         <div class="audit-header">
                             <h3><i class="fas fa-list-alt"></i> Historique des Mouvements</h3>
                             <div class="audit-stats">
@@ -3852,6 +3947,91 @@
             border-top: 1px solid #e9ecef;
             background-color: #f8f9fa;
             border-radius: 0 0 8px 8px;
+        }
+        
+        /* Styles pour les contrôles d'audit de cohérence */
+        .audit-consistency-controls {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+        }
+        
+        .consistency-buttons {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .consistency-info {
+            margin-top: 0.5rem;
+        }
+        
+        .consistency-info small {
+            color: #6c757d;
+            font-style: italic;
+        }
+        
+        /* Styles pour les résultats de cohérence */
+        .audit-consistency-results {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background-color: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        
+        .consistency-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #ffc107;
+        }
+        
+        .consistency-header h3 {
+            color: #856404;
+            margin: 0;
+        }
+        
+        .consistency-stats {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .consistency-stats .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #856404;
+            font-weight: 500;
+        }
+        
+        .consistency-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e9ecef;
+        }
+        
+        /* Styles pour les différences dans le tableau */
+        .difference-positive {
+            color: #28a745;
+            font-weight: 600;
+        }
+        
+        .difference-negative {
+            color: #dc3545;
+            font-weight: 600;
+        }
+        
+        .difference-zero {
+            color: #6c757d;
+            font-weight: 500;
         }
         
         .modal-footer .btn {
