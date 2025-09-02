@@ -1230,7 +1230,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                     END), 0) as net_transfers
                 FROM accounts a
                 LEFT JOIN transfer_history th ON (th.source_id = a.id OR th.destination_id = a.id)
-                    AND th.created_at >= $1 AND th.created_at <= $2
+                    AND th.created_at >= $1 AND th.created_at <= ($2::date + INTERVAL '1 day')
                 GROUP BY a.id
             )
             SELECT 
@@ -1320,7 +1320,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                          COALESCE((SELECT SUM(e2.total) FROM expenses e2 WHERE e2.account_id = a.id AND e2.expense_date <= $2), 0) +
                          COALESCE((SELECT SUM(CASE WHEN th.destination_id = a.id THEN th.montant ELSE -th.montant END) 
                                   FROM transfer_history th 
-                                  WHERE (th.source_id = a.id OR th.destination_id = a.id) AND th.created_at <= $2), 0) +
+                                  WHERE (th.source_id = a.id OR th.destination_id = a.id) AND th.created_at <= ($2::date + INTERVAL '1 day')), 0) +
                          COALESCE((SELECT montant FROM montant_debut_mois WHERE account_id = a.id), 0))
                 END as balance_at_end_date,
                 COALESCE(mc.monthly_credits, 0) as monthly_credits,
@@ -10222,7 +10222,7 @@ app.get('/api/dashboard/monthly-data', requireAuth, async (req, res) => {
                     END), 0) as net_transfers
                 FROM accounts a
                 LEFT JOIN transfer_history th ON (th.source_id = a.id OR th.destination_id = a.id)
-                    AND th.created_at >= $1 AND th.created_at <= $2
+                    AND th.created_at >= $1 AND th.created_at <= ($2::date + INTERVAL '1 day')
                 GROUP BY a.id
             )
             SELECT 
