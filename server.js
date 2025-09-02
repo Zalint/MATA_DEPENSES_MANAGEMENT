@@ -1230,7 +1230,7 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                     END), 0) as net_transfers
                 FROM accounts a
                 LEFT JOIN transfer_history th ON (th.source_id = a.id OR th.destination_id = a.id)
-                    AND th.created_at >= $1 AND th.created_at <= ($2::date + INTERVAL '1 day')
+                    AND th.created_at >= $1 AND th.created_at < ($2::date + INTERVAL '1 day')
                 GROUP BY a.id
             )
             SELECT 
@@ -1245,42 +1245,30 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                         -- Pour STATUT : dernière transaction chronologique <= end_date (timestamp complet)
                         COALESCE((
                             SELECT amount FROM (
-                                SELECT 
-                                    amount, 
-                                    created_at::date as transaction_date,
-                                    created_at as original_timestamp
+                                SELECT amount, created_at::date as transaction_date, created_at as original_timestamp, id as record_id
                                 FROM credit_history 
                                 WHERE account_id = a.id AND created_at <= ($2::date + INTERVAL '1 day')
                                 
                                 UNION ALL
                                 
-                                SELECT 
-                                    amount, 
-                                    credit_date::date as transaction_date,
-                                    credit_date as original_timestamp
+                                SELECT amount, credit_date::date as transaction_date, credit_date as original_timestamp, id as record_id
                                 FROM special_credit_history 
                                 WHERE account_id = a.id AND credit_date <= ($2::date + INTERVAL '1 day')
                                 
                                 UNION ALL
                                 
-                                SELECT 
-                                    -total as amount, 
-                                    expense_date::date as transaction_date,
-                                    expense_date as original_timestamp
+                                SELECT -total as amount, expense_date::date as transaction_date, expense_date as original_timestamp, id as record_id
                                 FROM expenses 
                                 WHERE account_id = a.id AND expense_date <= ($2::date + INTERVAL '1 day')
                                 
                                 UNION ALL
                                 
-                                SELECT 
-                                    montant as amount, 
-                                    ('2025-01-01')::DATE as transaction_date,
-                                    ('2025-01-01')::timestamp as original_timestamp
+                                SELECT montant as amount, ('2025-01-01')::DATE as transaction_date, ('2025-01-01')::timestamp as original_timestamp, 0 as record_id
                                 FROM montant_debut_mois 
                                 WHERE account_id = a.id
                                 
                             ) last_transactions 
-                            ORDER BY transaction_date DESC, original_timestamp DESC
+                            ORDER BY transaction_date DESC, original_timestamp DESC, record_id DESC
                             LIMIT 1
                         ), 0)
                     
@@ -1288,42 +1276,30 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                         -- Pour DEPOT : dernière transaction chronologique <= end_date (timestamp complet)
                         COALESCE((
                             SELECT amount FROM (
-                                SELECT 
-                                    amount, 
-                                    created_at::date as transaction_date,
-                                    created_at as original_timestamp
+                                SELECT amount, created_at::date as transaction_date, created_at as original_timestamp, id as record_id
                                 FROM credit_history 
                                 WHERE account_id = a.id AND created_at <= ($2::date + INTERVAL '1 day')
                                 
                                 UNION ALL
                                 
-                                SELECT 
-                                    amount, 
-                                    credit_date::date as transaction_date,
-                                    credit_date as original_timestamp
+                                SELECT amount, credit_date::date as transaction_date, credit_date as original_timestamp, id as record_id
                                 FROM special_credit_history 
                                 WHERE account_id = a.id AND credit_date <= ($2::date + INTERVAL '1 day')
                                 
                                 UNION ALL
                                 
-                                SELECT 
-                                    -total as amount, 
-                                    expense_date::date as transaction_date,
-                                    expense_date as original_timestamp
+                                SELECT -total as amount, expense_date::date as transaction_date, expense_date as original_timestamp, id as record_id
                                 FROM expenses 
                                 WHERE account_id = a.id AND expense_date <= ($2::date + INTERVAL '1 day')
                                 
                                 UNION ALL
                                 
-                                SELECT 
-                                    montant as amount, 
-                                    ('2025-01-01')::DATE as transaction_date,
-                                    ('2025-01-01')::timestamp as original_timestamp
+                                SELECT montant as amount, ('2025-01-01')::DATE as transaction_date, ('2025-01-01')::timestamp as original_timestamp, 0 as record_id
                                 FROM montant_debut_mois 
                                 WHERE account_id = a.id
                                 
                             ) last_transactions 
-                            ORDER BY transaction_date DESC, original_timestamp DESC
+                            ORDER BY transaction_date DESC, original_timestamp DESC, record_id DESC
                             LIMIT 1
                         ), 0)
                     
