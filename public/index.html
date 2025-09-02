@@ -215,7 +215,11 @@
                                 <i class="fas fa-calendar-day"></i>
                             </div>
                             <div class="stat-content">
-                                <h3>Cash disponible</h3>
+                                <h3>Cash disponible 
+                                    <button class="info-btn" id="cash-info-btn" title="Voir le détail du calcul">
+                                        <i class="fas fa-info-circle"></i>
+                                    </button>
+                                </h3>
                                 <p class="stat-value" id="solde-amount">0 FCFA</p>
                             </div>
                         </div>
@@ -4158,6 +4162,23 @@
             }
         }
     </style>
+
+    <!-- Modal pour les détails du Cash disponible -->
+    <div id="cash-detail-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-info-circle"></i> Détail du Cash disponible</h3>
+                <button class="close-btn" id="close-cash-detail">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div id="cash-detail-content">
+                    <!-- Le contenu sera généré dynamiquement -->
+                </div>
+            </div>
+        </div>
+    </div>
     
     <script src="app.js"></script>
 </body>

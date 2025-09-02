@@ -1139,6 +1139,8 @@ app.get('/api/users', requireAdminAuth, async (req, res) => {
 // Routes pour le dashboard
 app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
     try {
+        console.log('\n🚀 [CASH LOG] === DÉBUT API dashboard/stats ===');
+        console.log('📅 [CASH LOG] Query params:', req.query);
         // Récupérer les paramètres de date depuis la query string
         const { start_date, end_date } = req.query;
         
@@ -1237,13 +1239,90 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                 COALESCE(SUM(ABS(e.total)), 0) as spent,
                 a.total_credited,
                 a.current_balance,
-                -- Calculer le solde à la date de fin sélectionnée
-                (a.total_credited - COALESCE(
-                    (SELECT SUM(e2.total) 
-                     FROM expenses e2 
-                     WHERE e2.account_id = a.id 
-                     AND e2.expense_date <= $2), 0)
-                ) as balance_at_end_date,
+                -- NOUVEAU CALCUL CORRECT selon le type de compte
+                CASE a.account_type
+                    WHEN 'statut' THEN
+                        -- Pour STATUT : dernière transaction chronologique <= end_date
+                        COALESCE((
+                            SELECT amount FROM (
+                                SELECT amount, created_at as transaction_date
+                                FROM credit_history 
+                                WHERE account_id = a.id AND created_at <= $2
+                                
+                                UNION ALL
+                                
+                                SELECT amount, credit_date as transaction_date
+                                FROM special_credit_history 
+                                WHERE account_id = a.id AND credit_date <= $2
+                                
+                                UNION ALL
+                                
+                                SELECT -total as amount, expense_date as transaction_date
+                                FROM expenses 
+                                WHERE account_id = a.id AND expense_date <= $2
+                                
+                                UNION ALL
+                                
+                                SELECT montant as amount, ('2025-01-01')::DATE as transaction_date
+                                FROM montant_debut_mois 
+                                WHERE account_id = a.id
+                                
+                            ) last_transactions 
+                            ORDER BY transaction_date DESC, amount DESC
+                            LIMIT 1
+                        ), 0)
+                    
+                    WHEN 'depot' THEN
+                        -- Pour DEPOT : dernière transaction chronologique <= end_date
+                        COALESCE((
+                            SELECT amount FROM (
+                                SELECT amount, created_at as transaction_date
+                                FROM credit_history 
+                                WHERE account_id = a.id AND created_at <= $2
+                                
+                                UNION ALL
+                                
+                                SELECT amount, credit_date as transaction_date
+                                FROM special_credit_history 
+                                WHERE account_id = a.id AND credit_date <= $2
+                                
+                                UNION ALL
+                                
+                                SELECT -total as amount, expense_date as transaction_date
+                                FROM expenses 
+                                WHERE account_id = a.id AND expense_date <= $2
+                                
+                                UNION ALL
+                                
+                                SELECT montant as amount, ('2025-01-01')::DATE as transaction_date
+                                FROM montant_debut_mois 
+                                WHERE account_id = a.id
+                                
+                            ) last_transactions 
+                            ORDER BY transaction_date DESC, amount DESC
+                            LIMIT 1
+                        ), 0)
+                    
+                    WHEN 'partenaire' THEN
+                        -- Pour PARTENAIRE : total_credited - livraisons validées <= end_date
+                        (a.total_credited - COALESCE(
+                            (SELECT SUM(pd.amount) 
+                             FROM partner_deliveries pd 
+                             WHERE pd.account_id = a.id 
+                             AND pd.validation_status = 'fully_validated' 
+                             AND pd.is_validated = true
+                             AND pd.delivery_date <= $2), 0))
+                    
+                    ELSE
+                        -- Pour CLASSIQUE et autres : cumul complet <= end_date
+                        (COALESCE((SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id AND ch.created_at <= $2), 0) +
+                         COALESCE((SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id AND sch.credit_date <= $2), 0) -
+                         COALESCE((SELECT SUM(e2.total) FROM expenses e2 WHERE e2.account_id = a.id AND e2.expense_date <= $2), 0) +
+                         COALESCE((SELECT SUM(CASE WHEN th.destination_id = a.id THEN th.montant ELSE -th.montant END) 
+                                  FROM transfer_history th 
+                                  WHERE (th.source_id = a.id OR th.destination_id = a.id) AND th.created_at <= $2), 0) +
+                         COALESCE((SELECT montant FROM montant_debut_mois WHERE account_id = a.id), 0))
+                END as balance_at_end_date,
                 COALESCE(mc.monthly_credits, 0) as monthly_credits,
                 COALESCE(mt.net_transfers, 0) as net_transfers,
                 COALESCE(mdm.montant, 0) as montant_debut_mois
@@ -1279,6 +1358,11 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         
         const accountBurn = await pool.query(accountBurnQuery, accountParams);
         
+        // 🔍 LOG: Résultats de la requête principale
+        console.log('\n🔍 [CASH LOG] Requête accountBurnQuery exécutée');
+        console.log(`📊 [CASH LOG] ${accountBurn.rows.length} comptes trouvés`);
+        console.log('📅 [CASH LOG] Période:', startDate, 'à', endDate);
+        
         // Dépenses par sous-catégorie (période sélectionnée) - utilise le nouveau système hiérarchique
         let categoryBurnQuery = `
             SELECT 
@@ -1313,6 +1397,42 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
         
 
         
+        // 🔍 LOG: Réponse finale de l'API - APRÈS création account_breakdown
+        console.log('\n💰 [CASH LOG] === RÉSULTAT FINAL API dashboard/stats ===');
+        console.log(`📊 [CASH LOG] Nombre de comptes trouvés: ${accountBurn.rows.length}`);
+        
+        // Calculer le cash comme le fait le frontend (sur les données SQL directes)
+        let calculatedCash = 0;
+        accountBurn.rows.forEach(row => {
+            const name = row.name.toLowerCase();
+            if (name.includes('partenaire') ||
+                name.includes('depot') ||
+                name.includes('creance') ||
+                name.includes('fournisseur')) {
+                return; // Ignore ces comptes
+            }
+            // INCLUT: classique, statut, ajustement
+            
+            const balance = parseInt(row.balance_at_end_date || 0);
+            if (!isNaN(balance)) {
+                calculatedCash += balance;
+                
+                console.log(`🏦 [CASH LOG] ${row.name} (${row.account_type}): ${balance.toLocaleString()} FCFA`);
+            }
+        });
+        
+        console.log(`💰 [CASH LOG] CASH DISPONIBLE CALCULÉ: ${calculatedCash.toLocaleString()} FCFA`);
+        if (calculatedCash === -4224960) {
+            console.log('❌ [CASH LOG] PROBLÈME: Utilise encore l\'ancienne logique !');
+        } else if (calculatedCash === -4385360) {
+            console.log('✅ [CASH LOG] SUCCÈS: Utilise la nouvelle logique !');
+        } else {
+            console.log(`🤔 [CASH LOG] VALEUR INATTENDUE: ${calculatedCash.toLocaleString()}`);
+        }
+        console.log('💰 [CASH LOG] === FIN RÉSULTAT ===\n');
+        
+
+
         res.json({
             daily_burn: parseInt(dailyBurn.rows[0].total),
             weekly_burn: parseInt(weeklyBurn.rows[0].total),
@@ -1344,6 +1464,13 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                     console.log(`   (${row.monthly_credits || 0} - ${row.spent || 0} + ${netTransfers})`);
                 }
                 console.log('----------------------------------------');
+
+                // 🔍 LOG: Traitement d'un compte
+                console.log(`🏦 [CASH LOG] Traitement compte: ${row.name} (${row.account_type})`);
+                console.log(`   💰 [CASH LOG] balance_at_end_date: ${parseInt(row.balance_at_end_date || 0).toLocaleString()}`);
+                console.log(`   📊 [CASH LOG] current_balance DB: ${parseInt(row.current_balance || 0).toLocaleString()}`);
+                console.log(`   🔢 [CASH LOG] total_credited: ${parseInt(row.total_credited || 0).toLocaleString()}`);
+                console.log(`   📉 [CASH LOG] spent: ${parseInt(row.spent || 0).toLocaleString()}`);
 
                 return {
                 account: row.name,

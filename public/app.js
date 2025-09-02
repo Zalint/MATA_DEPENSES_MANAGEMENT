@@ -6,6 +6,8 @@ let stockVivantConfig = null;
 
 // Variables globales pour les dates du dashboard
 let startDate, endDate;
+let lastAccountBreakdown = null; // Cache pour account_breakdown
+let lastCashCalculation = null; // Cache pour les détails du calcul cash
 
 // Décote par défaut (20%)
 const DEFAULT_DISCOUNT = 0.20;
@@ -1063,7 +1065,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
                 console.log('❌ CLIENT: Compte Directeur Commercial NOT FOUND dans account_breakdown');
             }
         } else {
-            console.log('❌ CLIENT: account_breakdown est undefined ou null');
+            console.log('❌ CLIENT: account_breakdown ET lastAccountBreakdown sont undefined ou null');
         }
         
         // Mettre à jour les valeurs des cartes
@@ -1095,9 +1097,36 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
         
         // Mettre à jour la carte de solde principale avec le solde calculé dynamiquement
         // (surtout important quand cutoff_date est utilisé)
+        // UTILISER LE NOUVEAU CALCUL BASÉ SUR balance_at_end_date AU LIEU DE totalRemaining
+        let nouveauSolde = 0;
+        const accountData = stats.account_breakdown || lastAccountBreakdown; // Utiliser le cache si nécessaire
+        if (Array.isArray(accountData)) {
+            console.log('💰 updateStatsCards: Utilisation de', accountData.length, 'comptes pour le calcul');
+            accountData.forEach(acc => {
+                const name = (acc.account || '').toLowerCase();
+                if (
+                    name.includes('classique') ||
+                    name.includes('statut') ||
+                    name.includes('ajustement') ||
+                    (!name.includes('partenaire') && 
+                     !name.includes('fournisseur') && 
+                     !name.includes('depot'))
+                ) {
+                    if (typeof acc.remaining !== 'undefined') {
+                        nouveauSolde += parseInt(acc.remaining) || 0;
+                    } else if (typeof acc.current_balance !== 'undefined') {
+                        nouveauSolde += parseInt(acc.current_balance) || 0;
+                    } else if (typeof acc.total_credited !== 'undefined' && typeof acc.spent !== 'undefined') {
+                        nouveauSolde += (parseInt(acc.total_credited) || 0) - (parseInt(acc.spent) || 0);
+                    }
+                }
+            });
+        }
+        
         if (cutoffDate || (startDate && endDate)) {
-            document.getElementById('solde-amount').textContent = formatCurrency(stats.totalRemaining || 0);
-            console.log('💰 updateStatsCards: Solde principal mis à jour avec solde dynamique:', formatCurrency(stats.totalRemaining || 0));
+            document.getElementById('solde-amount').textContent = formatCurrency(nouveauSolde);
+            console.log('💰 updateStatsCards: Solde principal mis à jour avec NOUVEAU CALCUL:', formatCurrency(nouveauSolde));
+            console.log('💰 updateStatsCards: (ancienne valeur totalRemaining était:', formatCurrency(stats.totalRemaining || 0), ')');
         }
         
         // Afficher les détails du calcul du solde dans la console client
@@ -1132,7 +1161,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.log('📋 📊 DIFFÉRENCE:', formatCurrency(difference), '(comptes sans activité)');
         }
         console.log('📋 =============================================');
-        console.log('💵 ✅ SOLDE FINAL CALCULÉ:', formatCurrency(stats.totalRemaining || 0));
+        console.log('💵 ✅ SOLDE FINAL CALCULÉ:', formatCurrency(nouveauSolde || 0));
         console.groupEnd();
         
         // Afficher les détails du calcul PL dans la console du navigateur (F12)
@@ -3891,6 +3920,9 @@ function setDefaultDate() {
 }
 // Gestionnaires d'événements
 document.addEventListener('DOMContentLoaded', function() {
+    // Event listener pour le bouton info du Cash disponible
+    setupCashDetailModal();
+    
     // Vérifier si l'utilisateur est déjà connecté
     fetch('/api/user')
         .then(response => {
@@ -8718,27 +8750,70 @@ async function loadDashboardData(cutoffDate = null) {
         let solde = 0;
         if (Array.isArray(stats.account_breakdown)) {
             console.log('🔍 CLIENT: Données account_breakdown reçues:', stats.account_breakdown.length, 'comptes');
+            lastAccountBreakdown = stats.account_breakdown; // Sauvegarder pour updateStatsCards
             const compteDirecteur = stats.account_breakdown.find(item => item.account === 'Compte Directeur Commercial');
             if (compteDirecteur) {
                 console.log('🎯 CLIENT: Compte Directeur Commercial trouvé:', compteDirecteur);
             }
+            
+            console.log('\n💰 [CLIENT CASH LOG] === CALCUL CASH CÔTÉ CLIENT ===');
+            lastCashCalculation = {
+                total: 0,
+                accounts: [],
+                excludedAccounts: []
+            };
+            
             stats.account_breakdown.forEach(acc => {
                 const name = (acc.account || '').toLowerCase();
+                console.log(`🏦 [CLIENT] Compte: ${acc.account} (${acc.account_type || 'unknown'})`);
+                console.log(`   💰 remaining: ${acc.remaining}, current_balance: ${acc.current_balance}, total_credited: ${acc.total_credited}, spent: ${acc.spent}`);
+                
                 if (
                     name.includes('classique') ||
                     name.includes('statut') ||
                     name.includes('ajustement') ||
-                    (!name.includes('partenaire') && !name.includes('fournisseur') && !name.includes('depot'))
+                    (!name.includes('partenaire') && 
+                     !name.includes('fournisseur') && 
+                     !name.includes('depot'))
                 ) {
+                    let balanceUsed = 0;
+                    let sourceUsed = '';
                     if (typeof acc.remaining !== 'undefined') {
-                        solde += parseInt(acc.remaining) || 0;
+                        balanceUsed = parseInt(acc.remaining) || 0;
+                        sourceUsed = 'remaining';
+                        console.log(`   ✅ [CLIENT] INCLUS avec remaining: ${balanceUsed.toLocaleString()} FCFA`);
+                        solde += balanceUsed;
                     } else if (typeof acc.current_balance !== 'undefined') {
-                        solde += parseInt(acc.current_balance) || 0;
+                        balanceUsed = parseInt(acc.current_balance) || 0;
+                        sourceUsed = 'current_balance';
+                        console.log(`   ✅ [CLIENT] INCLUS avec current_balance: ${balanceUsed.toLocaleString()} FCFA`);
+                        solde += balanceUsed;
                     } else if (typeof acc.total_credited !== 'undefined' && typeof acc.spent !== 'undefined') {
-                        solde += (parseInt(acc.total_credited) || 0) - (parseInt(acc.spent) || 0);
+                        balanceUsed = (parseInt(acc.total_credited) || 0) - (parseInt(acc.spent) || 0);
+                        sourceUsed = 'calculé';
+                        console.log(`   ✅ [CLIENT] INCLUS avec calcul: ${balanceUsed.toLocaleString()} FCFA`);
+                        solde += balanceUsed;
                     }
+                    
+                    lastCashCalculation.accounts.push({
+                        name: acc.account,
+                        type: acc.account_type || 'unknown',
+                        balance: balanceUsed,
+                        source: sourceUsed
+                    });
+                } else {
+                    console.log(`   ❌ [CLIENT] EXCLU (type: ${acc.account_type || 'unknown'})`);
+                    lastCashCalculation.excludedAccounts.push({
+                        name: acc.account,
+                        type: acc.account_type || 'unknown',
+                        balance: parseInt(acc.remaining || acc.current_balance || 0)
+                    });
                 }
             });
+            
+            lastCashCalculation.total = solde;
+            console.log(`💰 [CLIENT CASH LOG] TOTAL FINAL: ${solde.toLocaleString()} FCFA`);
+            console.log('💰 [CLIENT CASH LOG] === FIN CALCUL ===\n');
         }
         document.getElementById('solde-amount').textContent = formatCurrency(solde);
         
@@ -17531,6 +17606,128 @@ function showSyncResults(html) {
         results.innerHTML = html;
         results.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+}
+
+// ===== MODAL DÉTAIL CASH DISPONIBLE =====
+
+function setupCashDetailModal() {
+    const cashInfoBtn = document.getElementById('cash-info-btn');
+    const modal = document.getElementById('cash-detail-modal');
+    const closeBtn = document.getElementById('close-cash-detail');
+    
+    if (cashInfoBtn) {
+        cashInfoBtn.addEventListener('click', showCashDetailModal);
+    }
+    
+    if (closeBtn) {
+        closeBtn.addEventListener('click', hideCashDetailModal);
+    }
+    
+    if (modal) {
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) {
+                hideCashDetailModal();
+            }
+        });
+    }
+}
+
+function showCashDetailModal() {
+    const modal = document.getElementById('cash-detail-modal');
+    const content = document.getElementById('cash-detail-content');
+    
+    if (!lastCashCalculation) {
+        content.innerHTML = `
+            <div class="info-message">
+                <i class="fas fa-info-circle"></i>
+                <p>Aucun calcul de cash disponible disponible. Veuillez actualiser le dashboard.</p>
+            </div>
+        `;
+    } else {
+        content.innerHTML = generateCashDetailHTML();
+    }
+    
+    modal.style.display = 'block';
+    document.body.style.overflow = 'hidden';
+}
+
+function hideCashDetailModal() {
+    const modal = document.getElementById('cash-detail-modal');
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+}
+
+function generateCashDetailHTML() {
+    if (!lastCashCalculation) return '<p>Aucune donnée disponible</p>';
+    
+    let html = `
+        <div class="cash-detail-summary">
+            <h4><i class="fas fa-calculator"></i> Résumé du calcul</h4>
+            <div class="total-amount ${lastCashCalculation.total >= 0 ? 'positive' : 'negative'}">
+                <strong>Total: ${formatCurrency(lastCashCalculation.total)}</strong>
+            </div>
+        </div>
+        
+        <div class="cash-detail-section">
+            <h4><i class="fas fa-check-circle"></i> Comptes inclus (${lastCashCalculation.accounts.length})</h4>
+            <div class="account-list">
+    `;
+    
+    // Trier les comptes par solde décroissant
+    const sortedAccounts = [...lastCashCalculation.accounts].sort((a, b) => b.balance - a.balance);
+    
+    sortedAccounts.forEach(account => {
+        const isPositive = account.balance >= 0;
+        html += `
+            <div class="account-item ${isPositive ? 'positive' : 'negative'}">
+                <div class="account-info">
+                    <span class="account-name">${account.name}</span>
+                    <span class="account-type">(${account.type})</span>
+                </div>
+                <div class="account-balance">
+                    ${formatCurrency(account.balance)}
+                </div>
+            </div>
+        `;
+    });
+    
+    html += `
+            </div>
+        </div>
+    `;
+    
+    if (lastCashCalculation.excludedAccounts.length > 0) {
+        html += `
+            <div class="cash-detail-section">
+                <h4><i class="fas fa-times-circle"></i> Comptes exclus (${lastCashCalculation.excludedAccounts.length})</h4>
+                <div class="account-list excluded">
+        `;
+        
+        lastCashCalculation.excludedAccounts.forEach(account => {
+            html += `
+                <div class="account-item excluded">
+                    <div class="account-info">
+                        <span class="account-name">${account.name}</span>
+                        <span class="account-type">(${account.type})</span>
+                    </div>
+                    <div class="account-balance">
+                        ${formatCurrency(account.balance)}
+                    </div>
+                </div>
+            `;
+        });
+        
+        html += `
+                </div>
+                <div class="exclusion-note">
+                    <i class="fas fa-info-circle"></i>
+                    <small>Ces comptes sont exclus du calcul du cash disponible selon leurs types : partenaire, dépôt, créance, fournisseur.</small>
+                </div>
+            </div>
+        `;
+    }
+    
+    return html;
 }
 
 // ====== FIN FONCTIONS SYNCHRONISATION ======
