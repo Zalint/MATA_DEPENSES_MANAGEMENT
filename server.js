@@ -11874,152 +11874,11 @@ Répondez en français de manière professionnelle.`;
 
 // ===== ENDPOINTS AUDIT DE COHÉRENCE =====
 
-// Route pour détecter les incohérences dans les comptes
-app.get('/api/audit/consistency/detect', requireSuperAdminOnly, async (req, res) => {
-    try {
-        console.log('🔍 CONSISTENCY: Détection des incohérences demandée');
-        
-        // Calculer directement les incohérences avec la logique Audit Flux
-        const result = await pool.query(`
-            SELECT 
-                a.id as account_id,
-                a.account_name,
-                a.current_balance as stored_balance,
-                (
-                    COALESCE(
-                        (SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id), 0
-                    ) + 
-                    COALESCE(
-                        (SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id), 0
-                    ) - 
-                    COALESCE(
-                        (SELECT SUM(e.total) FROM expenses e WHERE e.account_id = a.id), 0
-                    ) + 
-                    COALESCE(
-                        (SELECT SUM(th.montant) FROM transfer_history th WHERE th.destination_id = a.id), 0
-                    ) - 
-                    COALESCE(
-                        (SELECT SUM(th.montant) FROM transfer_history th WHERE th.source_id = a.id), 0
-                    )
-                    -- Montant début de mois ignoré pour l'audit flux selon demande utilisateur
-                    -- + COALESCE((SELECT SUM(mdm.montant) FROM montant_debut_mois mdm WHERE mdm.account_id = a.id), 0)
-                ) as calculated_balance,
-                a.total_credited as stored_total_credited,
-                (
-                    COALESCE(
-                        (SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id), 0
-                    ) + 
-                    COALESCE(
-                        (SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id), 0
-                    )
-                ) as calculated_total_credited,
-                a.total_spent as stored_total_spent,
-                COALESCE(
-                    (SELECT SUM(e.total) FROM expenses e WHERE e.account_id = a.id), 0
-                ) as calculated_total_spent
-            FROM accounts a
-            WHERE a.account_name != 'Compte Ajustement'
-            ORDER BY a.account_name
-        `);
-        
-        // Filtrer les comptes avec des incohérences (différence > 0.01 FCFA)
-        const inconsistencies = result.rows.filter(account => {
-            const balanceDiff = Math.abs(parseFloat(account.stored_balance) - parseFloat(account.calculated_balance));
-            const creditedDiff = Math.abs(parseFloat(account.stored_total_credited) - parseFloat(account.calculated_total_credited));
-            const spentDiff = Math.abs(parseFloat(account.stored_total_spent) - parseFloat(account.calculated_total_spent));
-            
-            return balanceDiff > 0.01 || creditedDiff > 0.01 || spentDiff > 0.01;
-        }).map(account => ({
-            account_id: account.account_id,
-            account_name: account.account_name,
-            balance_difference: parseFloat(account.stored_balance) - parseFloat(account.calculated_balance),
-            credited_difference: parseFloat(account.stored_total_credited) - parseFloat(account.calculated_total_credited),
-            spent_difference: parseFloat(account.stored_total_spent) - parseFloat(account.calculated_total_spent),
-            stored_balance: parseFloat(account.stored_balance),
-            calculated_balance: parseFloat(account.calculated_balance),
-            stored_total_credited: parseFloat(account.stored_total_credited),
-            calculated_total_credited: parseFloat(account.calculated_total_credited),
-            stored_total_spent: parseFloat(account.stored_total_spent),
-            calculated_total_spent: parseFloat(account.calculated_total_spent)
-        }));
-        
-        console.log(`✅ CONSISTENCY: ${inconsistencies.length} incohérences détectées`);
-        
-        res.json({
-            success: true,
-            inconsistencies: inconsistencies,
-            total_issues: inconsistencies.length,
-            detected_at: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('❌ CONSISTENCY: Erreur lors de la détection:', error);
-        res.status(500).json({ 
-            error: 'Erreur lors de la détection des incohérences',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-});
+// ROUTE SUPPRIMÉE - Dupliquée plus bas avec la nouvelle logique
 
-// Route pour corriger toutes les incohérences
-app.post('/api/audit/consistency/fix-all', requireSuperAdminOnly, async (req, res) => {
-    try {
-        console.log('🔧 CONSISTENCY: Correction de toutes les incohérences demandée');
-        
-        // Exécuter la fonction de correction (utiliser la fonction existante)
-        const result = await pool.query('SELECT force_sync_all_accounts_simple()');
-        const syncData = result.rows[0].force_sync_all_accounts_simple;
-        
-        console.log(`✅ CONSISTENCY: Correction terminée, ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
-        
-        res.json({
-            success: true,
-            message: 'Correction des incohérences terminée',
-            total_accounts: syncData.total_accounts,
-            corrected_accounts: syncData.total_corrected,
-            corrected_at: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('❌ CONSISTENCY: Erreur lors de la correction:', error);
-        res.status(500).json({ 
-            error: 'Erreur lors de la correction des incohérences',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-});
+// ====== FIN ROUTES SYNCHRONISATION ======
 
-// Route pour corriger un compte spécifique
-app.post('/api/audit/consistency/fix-account/:accountId', requireSuperAdminOnly, async (req, res) => {
-    try {
-        const { accountId } = req.params;
-        
-        console.log(`🔧 CONSISTENCY: Correction du compte ${accountId} demandée`);
-        
-        // Utiliser la fonction de synchronisation spécifique
-        const result = await pool.query('SELECT force_sync_account($1)', [accountId]);
-        const syncData = result.rows[0].force_sync_account;
-        
-        console.log(`✅ CONSISTENCY: Compte ${accountId} corrigé - ${syncData.account_name}: ${parseFloat(syncData.new_balance).toLocaleString()} FCFA`);
-        
-        res.json({
-            success: true,
-            account_id: accountId,
-            account_name: syncData.account_name,
-            old_balance: parseFloat(syncData.old_balance),
-            new_balance: parseFloat(syncData.new_balance),
-            status: syncData.status,
-            corrected_at: new Date().toISOString()
-        });
-        
-    } catch (error) {
-        console.error('❌ CONSISTENCY: Erreur lors de la correction du compte:', error);
-        res.status(500).json({ 
-            error: 'Erreur lors de la correction du compte',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-});
+// ====== ROUTES DE DÉTECTION ET CORRECTION D'INCOHÉRENCES ======
 
 // ====== ROUTES DE SYNCHRONISATION SÉLECTIVE ======
 
@@ -12122,31 +11981,14 @@ app.get('/api/audit/consistency/detect', requireSuperAdminOnly, async (req, res)
     try {
         console.log('🔍 CONSISTENCY: Détection des incohérences demandée par:', req.user.username);
         
-        // Vérifier la cohérence avec une requête directe (compatible avec structure locale)
+        // Vérifier la cohérence avec la nouvelle fonction qui gère les comptes statut
         const result = await pool.query(`
             SELECT 
                 a.id as account_id,
                 a.account_name,
+                a.account_type,
                 COALESCE(a.current_balance, 0) as stored_balance,
-                (
-                    COALESCE(
-                        (SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id), 0
-                    ) + 
-                    COALESCE(
-                        (SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id), 0
-                    ) - 
-                    COALESCE(
-                        (SELECT SUM(e.total) FROM expenses e WHERE e.account_id = a.id), 0
-                    ) + 
-                    COALESCE(
-                        (SELECT SUM(th.montant) FROM transfer_history th WHERE th.destination_id = a.id), 0
-                    ) - 
-                    COALESCE(
-                        (SELECT SUM(th.montant) FROM transfer_history th WHERE th.source_id = a.id), 0
-                    )
-                    -- Montant début de mois ignoré pour l'audit flux selon demande utilisateur
-                    -- + COALESCE((SELECT SUM(mdm.montant) FROM montant_debut_mois mdm WHERE mdm.account_id = a.id), 0)
-                ) as calculated_balance,
+                calculate_expected_balance(a.id) as calculated_balance,
                 COALESCE(a.total_credited, 0) as stored_total_credited,
                 (
                     COALESCE(
@@ -12163,6 +12005,8 @@ app.get('/api/audit/consistency/detect', requireSuperAdminOnly, async (req, res)
             FROM accounts a
             WHERE a.account_name NOT IN ('Compte Ajustement', 'Ajustement')
               AND a.id IS NOT NULL
+              AND a.is_active = true
+            ORDER BY a.account_name
         `);
         
         // Filtrer les comptes avec des incohérences (différence > 0.01 FCFA)

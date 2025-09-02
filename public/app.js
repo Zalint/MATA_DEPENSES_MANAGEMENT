@@ -16127,7 +16127,7 @@ async function loadAuditAccountsList() {
 }
 
 // Gestionnaire de changement de compte sélectionné
-function onAuditAccountChange() {
+async function onAuditAccountChange() {
     const accountSelect = document.getElementById('audit-account-select');
     const auditBtn = document.getElementById('audit-execute-btn');
     const accountInfo = document.getElementById('audit-account-info');
@@ -16135,12 +16135,65 @@ function onAuditAccountChange() {
     
     if (accountSelect.value) {
         auditBtn.disabled = false;
-        console.log(`🔍 AUDIT: Compte sélectionné: ${accountSelect.options[accountSelect.selectedIndex].text}`);
+        const accountName = accountSelect.options[accountSelect.selectedIndex].text;
+        console.log(`🔍 AUDIT: Compte sélectionné: ${accountName}`);
+        
+        // Synchroniser automatiquement le compte sélectionné
+        await syncSelectedAccount(accountSelect.value, accountName);
     } else {
         auditBtn.disabled = true;
         accountInfo.style.display = 'none';
         auditResults.style.display = 'none';
         console.log('🔍 AUDIT: Aucun compte sélectionné');
+    }
+}
+
+// Synchroniser le compte sélectionné
+async function syncSelectedAccount(accountId, accountName) {
+    try {
+        console.log(`🔄 SYNC: Synchronisation automatique du compte "${accountName}" (ID: ${accountId})`);
+        
+        // Afficher un indicateur visuel discret
+        const accountSelect = document.getElementById('audit-account-select');
+        const originalText = accountSelect.options[accountSelect.selectedIndex].text;
+        accountSelect.options[accountSelect.selectedIndex].text = `🔄 ${originalText}`;
+        accountSelect.disabled = true;
+        
+        const response = await fetch(`/api/admin/force-sync-account/${accountId}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Erreur HTTP: ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        // Restaurer l'affichage
+        accountSelect.options[accountSelect.selectedIndex].text = originalText;
+        accountSelect.disabled = false;
+        
+        if (result.status === 'success') {
+            console.log(`✅ SYNC: Compte "${accountName}" synchronisé avec succès`);
+            showNotification(`✅ Compte "${accountName}" synchronisé`, 'success', 2000);
+        } else {
+            console.log(`⚠️ SYNC: Synchronisation du compte "${accountName}" terminée avec avertissements`);
+            showNotification(`⚠️ Compte "${accountName}" synchronisé avec avertissements`, 'warning', 3000);
+        }
+        
+    } catch (error) {
+        console.error(`❌ SYNC: Erreur lors de la synchronisation du compte "${accountName}":`, error);
+        
+        // Restaurer l'affichage en cas d'erreur
+        const accountSelect = document.getElementById('audit-account-select');
+        const originalText = accountSelect.options[accountSelect.selectedIndex].text.replace('🔄 ', '');
+        accountSelect.options[accountSelect.selectedIndex].text = originalText;
+        accountSelect.disabled = false;
+        
+        showNotification(`❌ Erreur synchronisation: ${error.message}`, 'error', 5000);
     }
 }
 
