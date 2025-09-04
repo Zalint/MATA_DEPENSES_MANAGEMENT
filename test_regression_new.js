@@ -115,7 +115,7 @@ async function calculateAuditFluxSum(accountName) {
 }
 
 // Fonction helper pour forcer la synchronisation de tous les comptes après modifications de crédit
-// COPIE EXACTE DE server.js lignes 68-92 avec fallback pour environnement de test
+// COPIE EXACTE DE server.js lignes 68-92 SANS AUCUN CHANGEMENT
 async function forceSyncAllAccountsAfterCreditOperation() {
     try {
         console.log('🔄 AUTO-SYNC: Synchronisation automatique des comptes après modification de crédit...');
@@ -123,25 +123,13 @@ async function forceSyncAllAccountsAfterCreditOperation() {
         const result = await pool.query('SELECT force_sync_all_accounts_simple()');
         const syncData = result.rows[0].force_sync_all_accounts_simple;
         
-        // Vérifier si la fonction PostgreSQL a retourné des données valides
-        if (syncData && syncData.total_corrected !== undefined && syncData.total_accounts !== undefined) {
-            console.log(`✅ AUTO-SYNC: Synchronisation terminée - ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
-            
-            return {
-                success: true,
-                message: `Synchronisation automatique: ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`,
-                data: syncData
-            };
-        } else {
-            // Fallback: fonction appelée mais retour vide, considérer comme succès
-            console.log(`⚠️ AUTO-SYNC: Fonction PROD appelée, retour vide (probablement succès)`);
-            
-            return {
-                success: true,
-                message: `Synchronisation automatique: fonction PostgreSQL exécutée`,
-                data: { total_corrected: 'N/A', total_accounts: 'N/A' }
-            };
-        }
+        console.log(`✅ AUTO-SYNC: Synchronisation terminée - ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
+        
+        return {
+            success: true,
+            message: `Synchronisation automatique: ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`,
+            data: syncData
+        };
         
     } catch (error) {
         console.error('❌ AUTO-SYNC: Erreur lors de la synchronisation automatique:', error);
@@ -182,7 +170,7 @@ async function syncAllAccounts() {
 }
 
 // Fonction pour synchroniser UN compte spécifique
-// COPIE EXACTE DE server.js lignes 12295-12328 avec fallback pour environnement de test
+// COPIE EXACTE DE server.js lignes 12295-12328 SANS AUCUN CHANGEMENT
 async function syncAccountBalance(accountId) {
     try {
         console.log(`🎯 Synchronisation compte ${accountId}`);
@@ -195,22 +183,13 @@ async function syncAccountBalance(accountId) {
         
         const accountName = accountCheck.rows[0].account_name;
         
-        // Synchroniser le compte avec fonction PRODUCTION
+        // Synchroniser le compte
         const result = await pool.query('SELECT force_sync_account($1)', [accountId]);
         const syncData = result.rows[0].force_sync_account;
         
-        // Vérifier si la fonction PostgreSQL a retourné des données valides
-        if (syncData && syncData.new_balance !== undefined && syncData.status !== undefined) {
-            console.log(`✅ ${accountName} synchronisé: ${parseFloat(syncData.new_balance).toLocaleString()} FCFA (${syncData.status})`);
-            return parseFloat(syncData.new_balance);
-        } else {
-            // Fallback: récupérer le solde actuel après l'appel de la fonction
-            console.log(`⚠️ Fonction PROD retour vide, utilisation fallback pour ${accountName}`);
-            const balanceResult = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [accountId]);
-            const currentBalance = parseFloat(balanceResult.rows[0].current_balance) || 0;
-            console.log(`✅ ${accountName} synchronisé (fallback): ${currentBalance.toLocaleString()} FCFA`);
-            return currentBalance;
-        }
+        console.log(`✅ ${accountName} synchronisé: ${parseFloat(syncData.new_balance).toLocaleString()} FCFA (${syncData.status})`);
+        
+        return parseFloat(syncData.new_balance);
         
     } catch (error) {
         console.error('❌ Erreur synchronisation compte:', error);
@@ -471,8 +450,8 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
                 await pool.query('COMMIT');
                 
                 // Force sync both accounts after transfer
-                await syncAccount(sourceAccountId);
-                await syncAccount(destAccountId);
+                await syncAccountBalance(sourceAccountId);
+                await syncAccountBalance(destAccountId);
                 
                 await checkBalanceConsistency(sourceAccountId, 'BOVIN après transfert sortant 750 FCFA');
                 await checkBalanceConsistency(destAccountId, 'OVIN après transfert entrant 750 FCFA');
