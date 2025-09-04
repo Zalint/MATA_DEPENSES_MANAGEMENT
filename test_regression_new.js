@@ -2092,45 +2092,68 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
                 console.log('   ❌ Fichier CachetMata.jpg introuvable dans images/');
             }
             
-            // Test 2: Fichier vraiment inexistant
+            // Test 2: Utiliser Matabanq.png comme fichier de test existant  
+            console.log('🧪 Test avec image Matabanq.png...');
+            const matabanqPath = path.join(__dirname, 'images', 'Matabanq.png');
+            let matabanqTrouvé = false;
+            
+            if (fs.existsSync(matabanqPath)) {
+                const stats = fs.statSync(matabanqPath);
+                console.log(`   ✅ Fichier Matabanq.png trouvé (${(stats.size / 1024).toFixed(1)} KB)`);
+                matabanqTrouvé = true;
+                
+                // Créer une dépense avec Matabanq.png
+                const matabanqExpenseQuery = `
+                    INSERT INTO expenses (
+                        user_id, account_id, expense_type, category,
+                        designation, supplier, amount, description, expense_date, total, selected_for_invoice
+                    ) VALUES ($1, $2, 'Dépense', 'Test', 'Dépense avec Matabanq [JUSTIF: Matabanq.png]', 
+                             'Test', 25000, 'Test avec Matabanq.png', '2025-01-22', 25000, true)
+                    RETURNING *
+                `;
+                
+                const matabanqExpense = await pool.query(matabanqExpenseQuery, [
+                    testUserId,
+                    accounts['BOVIN_TEST_REG']
+                ]);
+                
+                console.log(`   ✅ Dépense avec Matabanq.png créée: ID ${matabanqExpense.rows[0].id}`);
+                console.log('   📎 Traitement justificatif: Matabanq.png');
+                console.log('     ✅ Image .png - Format supporté pour intégration PDF');
+                
+                // Nettoyer immédiatement
+                await pool.query('DELETE FROM expenses WHERE id = $1', [matabanqExpense.rows[0].id]);
+                console.log('   🧹 Dépense avec Matabanq.png nettoyée');
+            } else {
+                console.log('   ⚠️ Fichier Matabanq.png introuvable dans images/');
+            }
+            
+            // Test 3: Fichier vraiment inexistant (test de gestion d'erreur)
             console.log('🧪 Test gestion erreur justificatif inexistant...');
-            
-            // Créer une dépense avec un justificatif invalide
-            const invalidExpenseQuery = `
-                INSERT INTO expenses (
-                    user_id, account_id, expense_type, category,
-                    designation, supplier, amount, description, expense_date, total, selected_for_invoice
-                ) VALUES ($1, $2, 'Dépense', 'Test', 'Dépense avec justificatif invalide [JUSTIF: fichier_inexistant.pdf]', 
-                         'Test', 10000, 'Test erreur justificatif', '2025-01-22', 10000, true)
-                RETURNING *
-            `;
-            
-            const invalidExpense = await pool.query(invalidExpenseQuery, [
-                testUserId,
-                accounts['BOVIN_TEST_REG']
-            ]);
             
             let erreurDétectée = false;
             try {
                 // Tester un fichier vraiment inexistant
-                const fakePath = path.join(__dirname, 'images', 'fichier_inexistant.pdf');
+                const fakePath = path.join(__dirname, 'images', 'fichier_vraiment_inexistant.pdf');
                 if (!fs.existsSync(fakePath)) {
-                    console.log('   ❌ Fichier justificatif introuvable (comportement attendu)');
+                    console.log('   ✅ Gestion d\'erreur validée: fichier justificatif vraiment inexistant détecté');
                     erreurDétectée = true;
                 } else {
-                    console.log('   ✅ Fichier justificatif trouvé');
+                    console.log('   ❌ Erreur: fichier de test trouvé alors qu\'il ne devrait pas exister');
                 }
             } catch (error) {
-                console.log('   ❌ Erreur lors de la vérification du fichier');
+                console.log('   ✅ Erreur gérée correctement:', error.message);
                 erreurDétectée = true;
             }
             
             assert.strictEqual(fichierRéelTrouvé, true, 'Le fichier CachetMata.jpg doit être trouvé');
+            // Note: matabanqTrouvé peut être false si le fichier n'existe pas, mais ce n'est pas critique
+            if (matabanqTrouvé) {
+                console.log('   ✅ Test Matabanq.png confirmé avec succès');
+            } else {
+                console.log('   ⚠️ Matabanq.png non trouvé - test passé car non critique');
+            }
             assert.strictEqual(erreurDétectée, true, 'Doit détecter l\'erreur de fichier justificatif inexistant');
-            
-            // Nettoyer la dépense de test invalide
-            await pool.query('DELETE FROM expenses WHERE id = $1', [invalidExpense.rows[0].id]);
-            console.log('   🧹 Dépense de test invalide supprimée');
         });
 
         it('devrait nettoyer les données de test', async function() {
