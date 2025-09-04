@@ -120,7 +120,7 @@ async function forceSyncAllAccountsAfterCreditOperation() {
     try {
         console.log('🔄 AUTO-SYNC: Synchronisation automatique des comptes après modification de crédit...');
         
-        const result = await pool.query('SELECT force_sync_all_accounts_simple()');
+        const result = await pool.query('SELECT public.force_sync_all_accounts_simple()');
         const syncData = result.rows[0].force_sync_all_accounts_simple;
         
         // Production retourne: synchronized_accounts, errors, message
@@ -149,7 +149,7 @@ async function syncAllAccounts() {
     try {
         console.log('🔄 Synchronisation TOUS les comptes');
         
-        const result = await pool.query('SELECT force_sync_all_accounts_simple()');
+        const result = await pool.query('SELECT public.force_sync_all_accounts_simple()');
         const syncData = result.rows[0].force_sync_all_accounts_simple;
         
         console.log(`✅ Synchronisation terminée: ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
@@ -186,7 +186,7 @@ async function syncAccountBalance(accountId) {
         
         // Synchroniser le compte
         // Synchroniser le compte - EXACTEMENT COMME EN PRODUCTION (VOID)
-        await pool.query('SELECT force_sync_account($1)', [accountId]);
+        await pool.query('SELECT public.force_sync_account($1)', [accountId]);
         
         // Récupérer le nouveau solde après synchronisation
         const balanceResult = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [accountId]);
