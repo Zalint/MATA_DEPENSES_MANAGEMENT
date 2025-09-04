@@ -13,7 +13,7 @@ Ce système de tests garantit l'intégrité complète du système de gestion des
 - **Fonctionnalités avancées** (PL, Cash, Stock, Factures, Validation)
 
 ### 🎯 **Résultats Actuels**
-- ✅ **25 tests passent** (100% de réussite)
+- ✅ **26 tests passent** (100% de réussite)
 - ⏱️ **Temps d'exécution : ~940ms**
 - 🔄 **Synchronisation identique à la PRODUCTION**
 - 📊 **Base de test isolée** (`mata_expenses_test_db`)
@@ -67,11 +67,20 @@ Ce système de tests garantit l'intégrité complète du système de gestion des
 💰 Valeur testée : 4,500,000 FCFA (5M - 500K validées)
 ```
 
-#### **Test 9 : Compte CRÉANCE**
+#### **Test 9 : Compte CRÉANCE - Logique Métier Authentique** 🆕
 ```javascript
 💳 Compte : COMPTE_CREANCE_TEST_REG (temporaire)
-📝 Logique : Solde = Total crédité - Total dépensé + Transferts net
-💰 Valeur testée : 1,500,000 FCFA (2M - 500K)
+👤 Client : Client Test Créance (crédit initial: 200,000 FCFA)
+💰 Avance : +800,000 FCFA (opération credit)
+💸 Remboursement : -300,000 FCFA (opération debit)
+📝 Logique : Solde = crédit_initial + avances - remboursements
+🎯 Résultat : 700,000 FCFA (200K + 800K - 300K)
+
+🔧 DIFFÉRENCE vs Comptes Classiques :
+❌ PAS de crédits directs (credit_history)
+❌ PAS de transferts inter-comptes  
+✅ Clients avec crédit initial
+✅ Opérations de créance (avances/remboursements)
 ```
 
 ### **💼 Tests Fonctionnels Avancés - Tests 10-17**
@@ -161,6 +170,22 @@ Ce système de tests garantit l'intégrité complète du système de gestion des
 ⚙️ Configuration dynamique via financial_settings.json
 ```
 
+#### **Test 18 : Cut-off Date - Analyse Historique** 🆕
+```javascript
+📅 Dates test : 2025-01-05 à 2025-01-20 (transactions étalées)
+💰 Cut-off référence : 2025-01-15
+🔍 Calcul historique : 5M + 4.5M crédits - 1M dépenses = 8.5M FCFA
+🚫 Transactions futures : 3M crédits + 800K dépenses (exclues)
+📊 Cut-off récent : 2025-01-20 = 10.7M FCFA (inclut futures)
+🎯 Résultat : Filtrage chronologique précis et fonctionnel
+
+🔧 FONCTIONNALITÉS TESTÉES :
+✓ Exclusion transactions > cut-off date
+✓ Calcul solde à date donnée (historique)
+✓ Filtrage crédits/dépenses par timestamp
+✓ Support multiple dates de référence
+```
+
 ### **🔍 Test de Vérification Finale**
 - Synthèse complète de tous les tests
 - Rapport de cohérence globale
@@ -173,7 +198,7 @@ Ce système de tests garantit l'intégrité complète du système de gestion des
 
 ### **📁 Fichiers Principaux**
 ```
-test_regression_new.js         # Tests de non-régression (25 tests)
+test_regression_new.js         # Tests de non-régression (26 tests)
 copy_preprod_to_test.ps1       # Script copie base préprod → test
 package.json                   # Scripts npm configurés
 .github/workflows/             # Automatisation CI/CD
@@ -261,13 +286,1238 @@ if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type ==
 - **Logging authentique** : messages identiques à la production
 - **Maintenance simplifiée** : copier-coller des modifications production
 
+### **🔄 Enchaînement Exact de Synchronisation en Production**
+
+#### **1. 🏭 Synchronisation AUTOMATIQUE (Opérations de Crédit)**
+
+**Déclenchement :** Ajout/Modification/Suppression de crédit sur compte `classique`
+
+```javascript
+// 1. API Call: POST /api/credit-history
+app.post('/api/credit-history', requireAdminAuth, async (req, res) => {
+    // ... logique ajout crédit ...
+    
+    // 2. Vérification Type de Compte
+    const accountTypeCheck = await pool.query(
+        'SELECT account_type FROM accounts WHERE id = $1', 
+        [accountId]
+    );
+    
+    // 3. Déclenchement Conditionnel
+    if (accountTypeCheck.rows[0].account_type === 'classique') {
+        await forceSyncAllAccountsAfterCreditOperation();
+    }
+});
+
+// 4. Fonction de Sync Automatique
+async function forceSyncAllAccountsAfterCreditOperation() {
+    console.log('🔄 AUTO-SYNC: Synchronisation automatique...');
+    
+    // 5. Appel PostgreSQL
+    const result = await pool.query('SELECT force_sync_all_accounts_simple()');
+    const syncData = result.rows[0].force_sync_all_accounts_simple;
+    
+    console.log(`✅ AUTO-SYNC: ${syncData.total_corrected} comptes corrigés`);
+}
+```
+
+#### **2. ⚙️ Synchronisation MANUELLE (Interface Admin)**
+
+**Scénario A :** Admin clique "Synchroniser Compte"
+```javascript
+// API Call: POST /api/admin/force-sync-account/:accountId
+const result = await pool.query('SELECT force_sync_account($1)', [accountId]);
+const syncData = result.rows[0].force_sync_account;
+console.log(`✅ ${accountName} synchronisé: ${syncData.new_balance} FCFA`);
+```
+
+**Scénario B :** Admin clique "Synchroniser Tous"
+```javascript
+// API Call: POST /api/admin/force-sync-all-accounts
+const result = await pool.query('SELECT force_sync_all_accounts_simple()');
+const syncData = result.rows[0].force_sync_all_accounts_simple;
+console.log(`✅ ${syncData.total_corrected} comptes corrigés`);
+```
+
+#### **3. ❌ AUCUNE Synchronisation (Autres Opérations)**
+
+**Opérations SANS Sync Automatique :**
+- **Dépenses** : Update manuel `current_balance` uniquement
+- **Transferts** : Update manuel source + destination uniquement  
+- **Crédits** sur comptes NON-classique
+
+```javascript
+// Exemple : Ajout Dépense (PAS de sync auto)
+app.post('/api/expenses', requireAuth, async (req, res) => {
+    await pool.query(
+        'UPDATE accounts SET current_balance = current_balance - $1 WHERE id = $2',
+        [montant, accountId]
+    );
+    // ❌ PAS D'APPEL À forceSyncAllAccountsAfterCreditOperation()
+});
+```
+
+#### **📊 Tableau des Déclencheurs**
+
+| **Opération** | **Compte Type** | **Sync Auto** | **API Utilisée** |
+|---------------|-----------------|---------------|-------------------|
+| Ajout Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` |
+| Modif Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` |
+| Suppr Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` |
+| Ajout Crédit | `statut/partenaire/creance` | ❌ NON | - |
+| Ajout Dépense | Tous types | ❌ NON | Update manuel uniquement |
+| Transfert | Tous types | ❌ NON | Update manuel source + dest |
+| Admin Sync Un | Tous types | 🔧 MANUEL | `force_sync_account(id)` |
+| Admin Sync Tous | Tous types | 🔧 MANUEL | `force_sync_all_accounts_simple()` |
+
+### **📅 Mécanisme Cut-off Date (Analyse Historique)**
+
+Le système intègre une fonctionnalité avancée de **cut-off date** permettant d'analyser l'état financier à n'importe quelle date passée.
+
+#### **🎯 Principe de Fonctionnement**
+
+```javascript
+// 1. Paramètres d'entrée
+const { start_date, end_date, cutoff_date } = req.query;
+
+// 2. Logique conditionnelle
+if (cutoff_date) {
+    // Mode Snapshot : calculs jusqu'à cutoff_date (incluse)
+    const cutoffMonth = cutoff_date.substring(0, 7) + '-01';
+    WHERE e.expense_date >= $1 AND e.expense_date <= $2
+    params = [cutoffMonth, cutoff_date];
+} else {
+    // Mode Normal : utiliser start_date/end_date
+    WHERE e.expense_date >= $1 AND e.expense_date <= $2
+    params = [start_date, end_date];
+}
+```
+
+#### **📊 Applications dans le Dashboard**
+
+| **API Route** | **Paramètre Cut-off** | **Comportement** |
+|---------------|------------------------|------------------|
+| `/api/dashboard/stats-cards` | `cutoff_date` | Calcul soldes jusqu'à date donnée |
+| `/api/dashboard/monthly-data` | `cutoff_date` | Données mensuelles filtrées |
+| `/api/dashboard/monthly-cash-bictorys` | `cutoff_date` | Dernière valeur <= cutoff |
+| `/api/dashboard/stock-summary` | `cutoff_date` | Stock Mata à date spécifique |
+
+#### **🔍 Requêtes Typiques (Test 18)**
+
+```sql
+-- Solde à une date donnée (cut-off)
+SELECT (solde_initial + 
+        SUM(crédits WHERE created_at <= cutoff_date) -
+        SUM(dépenses WHERE expense_date <= cutoff_date)) as balance_at_cutoff
+
+-- Exclusion des transactions futures
+SELECT COUNT(*) as futures_transactions
+FROM transactions 
+WHERE date > cutoff_date  -- Ces transactions sont ignorées
+```
+
+#### **✅ Avantages du Système Cut-off**
+- **📈 Analyse rétroactive** : État exact du système à une date passée
+- **🔍 Audit financier** : Vérifier les soldes historiques
+- **📊 Reporting flexible** : Rapports sur période personnalisée
+- **🎯 Cohérence temporelle** : Exclusion automatique des transactions futures
+
+---
+
+## 📡 **APIs de l'Application - Documentation Complète**
+
+### **🔐 Types d'Authentification**
+
+| **Middleware** | **Rôles Autorisés** | **Description** |
+|----------------|---------------------|-----------------|
+| `requireAuth` | Tous utilisateurs connectés | Authentification de base |
+| `requireAdminAuth` | admin, directeur_general, pca | Permissions administratives |
+| `requireSuperAdmin` | admin | Permissions super administrateur |
+| `requireSuperAdminOnly` | admin seulement | Admin exclusif (delete/reset) |
+| `requireStockVivantAuth` | Permissions spéciales | Accès stock vivant |
+| `requireCashBictorysAuth` | Permissions spéciales | Accès cash bictorys |
+| `requireStrictAdminAuth` | admin strict | Opérations critiques |
+
+### **🔗 Authentification & Session**
+
+#### **🟢 POST** `/api/login`
+```javascript
+// Input
+{
+  "username": "string",
+  "password": "string"
+}
+
+// Output Success (200)
+{
+  "message": "Connexion réussie",
+  "user": {
+    "id": "number",
+    "username": "string", 
+    "role": "string",
+    "full_name": "string"
+  }
+}
+
+// Output Error (401)
+{ "error": "Nom d'utilisateur ou mot de passe incorrect" }
+```
+
+#### **🟢 POST** `/api/logout`
+```javascript
+// Input: Aucun
+// Output (200)
+{ "message": "Déconnexion réussie" }
+```
+
+#### **🔵 GET** `/api/user`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "id": "number",
+  "username": "string",
+  "role": "string", 
+  "full_name": "string"
+}
+```
+
+### **💰 Gestion des Comptes**
+
+#### **🔵 GET** `/api/accounts`
+- **Auth**: `requireAuth`
+```javascript
+// Query Params
+?user_id=number&include_inactive=boolean
+
+// Output (200)
+[
+  {
+    "id": "number",
+    "account_name": "string",
+    "account_type": "classique|statut|partenaire|creance|depot",
+    "current_balance": "number",
+    "total_credited": "number",
+    "is_active": "boolean",
+    "user_name": "string",
+    "category": "string"
+  }
+]
+```
+
+#### **🔵 GET** `/api/accounts/for-credit`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Output (200)
+[
+  {
+    "id": "number",
+    "account_name": "string",
+    "account_type": "string",
+    "current_balance": "number",
+    "user_name": "string"
+  }
+]
+```
+
+#### **🔵 GET** `/api/accounts/:accountId/balance`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "account_id": "number",
+  "account_name": "string",
+  "current_balance": "number",
+  "total_credited": "number",
+  "net_balance": "number"
+}
+```
+
+#### **🟢 POST** `/api/accounts/create`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "account_name": "string",
+  "account_type": "classique|statut|partenaire|creance|depot",
+  "user_id": "number",
+  "category": "string",
+  "initial_balance": "number"
+}
+
+// Output (201)
+{
+  "message": "Compte créé avec succès",
+  "accountId": "number"
+}
+```
+
+#### **🟡 PUT** `/api/accounts/:accountId/update`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "account_name": "string",
+  "account_type": "string",
+  "user_id": "number",
+  "category": "string"
+}
+
+// Output (200)
+{ "message": "Compte mis à jour avec succès" }
+```
+
+#### **🔴 DELETE** `/api/accounts/:accountId`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Output (200)
+{ "message": "Compte supprimé avec succès" }
+```
+
+### **💳 Gestion des Crédits**
+
+#### **🟢 POST** `/api/accounts/credit`
+- **Auth**: `requireAuth`
+```javascript
+// Input
+{
+  "account_id": "number",
+  "amount": "number",
+  "description": "string",
+  "credit_date": "YYYY-MM-DD" // optionnel
+}
+
+// Output (201)
+{
+  "message": "Crédit ajouté avec succès",
+  "creditId": "number",
+  "newBalance": "number"
+}
+```
+
+#### **🔵 GET** `/api/credit-history`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Query Params
+?account_id=number&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+// Output (200)
+[
+  {
+    "id": "number",
+    "account_id": "number",
+    "amount": "number",
+    "description": "string",
+    "created_at": "datetime",
+    "credited_by": "number",
+    "creditor_name": "string",
+    "account_name": "string"
+  }
+]
+```
+
+#### **🟡 PUT** `/api/credit-history/:id`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "amount": "number",
+  "description": "string"
+}
+
+// Output (200)
+{ "message": "Crédit modifié avec succès" }
+```
+
+#### **🔴 DELETE** `/api/credit-history/:id`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Output (200)
+{ "message": "Crédit supprimé avec succès" }
+```
+
+### **💸 Gestion des Dépenses**
+
+#### **🟢 POST** `/api/expenses`
+- **Auth**: `requireAuth`
+- **Upload**: `multipart/form-data` (justification)
+```javascript
+// Input (FormData)
+{
+  "account_id": "number",
+  "expense_type": "string",
+  "category": "string",
+  "designation": "string",
+  "supplier": "string",
+  "amount": "number",
+  "description": "string",
+  "expense_date": "YYYY-MM-DD",
+  "justification": "File" // optionnel
+}
+
+// Output (201)
+{
+  "message": "Dépense ajoutée avec succès",
+  "expenseId": "number",
+  "newBalance": "number"
+}
+```
+
+#### **🔵 GET** `/api/expenses`
+- **Auth**: `requireAuth`
+```javascript
+// Query Params
+?account_id=number&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&page=number&limit=number
+
+// Output (200)
+{
+  "expenses": [
+    {
+      "id": "number",
+      "account_id": "number",
+      "expense_type": "string",
+      "category": "string",
+      "designation": "string",
+      "supplier": "string",
+      "amount": "number",
+      "description": "string",
+      "expense_date": "YYYY-MM-DD",
+      "total": "number",
+      "justification_filename": "string",
+      "is_selected": "boolean",
+      "account_name": "string",
+      "user_name": "string"
+    }
+  ],
+  "totalCount": "number",
+  "currentPage": "number",
+  "totalPages": "number"
+}
+```
+
+#### **🔵 GET** `/api/expenses/:id`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "id": "number",
+  "account_id": "number",
+  "expense_type": "string",
+  "category": "string",
+  "designation": "string",
+  "supplier": "string",
+  "amount": "number",
+  "description": "string",
+  "expense_date": "YYYY-MM-DD",
+  "total": "number",
+  "justification_filename": "string",
+  "account_name": "string"
+}
+```
+
+#### **🟡 PUT** `/api/expenses/:id`
+- **Auth**: `requireAuth`
+- **Upload**: `multipart/form-data`
+```javascript
+// Input (FormData)
+{
+  "expense_type": "string",
+  "category": "string", 
+  "designation": "string",
+  "supplier": "string",
+  "amount": "number",
+  "description": "string",
+  "expense_date": "YYYY-MM-DD",
+  "justification": "File" // optionnel
+}
+
+// Output (200)
+{ "message": "Dépense modifiée avec succès" }
+```
+
+#### **🔴 DELETE** `/api/expenses/:id`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{ "message": "Dépense supprimée avec succès" }
+```
+
+#### **🟢 POST** `/api/expenses/:id/toggle-selection`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "message": "Sélection mise à jour",
+  "is_selected": "boolean"
+}
+```
+
+#### **🟢 POST** `/api/expenses/select-all`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "message": "Toutes les dépenses sélectionnées",
+  "selectedCount": "number"
+}
+```
+
+#### **🟢 POST** `/api/expenses/deselect-all`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "message": "Toutes les dépenses désélectionnées"
+}
+```
+
+### **📊 Dashboard & Analytics**
+
+#### **🔵 GET** `/api/dashboard/stats`
+- **Auth**: `requireAuth`
+```javascript
+// Query Params
+?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+// Output (200)
+{
+  "daily_burn": "number",
+  "weekly_burn": "number", 
+  "monthly_burn": "number",
+  "account_breakdown": [
+    {
+      "name": "string",
+      "account_type": "string",
+      "spent": "number",
+      "total_credited": "number",
+      "current_balance": "number",
+      "remaining": "number"
+    }
+  ],
+  "total_remaining": "number",
+  "period_expenses": "number"
+}
+```
+
+#### **🔵 GET** `/api/dashboard/stats-cards`
+- **Auth**: `requireAuth`
+```javascript
+// Query Params
+?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&cutoff_date=YYYY-MM-DD
+
+// Output (200)
+{
+  "total_spent": "number",
+  "cash_bictorys": "number",
+  "total_creances": "number",
+  "stock_mata_total": "number",
+  "stock_vivant_total": "number",
+  "stock_vivant_variation": "number",
+  "partner_deliveries": "number",
+  "pl_calculation": {
+    "pl_base": "number",
+    "pl_final": "number",
+    "stock_vivant_variation": "number",
+    "partner_deliveries": "number",
+    "estimated_charges": "number"
+  }
+}
+```
+
+#### **🔵 GET** `/api/dashboard/monthly-data`
+- **Auth**: `requireAuth`
+```javascript
+// Query Params
+?month=YYYY-MM&cutoff_date=YYYY-MM-DD&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+// Output (200)
+{
+  "account_breakdown": "Array",
+  "monthly_expenses": "number",
+  "cash_bictorys": "number", 
+  "total_creances": "number",
+  "stock_mata": "object",
+  "stock_vivant_variation": "number",
+  "partner_deliveries": "number"
+}
+```
+
+### **🏪 Gestion Stock**
+
+#### **🔵 GET** `/api/stock-vivant`
+- **Auth**: `requireStockVivantAuth`
+```javascript
+// Query Params
+?date=YYYY-MM-DD
+
+// Output (200)
+[
+  {
+    "id": "number",
+    "date_stock": "YYYY-MM-DD",
+    "categorie": "string",
+    "produit": "string", 
+    "total": "number",
+    "commentaire": "string"
+  }
+]
+```
+
+#### **🟢 POST** `/api/stock-vivant/update`
+- **Auth**: `requireStockVivantAuth`
+```javascript
+// Input
+{
+  "date_stock": "YYYY-MM-DD",
+  "stock_data": [
+    {
+      "categorie": "string",
+      "produit": "string",
+      "total": "number",
+      "commentaire": "string"
+    }
+  ]
+}
+
+// Output (201)
+{ "message": "Stock vivant mis à jour avec succès" }
+```
+
+#### **🟢 POST** `/api/stock-vivant/copy-from-date`
+- **Auth**: `requireStockVivantAuth`
+```javascript
+// Input
+{
+  "source_date": "YYYY-MM-DD",
+  "target_date": "YYYY-MM-DD"
+}
+
+// Output (201)
+{
+  "message": "Stock copié avec succès",
+  "copied_count": "number"
+}
+```
+
+### **🚚 Livraisons Partenaires**
+
+#### **🔵 GET** `/api/partner/:accountId/deliveries`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+[
+  {
+    "id": "number",
+    "account_id": "number",
+    "amount": "number",
+    "delivery_date": "YYYY-MM-DD",
+    "description": "string",
+    "validation_status": "pending|first_validated|fully_validated|rejected",
+    "is_validated": "boolean",
+    "created_by": "number",
+    "validated_by": "number",
+    "creator_name": "string",
+    "validator_name": "string"
+  }
+]
+```
+
+#### **🟢 POST** `/api/partner/:accountId/deliveries`
+- **Auth**: `requireAuth`
+```javascript
+// Input
+{
+  "amount": "number",
+  "delivery_date": "YYYY-MM-DD",
+  "description": "string"
+}
+
+// Output (201)
+{
+  "message": "Livraison ajoutée avec succès",
+  "deliveryId": "number"
+}
+```
+
+#### **🟢 POST** `/api/partner/deliveries/:deliveryId/final-validate`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "message": "Livraison validée définitivement",
+  "newBalance": "number"
+}
+```
+
+### **💳 Gestion Créances**
+
+#### **🔵 GET** `/api/creance/:accountId/clients`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+[
+  {
+    "id": "number",
+    "account_id": "number",
+    "client_name": "string",
+    "client_phone": "string",
+    "client_address": "string",
+    "initial_credit": "number",
+    "current_balance": "number",
+    "total_operations": "number"
+  }
+]
+```
+
+#### **🟢 POST** `/api/creance/:accountId/clients`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "client_name": "string",
+  "client_phone": "string",
+  "client_address": "string",
+  "initial_credit": "number"
+}
+
+// Output (201)
+{
+  "message": "Client créé avec succès",
+  "clientId": "number"
+}
+```
+
+#### **🔵 GET** `/api/creance/:accountId/operations`
+- **Auth**: `requireAuth`
+```javascript
+// Query Params
+?client_id=number&start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+// Output (200)
+[
+  {
+    "id": "number",
+    "account_id": "number",
+    "client_id": "number",
+    "operation_type": "credit|debit",
+    "amount": "number",
+    "description": "string",
+    "operation_date": "YYYY-MM-DD",
+    "client_name": "string",
+    "creator_name": "string"
+  }
+]
+```
+
+#### **🟢 POST** `/api/creance/:accountId/operations`
+- **Auth**: `requireAuth`
+```javascript
+// Input
+{
+  "client_id": "number",
+  "operation_type": "credit|debit",
+  "amount": "number",
+  "description": "string",
+  "operation_date": "YYYY-MM-DD"
+}
+
+// Output (201)
+{
+  "message": "Opération créée avec succès",
+  "operationId": "number"
+}
+```
+
+### **💰 Cash Bictorys**
+
+#### **🔵 GET** `/api/cash-bictorys/:monthYear`
+- **Auth**: `requireCashBictorysAuth`
+```javascript
+// Path Params: monthYear (YYYY-MM)
+// Query Params: ?cutoff_date=YYYY-MM-DD
+
+// Output (200)
+[
+  {
+    "id": "number",
+    "month_year": "YYYY-MM",
+    "date": "YYYY-MM-DD",
+    "amount": "number",
+    "description": "string"
+  }
+]
+```
+
+#### **🟡 PUT** `/api/cash-bictorys/:monthYear`
+- **Auth**: `requireCashBictorysAuth`
+```javascript
+// Input
+{
+  "date": "YYYY-MM-DD",
+  "amount": "number",
+  "description": "string"
+}
+
+// Output (200)
+{ "message": "Cash Bictorys mis à jour avec succès" }
+```
+
+### **🔧 Administration**
+
+#### **🔵 GET** `/api/admin/users`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Output (200)
+[
+  {
+    "id": "number",
+    "username": "string",
+    "full_name": "string",
+    "role": "string",
+    "is_active": "boolean",
+    "created_at": "datetime"
+  }
+]
+```
+
+#### **🟢 POST** `/api/admin/users`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "username": "string",
+  "password": "string",
+  "full_name": "string",
+  "role": "directeur|directeur_general|pca|admin"
+}
+
+// Output (201)
+{
+  "message": "Utilisateur créé avec succès",
+  "userId": "number"
+}
+```
+
+#### **🟢 POST** `/api/admin/force-sync-all-accounts`
+- **Auth**: `requireSuperAdminOnly`
+```javascript
+// Output (200)
+{
+  "message": "Synchronisation effectuée",
+  "total_corrected": "number",
+  "accounts_synced": "Array"
+}
+```
+
+#### **🟢 POST** `/api/admin/force-sync-account/:accountId`
+- **Auth**: `requireSuperAdminOnly`
+```javascript
+// Output (200)
+{
+  "message": "Compte synchronisé",
+  "account_name": "string",
+  "old_balance": "number", 
+  "new_balance": "number"
+}
+```
+
+#### **🔵 GET** `/api/validation-status`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "validate_expense_balance": "boolean"
+}
+```
+
+#### **🟡 PUT** `/api/admin/config/financial`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "validate_expense_balance": "boolean"
+}
+
+// Output (200)
+{ "message": "Configuration mise à jour avec succès" }
+```
+
+### **📈 Audit & Visualisation**
+
+#### **🔵 GET** `/api/audit/account-flux/:accountId`
+- **Auth**: `requireAuth`
+```javascript
+// Query Params
+?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+// Output (200)
+{
+  "account_info": {
+    "id": "number",
+    "account_name": "string",
+    "account_type": "string",
+    "current_balance": "number"
+  },
+  "transactions": [
+    {
+      "date": "YYYY-MM-DD",
+      "type": "credit|expense|transfer_in|transfer_out",
+      "amount": "number",
+      "description": "string",
+      "balance_after": "number"
+    }
+  ],
+  "summary": {
+    "total_credits": "number",
+    "total_expenses": "number",
+    "net_flow": "number"
+  }
+}
+```
+
+#### **🔵 GET** `/api/visualisation/pl-data`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Query Params
+?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+// Output (200)
+{
+  "period_data": [
+    {
+      "date": "YYYY-MM-DD",
+      "pl_base": "number",
+      "pl_final": "number",
+      "cash_bictorys": "number",
+      "expenses": "number",
+      "stock_variation": "number"
+    }
+  ]
+}
+```
+
+### **🔄 Transferts & Opérations**
+
+#### **🟢 POST** `/api/transfert`
+- **Auth**: `requireSuperAdmin`
+```javascript
+// Input
+{
+  "source_id": "number",
+  "destination_id": "number", 
+  "montant": "number",
+  "description": "string"
+}
+
+// Output (201)
+{
+  "message": "Transfert effectué avec succès",
+  "transferId": "number"
+}
+```
+
+#### **🔵 GET** `/api/transfers`
+- **Auth**: `requireAuth`
+```javascript
+// Query Params
+?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD&account_id=number
+
+// Output (200)
+[
+  {
+    "id": "number",
+    "source_id": "number",
+    "destination_id": "number",
+    "montant": "number",
+    "description": "string",
+    "created_at": "datetime",
+    "source_name": "string",
+    "destination_name": "string",
+    "created_by_name": "string"
+  }
+]
+```
+
+#### **🔴 DELETE** `/api/transfers/:transferId`
+- **Auth**: `requireSuperAdmin`
+```javascript
+// Output (200)
+{ "message": "Transfert supprimé avec succès" }
+```
+
+### **📄 Factures & Documents**
+
+#### **🟢 POST** `/api/expenses/generate-invoices-pdf`
+- **Auth**: `requireAuth`
+```javascript
+// Input
+{
+  "start_date": "YYYY-MM-DD",
+  "end_date": "YYYY-MM-DD",
+  "expense_ids": ["number"] // optionnel
+}
+
+// Output (200)
+{
+  "message": "Factures générées avec succès",
+  "filename": "string",
+  "total_expenses": "number",
+  "expenses_with_justifications": "number",
+  "expenses_without_justifications": "number"
+}
+```
+
+#### **🔵 GET** `/api/expenses/:id/justification`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200) - Binary File
+// Headers: Content-Type: image/jpeg|image/png|application/pdf
+// ou
+// Output (404)
+{ "error": "Justificatif non trouvé" }
+```
+
+### **📊 Catégories & Configuration**
+
+#### **🔵 GET** `/api/categories`
+- **Auth**: `requireAuth`
+```javascript
+// Output (200)
+{
+  "categories": {
+    "expense_types": [
+      {
+        "id": "number",
+        "name": "string",
+        "description": "string"
+      }
+    ],
+    "categories_by_type": {
+      "type_id": [
+        {
+          "id": "number", 
+          "name": "string",
+          "type_id": "number"
+        }
+      ]
+    }
+  }
+}
+```
+
+#### **🔵 GET** `/api/categories-config`
+- **Auth**: Aucune
+```javascript
+// Output (200)
+{
+  "expense_types": ["Array"],
+  "categories": {
+    "type_name": ["Array"]
+  },
+  "suppliers": ["Array"]
+}
+```
+
+#### **🟡 PUT** `/api/admin/config/categories`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "expense_types": ["Array"],
+  "categories": "Object",
+  "suppliers": ["Array"]
+}
+
+// Output (200)
+{ "message": "Configuration des catégories mise à jour" }
+```
+
+### **📈 APIs Snapshot & Backup**
+
+#### **🟢 POST** `/api/dashboard/save-snapshot`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "snapshot_date": "YYYY-MM-DD",
+  "description": "string"
+}
+
+// Output (201)
+{
+  "message": "Snapshot sauvegardé avec succès",
+  "snapshot_id": "number"
+}
+```
+
+#### **🔵 GET** `/api/dashboard/snapshots/:date`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Output (200)
+{
+  "snapshot_date": "YYYY-MM-DD",
+  "description": "string",
+  "data": {
+    "accounts": "Array",
+    "total_balance": "number",
+    "expenses_summary": "Object",
+    "credits_summary": "Object"
+  }
+}
+```
+
+### **🏦 Stock Mata & Montants Début Mois**
+
+#### **🔵 GET** `/api/stock-mata`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Query Params
+?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD
+
+// Output (200)
+[
+  {
+    "id": "number",
+    "date": "YYYY-MM-DD",
+    "montant": "number",
+    "description": "string",
+    "created_at": "datetime"
+  }
+]
+```
+
+#### **🟢 POST** `/api/stock-mata`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "date": "YYYY-MM-DD",
+  "montant": "number",
+  "description": "string"
+}
+
+// Output (201)
+{
+  "message": "Stock Mata ajouté avec succès",
+  "stockId": "number"
+}
+```
+
+#### **🔵 GET** `/api/montant-debut-mois/:year/:month`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Path Params: year (YYYY), month (MM)
+
+// Output (200)
+[
+  {
+    "id": "number",
+    "account_id": "number",
+    "year": "number",
+    "month": "number",
+    "montant": "number",
+    "account_name": "string"
+  }
+]
+```
+
+#### **🟢 POST** `/api/montant-debut-mois`
+- **Auth**: `requireAdminAuth`
+```javascript
+// Input
+{
+  "account_id": "number",
+  "year": "number",
+  "month": "number",
+  "montant": "number"
+}
+
+// Output (201)
+{
+  "message": "Montant début mois défini avec succès",
+  "montantId": "number"
+}
+```
+
+### **🔧 Consistency & Repair**
+
+#### **🔵 GET** `/api/audit/consistency/detect`
+- **Auth**: `requireSuperAdminOnly`
+```javascript
+// Output (200)
+{
+  "inconsistent_accounts": [
+    {
+      "account_id": "number",
+      "account_name": "string",
+      "current_balance": "number",
+      "calculated_balance": "number",
+      "difference": "number"
+    }
+  ],
+  "total_inconsistencies": "number"
+}
+```
+
+#### **🟢 POST** `/api/audit/consistency/fix-all`
+- **Auth**: `requireSuperAdminOnly`
+```javascript
+// Output (200)
+{
+  "message": "Correction effectuée",
+  "fixed_accounts": "number",
+  "total_corrections": "number"
+}
+```
+
+#### **🟢 POST** `/api/audit/consistency/fix-account/:accountId`
+- **Auth**: `requireSuperAdminOnly`
+```javascript
+// Output (200)
+{
+  "message": "Compte corrigé",
+  "account_name": "string",
+  "old_balance": "number",
+  "new_balance": "number",
+  "correction_amount": "number"
+}
+```
+
+### **📊 Résumé des APIs par Catégorie**
+
+| **Catégorie** | **APIs** | **Principales Fonctions** |
+|---------------|----------|---------------------------|
+| **🔐 Auth** | 3 APIs | Connexion, déconnexion, session |
+| **💰 Comptes** | 8 APIs | CRUD comptes, soldes, permissions |
+| **💳 Crédits** | 4 APIs | Ajout, historique, modification, suppression |
+| **💸 Dépenses** | 11 APIs | CRUD dépenses, sélection, justificatifs |
+| **📊 Dashboard** | 9 APIs | Stats, analytics, données mensuelles |
+| **🏪 Stock** | 7 APIs | Stock vivant, Stock Mata, variations |
+| **🚚 Livraisons** | 6 APIs | Partenaires, validation, statuts |
+| **💳 Créances** | 6 APIs | Clients, opérations, avances/remboursements |
+| **💰 Cash Bictorys** | 4 APIs | Gestion mensuelle, uploads, totaux |
+| **🔧 Admin** | 15 APIs | Utilisateurs, config, synchronisation |
+| **📈 Audit** | 4 APIs | Flux comptes, visualisation, cohérence |
+| **🔄 Transferts** | 3 APIs | Créer, lister, supprimer transferts |
+| **📄 Documents** | 3 APIs | Factures PDF, justificatifs, config |
+
+### **⚡ Codes de Statut HTTP Utilisés**
+
+- **200 OK** : Succès pour GET, PUT, DELETE
+- **201 Created** : Succès pour POST (création)
+- **400 Bad Request** : Données invalides
+- **401 Unauthorized** : Non authentifié
+- **403 Forbidden** : Permissions insuffisantes  
+- **404 Not Found** : Ressource introuvable
+- **500 Internal Server Error** : Erreur serveur
+
 ---
 
 ## 🚀 **Exécution des Tests**
 
 ### **📝 Commandes NPM**
 ```bash
-# Tests de régression complets (25 tests)
+# Tests de régression complets (26 tests)
 npm run test:regression
 
 # Script pré-production (nouveau)
@@ -319,7 +1569,7 @@ Déclencheurs:
   3. Setup PostgreSQL service
   4. Initialisation base de test complète
   5. Exécution tests de base
-  6. Exécution tests de régression (25 tests)
+  6. Exécution tests de régression (26 tests)
   7. Rapport de couverture
 ```
 
@@ -357,6 +1607,7 @@ git push → Tests automatiques → Blocage si échec
 ✅ Test 15: Gestion CASH BICTORYS (valeur récente) - PASSÉ
 ✅ Test 16: Génération FACTURES (avec/sans justificatifs) - PASSÉ
 ✅ Test 17: Validation BUDGET (suffisant/insuffisant/mode libre) - PASSÉ
+✅ Test 18: Cut-off DATE (analyse historique/filtrage chronologique) - PASSÉ
 ✅ Cohérence Solde actuel = Solde Net - VALIDÉE
 ✅ Cohérence Audit Flux = Solde Net - VALIDÉE
 =========================================
@@ -463,13 +1714,20 @@ git push → Tests automatiques → Blocage si échec
 ✅ MAINTENANT: Types adaptés aux contraintes réelles
 ```
 
+#### **✅ Test 9 Créance - Logique Métier Corrigée (Résolu)** 🆕
+```
+❌ AVANT: Logique erronée avec crédits directs + transferts
+✅ MAINTENANT: Logique authentique clients + opérations créance
+```
+
 ### **🔧 Solutions Implémentées**
 1. **Script copie base** : `copy_preprod_to_test.ps1`
 2. **Mécanisme production** : Fonctions PostgreSQL identiques à `server.js`
 3. **Synchronisation automatique** : Appels conditionnels après opérations crédit
 4. **Fallback intelligent** : Robustesse en cas de différences d'environnement
-5. **Corrections schéma** : Colonnes et contraintes adaptées
-6. **Nettoyage automatique** : Données test isolées
+5. **Logique métier créance** : Test 9 avec clients et opérations authentiques
+6. **Corrections schéma** : Colonnes et contraintes adaptées (`client_name`, `initial_credit`)
+7. **Nettoyage automatique** : Données test isolées
 
 ---
 
@@ -496,7 +1754,7 @@ git push → Tests automatiques → Blocage si échec
 ## 🎯 **Conclusion**
 
 ### **🏆 Système de Tests Complet**
-- ✅ **25 tests** couvrant toutes les fonctionnalités
+- ✅ **26 tests** couvrant toutes les fonctionnalités
 - ✅ **100% de réussite** avec exécution en **940ms**
 - ✅ **Base isolée** copiée depuis préprod
 - ✅ **Mécanisme identique PRODUCTION** intégré

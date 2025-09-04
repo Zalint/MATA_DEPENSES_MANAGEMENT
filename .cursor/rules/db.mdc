@@ -15,7 +15,8 @@ DB_PASSWORD=bonea2024
    - SOLUTION: Utiliser des chaînes de dates explicites: new Date("2025-09-01T00:00:00")
    - OU séparer la logique: dates UTC pour calculs SQL, chaînes fixes pour affichage frontend
    - SYMPTÔME: Période affichée "31/08/2025 au 04/09/2025" au lieu de "01/09/2025 au 04/09/2025" 
-
+4. Mettre a jour GUIDE_TESTS_NON_REGRESSION.md au fur et a mesure que l'application evolue.
+5. Toujours lire GUIDE_TESTS_NON_REGRESSION.md
 
 globs:
 alwaysApply: true

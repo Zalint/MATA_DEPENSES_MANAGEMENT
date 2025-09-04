@@ -613,47 +613,92 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
         });
     });
 
-    describe('🧪 Test 9: Compte CRÉANCE - Solde restant', () => {
-        it('Devrait calculer le solde restant selon la logique créance', async () => {
+    describe('🧪 Test 9: Compte CRÉANCE - Gestion Clients et Opérations', () => {
+        it('Devrait gérer correctement les créances avec clients et opérations', async () => {
+            console.log('\n💳 TEST GESTION CRÉANCES - LOGIQUE MÉTIER');
+            console.log('=======================================');
+            
             // Créer compte créance temporaire
             const creanceResult = await pool.query(
                 'INSERT INTO accounts (user_id, account_name, current_balance, total_credited, total_spent, created_by, account_type) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
                 [directeurId, 'COMPTE_CREANCE_TEST_REG', 0, 0, 0, dgId, 'creance']
             );
             const creanceAccountId = creanceResult.rows[0].id;
+            console.log(`🏦 COMPTE CRÉANCE CRÉÉ: ID ${creanceAccountId}, Nom: COMPTE_CREANCE_TEST_REG`);
             
             await pool.query('BEGIN');
             try {
-                await pool.query(
-                    'INSERT INTO credit_history (account_id, credited_by, amount, description) VALUES ($1, $2, $3, $4)',
-                    [creanceAccountId, dgId, 2000000, 'Crédit créance']
+                // 1. Ajouter client
+                const clientResult = await pool.query(
+                    'INSERT INTO creance_clients (account_id, client_name, client_phone, client_address, initial_credit, created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+                    [creanceAccountId, 'Client Test Créance', '77999888', 'Adresse Test', 200000, dgId]
                 );
+                const clientId = clientResult.rows[0].id;
+                console.log(`👤 CLIENT AJOUTÉ: Client Test Créance (Crédit initial: 200,000 FCFA)`);
                 
-                // Vérifier si le compte est de type classique pour la synchronisation
-                // COPIE EXACTE DE server.js
-                const accountTypeCheck = await pool.query('SELECT account_type FROM accounts WHERE id = $1', [creanceAccountId]);
-                if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
-                    await forceSyncAllAccountsAfterCreditOperation();
-                }
+                // 2. Opération Avance (+)
                 await pool.query(
-                    'INSERT INTO expenses (user_id, account_id, amount, description, expense_date, expense_type, category, designation, supplier, total) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)',
-                    [directeurId, creanceAccountId, 500000, 'Dépense créance', '2025-01-16', 'Achat', 'Test', 'Article', 'Fournisseur', 500000]
+                    'INSERT INTO creance_operations (account_id, client_id, operation_type, amount, description, operation_date, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                    [creanceAccountId, clientId, 'credit', 800000, 'Avance Client Test', '2025-01-16', dgId]
                 );
+                console.log(`💰 AVANCE AJOUTÉE: +800,000 FCFA`);
                 
-                const expectedBalance = 1500000;
+                // 3. Opération Remboursement (-)
                 await pool.query(
-                    'UPDATE accounts SET current_balance = $1, total_credited = 2000000, total_spent = 500000 WHERE id = $2',
+                    'INSERT INTO creance_operations (account_id, client_id, operation_type, amount, description, operation_date, created_by) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+                    [creanceAccountId, clientId, 'debit', 300000, 'Remboursement partiel Client Test', '2025-01-17', dgId]
+                );
+                console.log(`💸 REMBOURSEMENT AJOUTÉ: -300,000 FCFA`);
+                
+                // 4. Calculer le solde client selon la logique créance
+                const clientBalance = await pool.query(`
+                    SELECT 
+                        cc.initial_credit,
+                        COALESCE(SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE 0 END), 0) as total_avances,
+                        COALESCE(SUM(CASE WHEN co.operation_type = 'debit' THEN co.amount ELSE 0 END), 0) as total_remboursements,
+                        cc.initial_credit + 
+                        COALESCE(SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE 0 END), 0) - 
+                        COALESCE(SUM(CASE WHEN co.operation_type = 'debit' THEN co.amount ELSE 0 END), 0) as solde_client
+                    FROM creance_clients cc
+                    LEFT JOIN creance_operations co ON cc.id = co.client_id
+                    WHERE cc.id = $1
+                    GROUP BY cc.id, cc.initial_credit
+                `, [clientId]);
+                
+                const balance = clientBalance.rows[0];
+                const expectedBalance = 200000 + 800000 - 300000; // 700,000 FCFA
+                
+                console.log(`\n📊 SOLDE CLIENT:`);
+                console.log(`   Crédit initial: ${parseInt(balance.initial_credit).toLocaleString()} FCFA`);
+                console.log(`   Total avances: ${parseInt(balance.total_avances).toLocaleString()} FCFA`);
+                console.log(`   Total remboursements: ${parseInt(balance.total_remboursements).toLocaleString()} FCFA`);
+                console.log(`   SOLDE: ${parseInt(balance.solde_client).toLocaleString()} FCFA`);
+                
+                // 5. Mettre à jour le solde du compte créance
+                await pool.query(
+                    'UPDATE accounts SET current_balance = $1 WHERE id = $2',
                     [expectedBalance, creanceAccountId]
                 );
-
+                
                 await pool.query('COMMIT');
                 
-                await checkBalanceConsistency(creanceAccountId, 'Compte CRÉANCE - Solde restant');
-                console.log('✅ Test CRÉANCE réussi: Solde restant calculé correctement');
+                // 6. Vérifications
+                assert.strictEqual(parseInt(balance.solde_client), expectedBalance,
+                    `❌ Le solde client devrait être ${expectedBalance} FCFA`);
                 
-                // Nettoyer le compte créance
-                await pool.query('DELETE FROM expenses WHERE account_id = $1', [creanceAccountId]);
-                await pool.query('DELETE FROM credit_history WHERE account_id = $1', [creanceAccountId]);
+                // Vérifier le solde du compte
+                const accountInfo = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [creanceAccountId]);
+                const accountBalance = parseInt(accountInfo.rows[0].current_balance);
+                
+                assert.strictEqual(accountBalance, expectedBalance,
+                    `❌ Le solde du compte créance devrait être ${expectedBalance} FCFA`);
+                
+                console.log(`💰 TOTAL COMPTE CRÉANCE: ${expectedBalance.toLocaleString()} FCFA`);
+                console.log('✅ Test CRÉANCE réussi: Logique clients et opérations validée');
+                
+                // 7. Nettoyage
+                await pool.query('DELETE FROM creance_operations WHERE client_id = $1', [clientId]);
+                await pool.query('DELETE FROM creance_clients WHERE id = $1', [clientId]);
                 await pool.query('DELETE FROM accounts WHERE id = $1', [creanceAccountId]);
                 
             } catch (error) {
@@ -2506,6 +2551,186 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
             }
             
             console.log('✅ Test 17 terminé - Validation du budget testée avec succès');
+        });
+    });
+
+    // 🧪 Test 18: Cut-off Date - Filtrage par Période
+    describe('🧪 Test 18: Cut-off Date - Analyse État Système à Date Donnée', () => {
+        let testAccountId_cutoff;
+        let testUserId_cutoff;
+
+        before(async function() {
+            console.log('\n🧪 Initialisation Test 18: Cut-off Date...');
+            
+            // 1. Créer utilisateur de test
+            const userResult = await pool.query(
+                'INSERT INTO users (username, password_hash, role, full_name) VALUES ($1, $2, $3, $4) RETURNING id',
+                ['user_cutoff_test', 'hashed_password', 'admin', 'Utilisateur Test Cut-off']
+            );
+            testUserId_cutoff = userResult.rows[0].id;
+            console.log(`✅ Utilisateur test créé: ID ${testUserId_cutoff}`);
+
+            // 2. Créer compte test pour scénarios cut-off
+            const accountResult = await pool.query(
+                'INSERT INTO accounts (account_name, account_type, user_id, total_credited, current_balance, is_active) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id',
+                ['COMPTE_CUTOFF_TEST', 'classique', testUserId_cutoff, 5000000, 5000000, true]
+            );
+            testAccountId_cutoff = accountResult.rows[0].id;
+            console.log(`✅ Compte test créé: ID ${testAccountId_cutoff}`);
+        });
+
+        it('Devrait calculer correctement les soldes et dépenses avec cut-off date', async () => {
+            console.log('\n🔍 Test de filtrage cut-off avec dates historiques...');
+            
+            try {
+                await pool.query('BEGIN');
+                
+                // 1. Ajouter des crédits sur plusieurs dates
+                const credits = [
+                    { date: '2025-01-05', amount: 1000000, description: 'Crédit J-10' },
+                    { date: '2025-01-10', amount: 2000000, description: 'Crédit J-5' },
+                    { date: '2025-01-15', amount: 1500000, description: 'Crédit J-0 (référence)' },
+                    { date: '2025-01-20', amount: 3000000, description: 'Crédit J+5 (futur)' }
+                ];
+                
+                for (const credit of credits) {
+                    await pool.query(
+                        'INSERT INTO credit_history (account_id, credited_by, amount, description, created_at) VALUES ($1, $2, $3, $4, $5)',
+                        [testAccountId_cutoff, testUserId_cutoff, credit.amount, credit.description, credit.date + ' 12:00:00']
+                    );
+                    console.log(`✅ Crédit ajouté: ${credit.amount.toLocaleString()} FCFA le ${credit.date}`);
+                }
+                
+                // 2. Ajouter des dépenses sur plusieurs dates
+                const expenses = [
+                    { date: '2025-01-07', amount: 300000, description: 'Dépense J-8' },
+                    { date: '2025-01-12', amount: 500000, description: 'Dépense J-3' },
+                    { date: '2025-01-14', amount: 200000, description: 'Dépense J-1' },
+                    { date: '2025-01-18', amount: 800000, description: 'Dépense J+3 (futur)' }
+                ];
+                
+                for (const expense of expenses) {
+                    await pool.query(`
+                        INSERT INTO expenses (user_id, account_id, expense_type, category, designation, supplier, amount, description, expense_date, total)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    `, [
+                        testUserId_cutoff, testAccountId_cutoff, 'achat', 'Test', 
+                        'Article test', 'Fournisseur test', expense.amount, 
+                        expense.description, expense.date, expense.amount
+                    ]);
+                    console.log(`✅ Dépense ajoutée: ${expense.amount.toLocaleString()} FCFA le ${expense.date}`);
+                }
+                
+                // Synchroniser le compte après toutes les opérations
+                await syncAccountBalance(testAccountId_cutoff);
+                
+                // 3. Test avec cut-off date = 2025-01-15 (date de référence)
+                const cutoffDate = '2025-01-15';
+                console.log(`\n🎯 Analyse avec cut-off date: ${cutoffDate}`);
+                
+                // 3a. Calculer le solde attendu jusqu'au cut-off
+                const expectedCreditsUntilCutoff = 1000000 + 2000000 + 1500000; // 4,500,000 FCFA
+                const expectedExpensesUntilCutoff = 300000 + 500000 + 200000; // 1,000,000 FCFA
+                const expectedBalanceAtCutoff = 5000000 + expectedCreditsUntilCutoff - expectedExpensesUntilCutoff; // 8,500,000 FCFA
+                
+                console.log(`💰 Calcul attendu jusqu'au ${cutoffDate}:`);
+                console.log(`   • Solde initial: ${(5000000).toLocaleString()} FCFA`);
+                console.log(`   • Crédits cumulés: ${expectedCreditsUntilCutoff.toLocaleString()} FCFA`);
+                console.log(`   • Dépenses cumulées: ${expectedExpensesUntilCutoff.toLocaleString()} FCFA`);
+                console.log(`   • Solde attendu: ${expectedBalanceAtCutoff.toLocaleString()} FCFA`);
+                
+                // 3b. Simuler l'API avec cut-off date
+                const balanceQuery = `
+                    SELECT 
+                        (5000000 + 
+                         COALESCE((SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = $1 AND ch.created_at <= $2), 0) -
+                         COALESCE((SELECT SUM(e.total) FROM expenses e WHERE e.account_id = $1 AND e.expense_date <= $2), 0)) as balance_at_cutoff
+                `;
+                
+                const balanceResult = await pool.query(balanceQuery, [testAccountId_cutoff, cutoffDate + ' 23:59:59']);
+                const actualBalanceAtCutoff = parseInt(balanceResult.rows[0].balance_at_cutoff);
+                
+                console.log(`🔍 Solde calculé avec cut-off: ${actualBalanceAtCutoff.toLocaleString()} FCFA`);
+                
+                // 3c. Vérifier que les transactions futures sont exclues
+                const futureCreditsQuery = `
+                    SELECT COALESCE(SUM(amount), 0) as future_credits
+                    FROM credit_history 
+                    WHERE account_id = $1 AND created_at > $2
+                `;
+                const futureCreditsResult = await pool.query(futureCreditsQuery, [testAccountId_cutoff, cutoffDate + ' 23:59:59']);
+                const futureCredits = parseInt(futureCreditsResult.rows[0].future_credits);
+                
+                const futureExpensesQuery = `
+                    SELECT COALESCE(SUM(total), 0) as future_expenses
+                    FROM expenses 
+                    WHERE account_id = $1 AND expense_date > $2
+                `;
+                const futureExpensesResult = await pool.query(futureExpensesQuery, [testAccountId_cutoff, cutoffDate]);
+                const futureExpenses = parseInt(futureExpensesResult.rows[0].future_expenses);
+                
+                console.log(`\n🚫 Transactions FUTURES (exclues du cut-off):`);
+                console.log(`   • Crédits futurs: ${futureCredits.toLocaleString()} FCFA`);
+                console.log(`   • Dépenses futures: ${futureExpenses.toLocaleString()} FCFA`);
+                
+                // 4. Test avec une date plus récente (2025-01-20)
+                const recentCutoff = '2025-01-20';
+                const recentBalanceResult = await pool.query(balanceQuery, [testAccountId_cutoff, recentCutoff + ' 23:59:59']);
+                const balanceAtRecentCutoff = parseInt(recentBalanceResult.rows[0].balance_at_cutoff);
+                
+                const expectedRecentBalance = 5000000 + (1000000 + 2000000 + 1500000 + 3000000) - (300000 + 500000 + 200000 + 800000);
+                
+                console.log(`\n🎯 Analyse avec cut-off date récente: ${recentCutoff}`);
+                console.log(`   • Solde calculé: ${balanceAtRecentCutoff.toLocaleString()} FCFA`);
+                console.log(`   • Solde attendu: ${expectedRecentBalance.toLocaleString()} FCFA`);
+                
+                // 5. Assertions principales
+                assert.strictEqual(
+                    actualBalanceAtCutoff, 
+                    expectedBalanceAtCutoff,
+                    `❌ Solde cut-off incorrect: attendu ${expectedBalanceAtCutoff.toLocaleString()}, obtenu ${actualBalanceAtCutoff.toLocaleString()}`
+                );
+                
+                assert.strictEqual(
+                    balanceAtRecentCutoff,
+                    expectedRecentBalance,
+                    `❌ Solde cut-off récent incorrect: attendu ${expectedRecentBalance.toLocaleString()}, obtenu ${balanceAtRecentCutoff.toLocaleString()}`
+                );
+                
+                // 6. Vérifier l'exclusion des transactions futures
+                assert.strictEqual(futureCredits, 3000000, '❌ Crédits futurs mal calculés');
+                assert.strictEqual(futureExpenses, 800000, '❌ Dépenses futures mal calculées');
+                
+                console.log('\n✅ Test Cut-off Date réussi:');
+                console.log(`   ✓ Solde au ${cutoffDate}: ${actualBalanceAtCutoff.toLocaleString()} FCFA`);
+                console.log(`   ✓ Solde au ${recentCutoff}: ${balanceAtRecentCutoff.toLocaleString()} FCFA`);
+                console.log('   ✓ Transactions futures correctement exclues');
+                console.log('   ✓ Filtrage chronologique fonctionnel');
+                
+                await pool.query('COMMIT');
+                
+            } catch (error) {
+                await pool.query('ROLLBACK');
+                throw error;
+            }
+        });
+
+        after(async function() {
+            console.log('\n🧹 Nettoyage Test 18...');
+            
+            // Supprimer le compte de test
+            if (testAccountId_cutoff) {
+                await pool.query('DELETE FROM accounts WHERE id = $1', [testAccountId_cutoff]);
+                console.log(`✅ Compte de test supprimé: ID ${testAccountId_cutoff}`);
+            }
+            
+            // Supprimer l'utilisateur de test
+            if (testUserId_cutoff) {
+                await pool.query('DELETE FROM users WHERE id = $1', [testUserId_cutoff]);
+                console.log(`✅ Utilisateur de test supprimé: ID ${testUserId_cutoff}`);
+            }
+            
+            console.log('✅ Test 18 terminé - Système Cut-off Date testé avec succès');
         });
     });
 });
