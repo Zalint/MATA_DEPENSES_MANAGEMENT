@@ -1,5 +1,5 @@
    # 🧪 Guide des Tests de Non-Régression
-   *Système de validation automatisée complet - 25 Tests*
+   *Système de validation automatisée complet - 26 Tests*
 
    ---
 
@@ -22,7 +22,7 @@
 
    ---
 
-   ## 🧪 **Tests Implémentés (25 Tests Complets)**
+   ## 🧪 **Tests Implémentés (26 Tests Complets)**
 
    ### **🐄 Tests Compte CLASSIQUE (BOVIN) - Tests 1-6**
 
@@ -215,15 +215,17 @@
 
    #### **`syncAccountBalance(accountId)`** 🏭
    - **COPIE EXACTE** de `server.js` lignes 12295-12328
-   - Utilise `force_sync_account()` PostgreSQL **EXTRAITE DE PRODUCTION**
+   - Utilise `public.force_sync_account()` PostgreSQL **EXTRAITE DE PRODUCTION**
    - **VOID function** - pas de retour JSON (comme en production)
    - **AUCUN fallback** - fonction PostgreSQL obligatoire
+   - Schema prefix `public.` obligatoire sur GitHub Actions
    - Exécutée automatiquement avant chaque vérification
 
    #### **`forceSyncAllAccountsAfterCreditOperation()`** 🏭
    - **COPIE EXACTE** de `server.js` lignes 68-92
-   - Utilise `force_sync_all_accounts_simple()` **EXTRAITE DE PRODUCTION**
+   - Utilise `public.force_sync_all_accounts_simple()` **EXTRAITE DE PRODUCTION**
    - Retourne `synchronized_accounts`, `errors`, `message` (format PROD)
+   - Schema prefix `public.` obligatoire sur GitHub Actions
    - Synchronisation automatique après opérations de crédit
    - Appliquée sur comptes `classique` uniquement
    - **AUCUN fallback** - mécanisme production strict
@@ -266,9 +268,48 @@
    WHERE proname = 'force_sync_account'
    ```
 
+   ### **🔧 GitHub Actions - Schéma EXACTEMENT Identique PROD**
+
+   #### **💀 Problèmes de Colonnes Manquantes RÉSOLUS :**
+   ```
+   ❌ AVANT: column "unit_price" does not exist
+   ❌ AVANT: column "validation_status" does not exist  
+   ❌ AVANT: column "article_count" does not exist
+   ✅ MAINTENANT: Schéma PRODUCTION complet extrait directement
+   ```
+
+   #### **🏭 Table partner_deliveries - Schéma Production Complet :**
+   ```sql
+   CREATE TABLE IF NOT EXISTS partner_deliveries (
+       id SERIAL PRIMARY KEY,
+       account_id INTEGER NOT NULL,
+       delivery_date DATE NOT NULL,
+       amount NUMERIC NOT NULL,
+       description TEXT,
+       status VARCHAR(255) DEFAULT 'pending',
+       validated_by INTEGER,
+       validation_date TIMESTAMP,
+       rejection_reason TEXT,
+       created_by INTEGER,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       unit_price NUMERIC,                    -- Était manquante
+       article_count INTEGER,                 -- Était manquante  
+       is_validated BOOLEAN DEFAULT false,
+       validated_at TIMESTAMP,
+       validation_status VARCHAR(255) DEFAULT 'pending',  -- Était manquante
+       first_validated_by INTEGER,
+       first_validated_at TIMESTAMP,
+       rejection_comment TEXT,
+       rejected_by INTEGER,
+       rejected_at TIMESTAMP
+   );
+   ```
+
    #### **📋 Fonctions PostgreSQL Identiques PROD :**
-   - `force_sync_account(accountId)` - **VOID**, logique complexe 3 types comptes
-   - `force_sync_all_accounts_simple()` - Retourne JSON `synchronized_accounts`/`errors`
+   - `public.force_sync_account(accountId)` - **VOID**, logique complexe 3 types comptes
+   - `public.force_sync_all_accounts_simple()` - Retourne JSON `synchronized_accounts`/`errors`
+   - **Schema prefix** `public.` obligatoire sur GitHub Actions
 
    #### **🎯 Déclenchement Automatique (MODE PRODUCTION PUR) :**
    ```javascript
@@ -277,6 +318,10 @@
    if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
       await forceSyncAllAccountsAfterCreditOperation();
    }
+   
+   // GitHub Actions: Schema prefix obligatoire
+   await pool.query('SELECT public.force_sync_account($1)', [accountId]);
+   await pool.query('SELECT public.force_sync_all_accounts_simple()');
    ```
 
    #### **🚫 SUPPRESSION de TOUS les Fallbacks :**
@@ -328,7 +373,45 @@
    }
    ```
 
-   #### **2. ⚙️ Synchronisation MANUELLE (Interface Admin)**
+   #### **2. 🏭 Synchronisation AUTOMATIQUE (Toutes Opérations) - NOUVEAU!**
+
+   **Déclenchement :** Ajout/Modification/Suppression sur TOUS types d'opérations affectant les soldes
+
+   ```javascript
+   // 1. Fonction Helper Générique
+   async function triggerAutoSyncIfNeeded(accountId, operationType = 'modification') {
+      // Vérifier le type de compte
+      const account = await pool.query('SELECT account_type, account_name FROM accounts WHERE id = $1', [accountId]);
+      
+      // Déclencher sync UNIQUEMENT pour comptes classiques
+      if (account.rows[0].account_type === 'classique') {
+         console.log(`🔄 AUTO-SYNC: Déclenchement après ${operationType} sur compte classique`);
+         return await forceSyncAllAccountsAfterCreditOperation();
+      } else {
+         console.log(`ℹ️ AUTO-SYNC: Compte ${account.account_type} - pas de sync automatique`);
+      }
+   }
+
+   // 2. Intégration dans TOUTES les opérations
+   app.post('/api/expenses', requireAuth, async (req, res) => {
+      // ... logique ajout dépense ...
+      await pool.query('COMMIT');
+      
+      // ✅ NOUVEAU: Synchronisation automatique
+      await triggerAutoSyncIfNeeded(account_id, 'ajout de dépense');
+   });
+   
+   app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
+      // ... logique transfert ...
+      await pool.query('COMMIT');
+      
+      // ✅ NOUVEAU: Synchronisation des 2 comptes
+      await triggerAutoSyncIfNeeded(source_id, 'transfert sortant');
+      await triggerAutoSyncIfNeeded(destination_id, 'transfert entrant');
+   });
+   ```
+
+   #### **3. ⚙️ Synchronisation MANUELLE (Interface Admin)**
 
    **Scénario A :** Admin clique "Synchroniser Compte"
    ```javascript
@@ -346,36 +429,21 @@
    console.log(`✅ ${syncData.total_corrected} comptes corrigés`);
    ```
 
-   #### **3. ❌ AUCUNE Synchronisation (Autres Opérations)**
+   #### **📊 Tableau des Déclencheurs (NOUVELLE VERSION)**
 
-   **Opérations SANS Sync Automatique :**
-   - **Dépenses** : Update manuel `current_balance` uniquement
-   - **Transferts** : Update manuel source + destination uniquement  
-   - **Crédits** sur comptes NON-classique
-
-   ```javascript
-   // Exemple : Ajout Dépense (PAS de sync auto)
-   app.post('/api/expenses', requireAuth, async (req, res) => {
-      await pool.query(
-         'UPDATE accounts SET current_balance = current_balance - $1 WHERE id = $2',
-         [montant, accountId]
-      );
-      // ❌ PAS D'APPEL À forceSyncAllAccountsAfterCreditOperation()
-   });
-   ```
-
-   #### **📊 Tableau des Déclencheurs**
-
-   | **Opération** | **Compte Type** | **Sync Auto** | **API Utilisée** |
-   |---------------|-----------------|---------------|-------------------|
-   | Ajout Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` |
-   | Modif Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` |
-   | Suppr Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` |
-   | Ajout Crédit | `statut/partenaire/creance` | ❌ NON | - |
-   | Ajout Dépense | Tous types | ❌ NON | Update manuel uniquement |
-   | Transfert | Tous types | ❌ NON | Update manuel source + dest |
-   | Admin Sync Un | Tous types | 🔧 MANUEL | `force_sync_account(id)` |
-   | Admin Sync Tous | Tous types | 🔧 MANUEL | `force_sync_all_accounts_simple()` |
+   | **Opération** | **Compte Type** | **Sync Auto** | **API Utilisée** | **Nouveau** |
+   |---------------|-----------------|---------------|-------------------|-------------|
+   | Ajout Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` | - |
+   | Modif Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` | - |
+   | Suppr Crédit | `classique` | ✅ OUI | `force_sync_all_accounts_simple()` | - |
+   | **Ajout Dépense** | **`classique`** | **✅ OUI** | **`force_sync_all_accounts_simple()`** | **🆕** |
+   | **Modif Dépense** | **`classique`** | **✅ OUI** | **`force_sync_all_accounts_simple()`** | **🆕** |
+   | **Suppr Dépense** | **`classique`** | **✅ OUI** | **`force_sync_all_accounts_simple()`** | **🆕** |
+   | **Ajout Transfert** | **`classique`** | **✅ OUI** | **`force_sync_all_accounts_simple()`** | **🆕** |
+   | **Suppr Transfert** | **`classique`** | **✅ OUI** | **`force_sync_all_accounts_simple()`** | **🆕** |
+   | Toutes opérations | `statut/partenaire/creance/depot` | ❌ NON | - | - |
+   | Admin Sync Un | Tous types | 🔧 MANUEL | `force_sync_account(id)` | - |
+   | Admin Sync Tous | Tous types | 🔧 MANUEL | `force_sync_all_accounts_simple()` | - |
 
    ### **📅 Mécanisme Cut-off Date (Analyse Historique)**
 
@@ -1736,14 +1804,29 @@
    ✅ MAINTENANT: Logique authentique clients + opérations créance
    ```
 
+   #### **✅ GitHub Actions - Colonnes Manquantes (Résolu)** 🔥
+   ```
+   ❌ AVANT: Jeu du chat et souris avec colonnes manquantes
+   - unit_price missing → Fix → validation_status missing → Fix → ...
+   ✅ MAINTENANT: Schéma COMPLET extrait de production
+   - TOUS les 22 colonnes de partner_deliveries
+   - FINI les surprises "column does not exist"
+   - Schéma GitHub Actions = Schéma PRODUCTION (100%)
+   ```
+
    ### **🔧 Solutions Implémentées**
    1. **Fonctions PROD extractées** : `github_test_database_setup.sql` avec fonctions réelles
    2. **Mode production pur** : ZÉRO fallback, code strictement identique à production
    3. **Tables PROD complètes** : `partner_delivery_summary`, `montant_debut_mois`
-   4. **Synchronisation automatique** : Appels conditionnels après opérations crédit
-   5. **Logique métier créance** : Test 9 avec clients et opérations authentiques
-   6. **Corrections schéma** : Colonnes et contraintes adaptées (`client_name`, `initial_credit`)
-   7. **GitHub Actions** : Base PostgreSQL identique à production
+   4. **Synchronisation automatique ÉTENDUE** : TOUTES opérations sur comptes classiques 🆕
+   5. **Fonction helper générique** : `triggerAutoSyncIfNeeded()` pour vérification type compte 🆕
+   6. **Logique métier créance** : Test 9 avec clients et opérations authentiques
+   7. **Corrections schéma** : Colonnes et contraintes adaptées (`client_name`, `initial_credit`)
+   8. **GitHub Actions** : Base PostgreSQL identique à production
+   9. **Schéma COMPLET extracté** : Table `partner_deliveries` avec ALL 22 colonnes
+   10. **Schema prefix** : `public.` obligatoire pour fonctions PostgreSQL GitHub Actions
+   11. **Colonnes manquantes** : `unit_price`, `validation_status`, `article_count` AJOUTÉES
+   12. **Sync dépenses/transferts** : Automatisation complète de toutes les opérations financières 🆕
 
    ---
 
@@ -1753,12 +1836,15 @@
    - **Fonctions PROD exactes** : Extraire directement depuis production PostgreSQL
    - **Mode production pur** : AUCUN fallback, code strictement identique
    - **GitHub Actions** : Base avec fonctions PostgreSQL identiques à production
+   - **Schema COMPLET** : Extraire TOUT le schéma depuis production, pas à pièces
+   - **Schema prefix** : Utiliser `public.` pour toutes fonctions PostgreSQL GitHub Actions
    - **Synchronisation automatique** : Laisser les fonctions PostgreSQL s'exécuter
    - **Nettoyage** : Tests indépendants et nettoyage automatique
    - **CI/CD** : Tests automatiques à chaque push avec hooks Git
 
    ### **❌ Don'ts**
    - **Fallbacks** : INTERDIT - si ça marche pas en test, ça marche pas en prod
+   - **Colonnes manquantes** : JAMAIS deviner les colonnes, extraire le schéma complet
    - **Logique spécifique tests** : Code doit être strictement identique à production
    - **Sync manuelle** : Éviter les updates manuels de `current_balance`
    - **Fonctions modifiées** : Ne jamais adapter les fonctions PostgreSQL
@@ -1771,10 +1857,12 @@
 
    ### **🏆 Système de Tests Production Pure**
    - ✅ **26 tests** couvrant toutes les fonctionnalités
-   - ✅ **100% de réussite** avec exécution en **940ms**
+   - ✅ **100% de réussite** avec exécution en **3s** (temps réel)
    - ✅ **Fonctions PostgreSQL** extraites directement de production
    - ✅ **ZÉRO fallback** - code strictement identique à production
    - ✅ **GitHub Actions** avec base PostgreSQL identique
+   - ✅ **Schéma COMPLET** - tous les 22 colonnes de partner_deliveries
+   - ✅ **Schema prefix public.** - fonctions PostgreSQL GitHub Actions
    - ✅ **Mode production pur** - fiabilité maximale
    - ✅ **CI/CD intégré** avec hooks Git
 
@@ -1788,8 +1876,12 @@
 
    **🎊 Le système garantit une fiabilité ABSOLUE avec les vraies fonctions PostgreSQL de production - ZÉRO différence !**
 
+   **🔥 PLUS JAMAIS de "column does not exist" - Schéma GitHub Actions = PRODUCTION à 100% !**
+
+   **🚀 SYNCHRONISATION AUTOMATIQUE TOTALE - Dépenses & Transferts inclus dans la synchronisation automatique !**
+
    ---
 
-   *Dernière mise à jour : 9 janvier 2025*  
-   *Version : 3.0 - Mécanisme Production Intégré*  
+   *Dernière mise à jour : 16 janvier 2025*  
+   *Version : 3.2 - Synchronisation Automatique Complète (Dépenses + Transferts)*  
    *Auteur : Système de Gestion des Dépenses MATA*

@@ -91,6 +91,43 @@ async function forceSyncAllAccountsAfterCreditOperation() {
     }
 }
 
+// Fonction helper générique pour vérifier le type de compte et déclencher la synchronisation automatique
+async function triggerAutoSyncIfNeeded(accountId, operationType = 'modification') {
+    try {
+        if (!accountId) {
+            console.log('⚠️ AUTO-SYNC: Aucun compte ID fourni, synchronisation ignorée');
+            return { success: false, message: 'Aucun compte ID fourni' };
+        }
+
+        // Vérifier le type de compte
+        const accountTypeCheck = await pool.query('SELECT account_type, account_name FROM accounts WHERE id = $1', [accountId]);
+        
+        if (accountTypeCheck.rows.length === 0) {
+            console.log(`⚠️ AUTO-SYNC: Compte ${accountId} non trouvé, synchronisation ignorée`);
+            return { success: false, message: 'Compte non trouvé' };
+        }
+
+        const account = accountTypeCheck.rows[0];
+        
+        // Déclencher la synchronisation UNIQUEMENT pour les comptes classiques
+        if (account.account_type === 'classique') {
+            console.log(`🔄 AUTO-SYNC: Déclenchement synchronisation après ${operationType} sur compte classique "${account.account_name}"`);
+            return await forceSyncAllAccountsAfterCreditOperation();
+        } else {
+            console.log(`ℹ️ AUTO-SYNC: Compte "${account.account_name}" de type "${account.account_type}" - synchronisation automatique non nécessaire`);
+            return { success: true, message: `Compte ${account.account_type} - pas de sync automatique` };
+        }
+        
+    } catch (error) {
+        console.error('❌ AUTO-SYNC: Erreur lors de la vérification du type de compte:', error);
+        return {
+            success: false,
+            message: 'Erreur lors de la vérification du type de compte',
+            error: error.message
+        };
+    }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -649,6 +686,9 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
         console.log('💾 Validation de la transaction');
         await pool.query('COMMIT');
         
+        // Déclencher la synchronisation automatique si c'est un compte classique
+        await triggerAutoSyncIfNeeded(account_id, 'ajout de dépense');
+        
         console.log('🎉 SUCCÈS: Dépense ajoutée avec succès');
         res.json(expenseResult.rows[0]);
     } catch (error) {
@@ -950,11 +990,8 @@ app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
 
             await client.query('COMMIT');
             
-            // Vérifier si le compte est de type classique pour la synchronisation
-            const accountTypeCheck = await client.query('SELECT account_type FROM accounts WHERE id = $1', [accountId]);
-            if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
-                await forceSyncAllAccountsAfterCreditOperation();
-            }
+            // Déclencher la synchronisation automatique si c'est un compte classique
+            await triggerAutoSyncIfNeeded(accountId, 'suppression de crédit');
 
             console.log(`✅ API: Crédit ${creditId} supprimé par ${req.session.user.username}: ${formatCurrency(oldAmount)}`);
 
@@ -4189,6 +4226,14 @@ app.put('/api/expenses/:id', requireAuth, upload.single('justification'), async 
         
         await pool.query('COMMIT');
         
+        // Déclencher la synchronisation automatique si un compte classique est affecté
+        if (oldAccountId) {
+            await triggerAutoSyncIfNeeded(oldAccountId, 'modification de dépense (ancien compte)');
+        }
+        if (newAccountId && newAccountId !== oldAccountId) {
+            await triggerAutoSyncIfNeeded(newAccountId, 'modification de dépense (nouveau compte)');
+        }
+        
         res.json({
             message: 'Dépense modifiée avec succès',
             expense: updateResult.rows[0]
@@ -4256,6 +4301,11 @@ app.delete('/api/expenses/:id', requireAuth, async (req, res) => {
         await pool.query('DELETE FROM expenses WHERE id = $1', [expenseId]);
         
         await pool.query('COMMIT');
+        
+        // Déclencher la synchronisation automatique si c'est un compte classique
+        if (expense.account_id) {
+            await triggerAutoSyncIfNeeded(expense.account_id, 'suppression de dépense');
+        }
         
         res.json({
             message: `Dépense supprimée avec succès. Le solde du compte "${expense.account_name}" a été restauré.`
@@ -4443,11 +4493,8 @@ app.delete('/api/credit-history/:id', requireAdminAuth, async (req, res) => {
             
             await client.query('COMMIT');
             
-            // Vérifier si le compte est de type classique pour la synchronisation
-            const accountTypeCheck = await client.query('SELECT account_type FROM accounts WHERE id = $1', [credit.account_id]);
-            if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
-                await forceSyncAllAccountsAfterCreditOperation();
-            }
+            // Déclencher la synchronisation automatique si c'est un compte classique
+            await triggerAutoSyncIfNeeded(credit.account_id, 'suppression de crédit');
             
             console.log(`[Admin] Crédit ${creditId} supprimé par ${req.session.user.username}`);
             
@@ -4534,11 +4581,8 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
             
             await client.query('COMMIT');
             
-            // Vérifier si le compte est de type classique pour la synchronisation
-            const accountTypeCheck = await client.query('SELECT account_type FROM accounts WHERE id = $1', [credit.account_id]);
-            if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
-                await forceSyncAllAccountsAfterCreditOperation();
-            }
+            // Déclencher la synchronisation automatique si c'est un compte classique
+            await triggerAutoSyncIfNeeded(credit.account_id, 'suppression de crédit de directeur');
             
             console.log(`[Directeur] Crédit ${creditId} supprimé par ${req.session.user.username}`);
             
@@ -8057,6 +8101,11 @@ app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
         const destAfter = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [destination_id]);
         console.log('[Transfert] Soldes APRES:', { source: sourceAfter.rows[0].current_balance, dest: destAfter.rows[0].current_balance });
         await pool.query('COMMIT');
+        
+        // Déclencher la synchronisation automatique pour les comptes classiques impliqués
+        await triggerAutoSyncIfNeeded(source_id, 'transfert sortant');
+        await triggerAutoSyncIfNeeded(destination_id, 'transfert entrant');
+        
         res.json({ success: true });
     } catch (e) {
         await pool.query('ROLLBACK');
@@ -8280,6 +8329,10 @@ app.delete('/api/transfers/:transferId', requireSuperAdmin, async (req, res) => 
             });
             
             await pool.query('COMMIT');
+            
+            // Déclencher la synchronisation automatique pour les comptes classiques impliqués
+            await triggerAutoSyncIfNeeded(transfer.source_id, 'annulation transfert (remboursement)');
+            await triggerAutoSyncIfNeeded(transfer.destination_id, 'annulation transfert (débit)');
             
             res.json({ 
                 success: true,
