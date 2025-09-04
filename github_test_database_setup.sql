@@ -150,17 +150,27 @@ CREATE TABLE IF NOT EXISTS stock_vivant (
 -- =====================================================
 CREATE TABLE IF NOT EXISTS partner_deliveries (
     id SERIAL PRIMARY KEY,
-    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL,
     delivery_date DATE NOT NULL,
-    amount INTEGER NOT NULL,
+    amount NUMERIC NOT NULL,
     description TEXT,
-    article_count INTEGER DEFAULT 1,
-    unit_price INTEGER DEFAULT 0,
-    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'first_validated', 'fully_validated', 'rejected')),
-    validated_by INTEGER REFERENCES users(id),
+    status VARCHAR(255) DEFAULT 'pending',
+    validated_by INTEGER,
     validation_date TIMESTAMP,
-    created_by INTEGER REFERENCES users(id),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    rejection_reason TEXT,
+    created_by INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    unit_price NUMERIC,
+    article_count INTEGER,
+    is_validated BOOLEAN DEFAULT false,
+    validated_at TIMESTAMP,
+    validation_status VARCHAR(255) DEFAULT 'pending',
+    first_validated_by INTEGER,
+    first_validated_at TIMESTAMP,
+    rejection_comment TEXT,
+    rejected_by INTEGER,
+    rejected_at TIMESTAMP
 );
 
 -- =====================================================
