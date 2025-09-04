@@ -470,6 +470,10 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
 
                 await pool.query('COMMIT');
                 
+                // Force sync both accounts after transfer
+                await syncAccount(sourceAccountId);
+                await syncAccount(destAccountId);
+                
                 await checkBalanceConsistency(sourceAccountId, 'BOVIN après transfert sortant 750 FCFA');
                 await checkBalanceConsistency(destAccountId, 'OVIN après transfert entrant 750 FCFA');
                 console.log(`✅ Transfert de 750 FCFA effectué avec ID: ${transferId}`);
