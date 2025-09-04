@@ -1,35 +1,31 @@
 @echo off
-echo ============================================
-echo   DEMARRAGE SERVEUR DEPENSES MANAGEMENT
-echo   Base de donnees: PREPROD
-echo ============================================
-echo.
+echo 🧪 ==================================
+echo 🧪 TESTS DE NON-REGRESSION PRE-PUSH
+echo 🧪 ==================================
 
-REM Configuration des variables d'environnement pour la base de donnees preprod
+echo 📋 Configuration des variables d'environnement...
 set DB_HOST=localhost
 set DB_PORT=5432
 set DB_NAME=depenses_management_preprod
 set DB_USER=zalint
 set DB_PASSWORD=bonea2024
+set NODE_ENV=test
 
-echo Configuration base de donnees:
-echo - Host: %DB_HOST%
-echo - Port: %DB_PORT%
-echo - Database: %DB_NAME%
-echo - User: %DB_USER%
-echo.
+echo ⚡ Démarrage des tests de régression...
+call npm run test:regression
 
-REM Arreter tout processus Node.js existant
-echo Arret des processus Node.js existants...
-taskkill /f /im node.exe 2>nul
-if %errorlevel% == 0 (
-    echo Processus Node.js arretes.
-) else (
-    echo Aucun processus Node.js a arreter.
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ ==================================
+    echo ❌ TESTS DE REGRESSION ECHOUES!
+    echo ❌ ==================================
+    echo ❌ Les tests de non-régression ont échoué.
+    echo ❌ Corrigez les erreurs avant de continuer.
+    pause
+    exit /b 1
 )
-echo.
 
-REM Demarrer le serveur
-echo Demarrage du serveur...
-echo.
-node server.js
+echo ✅ ==================================
+echo ✅ TESTS DE REGRESSION REUSSIS!
+echo ✅ ==================================
+echo ✅ Tous les tests de non-régression sont passés.
+pause

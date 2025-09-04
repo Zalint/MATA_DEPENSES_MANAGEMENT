@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "start_preprod": "npm run test:regression",
     "test": "mocha test_core_functions.js --timeout 10000",
     "test:bovin": "mocha test_regression.js --timeout 15000",
     "test:regression": "mocha test_regression.js --timeout 15000",
