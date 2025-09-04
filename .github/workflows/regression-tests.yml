@@ -48,8 +48,22 @@ jobs:
 
     - name: 🏗️ Initialisation de la base de données de test
       run: |
+        # Vérifier que le fichier SQL existe
+        if [ ! -f "github_test_database_setup.sql" ]; then
+          echo "❌ Fichier github_test_database_setup.sql non trouvé"
+          ls -la *.sql
+          exit 1
+        fi
+        
+        echo "✅ Fichier github_test_database_setup.sql trouvé"
+        echo "📝 Taille du fichier:"
+        wc -l github_test_database_setup.sql
+        
         # Utiliser le script complet de setup de la base de données
+        echo "🔄 Exécution du script de setup..."
         PGPASSWORD=$DB_PASSWORD psql -h localhost -U $DB_USER -d $DB_NAME -f github_test_database_setup.sql
+        
+        echo "✅ Setup de la base de données terminé"
 
     - name: 🧪 Exécution des tests de base
       run: npm run test
