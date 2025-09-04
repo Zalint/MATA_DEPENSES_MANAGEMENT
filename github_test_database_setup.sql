@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS partner_deliveries (
     amount INTEGER NOT NULL,
     description TEXT,
     article_count INTEGER DEFAULT 1,
+    unit_price INTEGER DEFAULT 0,
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'first_validated', 'fully_validated', 'rejected')),
     validated_by INTEGER REFERENCES users(id),
     validation_date TIMESTAMP,
