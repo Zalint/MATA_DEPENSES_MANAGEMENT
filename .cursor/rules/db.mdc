@@ -1,0 +1,22 @@
+---
+description:
+
+1. DB
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=depenses_management_preprod
+DB_USER=zalint
+DB_PASSWORD=bonea2024
+
+2. J'utilise Windows
+3. PROBLÈME TIMEZONE CRITIQUE: 
+   - new Date(year, month, 1) utilise le timezone local (GMT+4) et cause un décalage
+   - Exemple: new Date(2025, 8, 1) devient "2025-08-31T20:00:00.000Z" au lieu de "2025-09-01T00:00:00.000Z"
+   - SOLUTION: Utiliser des chaînes de dates explicites: new Date("2025-09-01T00:00:00")
+   - OU séparer la logique: dates UTC pour calculs SQL, chaînes fixes pour affichage frontend
+   - SYMPTÔME: Période affichée "31/08/2025 au 04/09/2025" au lieu de "01/09/2025 au 04/09/2025" 
+
+
+globs:
+alwaysApply: true
+---

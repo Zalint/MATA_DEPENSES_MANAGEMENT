@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "test": "mocha test_core_functions.js --timeout 10000",
+    "test:bovin": "mocha test_regression.js --timeout 15000",
+    "test:regression": "mocha test_regression.js --timeout 15000",
+    "test:all": "npm run test && npm run test:regression",
     "dev": "nodemon server.js",
     "build": "echo 'No build step required'",
     "postinstall": "echo 'Installation complete'"

@@ -45,6 +45,25 @@ function cleanEncoding(obj) {
     return obj;
 }
 
+// Fonction utilitaire pour lire la configuration financière
+function getFinancialConfig() {
+    try {
+        const configPath = path.join(__dirname, 'financial_settings.json');
+        if (fs.existsSync(configPath)) {
+            const configData = fs.readFileSync(configPath, 'utf8');
+            return JSON.parse(configData);
+        }
+    } catch (error) {
+        console.error('Erreur lecture configuration financière:', error);
+    }
+    // Configuration par défaut si le fichier n'existe pas ou est corrompu
+    return {
+        charges_fixes_estimation: 5320000,
+        validate_expense_balance: true,
+        description: "Paramètres financiers et estimations pour les calculs du système"
+    };
+}
+
 // Fonction helper pour forcer la synchronisation de tous les comptes après modifications de crédit
 async function forceSyncAllAccountsAfterCreditOperation() {
     try {
@@ -534,47 +553,53 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
         if (account.account_type === 'statut') {
             console.log('✅ COMPTE STATUT: Validation du solde désactivée pour compte:', account.account_name);
         } else {
-            // Vérification du solde disponible pour les autres types de comptes
+            // Lire la configuration pour savoir si la validation est activée
+            const financialConfig = getFinancialConfig();
+            const validateBalance = financialConfig.validate_expense_balance;
+            
             console.log('💰 Vérification du solde pour compte classique');
             console.log('  - Solde actuel:', account.current_balance);
             console.log('  - Montant demandé:', finalAmount);
+            console.log('  - Validation activée:', validateBalance);
             
-            const currentBalance = account.current_balance;
-            // BYPASS TEMPORAIRE - VÉRIFICATION DE SOLDE DÉSACTIVÉE
-            /*
-            if (currentBalance < finalAmount) {
-                console.log('❌ ERREUR 400: Solde insuffisant');
-                return res.status(400).json({ 
-                    error: `Solde insuffisant. Solde disponible: ${currentBalance.toLocaleString()} FCFA, Montant demandé: ${finalAmount.toLocaleString()} FCFA` 
-                });
-            }
-            */
-            
-            // BYPASS TEMPORAIRE - VÉRIFICATION DU BUDGET TOTAL DÉSACTIVÉE
-            /*
-            // Vérification supplémentaire : le total des dépenses ne doit pas dépasser le total crédité
-            if (account.total_credited > 0) {
-                console.log('💳 Vérification du budget total crédité');
-                const totalSpentAfter = await pool.query(
-                    'SELECT COALESCE(SUM(total), 0) as total_spent FROM expenses WHERE account_id = $1',
-                    [account_id]
-                );
+            if (validateBalance) {
+                const currentBalance = account.current_balance;
                 
-                const currentTotalSpent = parseInt(totalSpentAfter.rows[0].total_spent);
-                const newTotalSpent = currentTotalSpent + finalAmount;
-                
-                console.log('  - Budget total:', account.total_credited);
-                console.log('  - Déjà dépensé:', currentTotalSpent);
-                console.log('  - Nouveau total après dépense:', newTotalSpent);
-                
-                if (newTotalSpent > account.total_credited) {
-                    console.log('❌ ERREUR 400: Dépassement du budget total');
+                // Vérification du solde disponible
+                if (currentBalance < finalAmount) {
+                    console.log('❌ ERREUR 400: Solde insuffisant');
                     return res.status(400).json({ 
-                        error: `Cette dépense dépasserait le budget total. Budget total: ${account.total_credited.toLocaleString()} FCFA, Déjà dépensé: ${currentTotalSpent.toLocaleString()} FCFA, Nouveau montant: ${finalAmount.toLocaleString()} FCFA` 
+                        error: `Solde insuffisant. Solde disponible: ${currentBalance.toLocaleString()} FCFA, Montant demandé: ${finalAmount.toLocaleString()} FCFA` 
                     });
                 }
+                
+                // Vérification supplémentaire : le total des dépenses ne doit pas dépasser le total crédité
+                if (account.total_credited > 0) {
+                    console.log('💳 Vérification du budget total crédité');
+                    const totalSpentAfter = await pool.query(
+                        'SELECT COALESCE(SUM(total), 0) as total_spent FROM expenses WHERE account_id = $1',
+                        [account_id]
+                    );
+                    
+                    const currentTotalSpent = parseInt(totalSpentAfter.rows[0].total_spent);
+                    const newTotalSpent = currentTotalSpent + finalAmount;
+                    
+                    console.log('  - Budget total:', account.total_credited);
+                    console.log('  - Déjà dépensé:', currentTotalSpent);
+                    console.log('  - Nouveau total après dépense:', newTotalSpent);
+                    
+                    if (newTotalSpent > account.total_credited) {
+                        console.log('❌ ERREUR 400: Dépassement du budget total');
+                        return res.status(400).json({ 
+                            error: `Cette dépense dépasserait le budget total. Budget total: ${account.total_credited.toLocaleString()} FCFA, Déjà dépensé: ${currentTotalSpent.toLocaleString()} FCFA, Nouveau montant: ${finalAmount.toLocaleString()} FCFA` 
+                        });
+                    }
+                }
+                
+                console.log('✅ Validation des soldes passée avec succès');
+            } else {
+                console.log('⚠️ Validation des soldes désactivée par configuration');
             }
-            */
         }
         
         console.log('🚀 Début de la transaction pour ajouter la dépense');
@@ -695,6 +720,40 @@ app.get('/api/accounts/for-credit', requireAdminAuth, async (req, res) => {
         res.json(result.rows);
     } catch (error) {
         console.error('Erreur récupération comptes pour crédit:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour récupérer les informations d'un compte spécifique avec son solde
+app.get('/api/accounts/:accountId/balance', requireAuth, async (req, res) => {
+    try {
+        const accountId = parseInt(req.params.accountId);
+        
+        const query = `
+            SELECT a.id, a.account_name, COALESCE(a.account_type, 'classique') as account_type,
+                   a.current_balance, a.total_credited, u.full_name as user_name
+            FROM accounts a
+            LEFT JOIN users u ON a.user_id = u.id
+            WHERE a.id = $1 AND a.is_active = true
+        `;
+        
+        const result = await pool.query(query, [accountId]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Compte non trouvé' });
+        }
+        
+        const account = result.rows[0];
+        
+        console.log('💰 API: Informations compte récupérées pour ID', accountId);
+        console.log('  - Nom:', account.account_name);
+        console.log('  - Type:', account.account_type);
+        console.log('  - Solde actuel:', account.current_balance);
+        console.log('  - Total crédité:', account.total_credited);
+        
+        res.json(account);
+    } catch (error) {
+        console.error('Erreur récupération compte par ID:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
@@ -1503,10 +1562,14 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
 
 // Route pour les cartes de statistiques du dashboard
 app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
+    console.log(`🚚 ===== ROUTE STATS-CARDS DÉMARRÉE =====`);
     try {
         const { start_date, end_date, cutoff_date } = req.query;
         const isDirector = req.session.user.role === 'directeur';
         const userId = req.session.user.id;
+        
+        console.log(`🚚 ===== ROUTE /api/dashboard/stats-cards APPELÉE =====`);
+        console.log(`🚚 DEBUG - Paramètres reçus: start_date=${start_date}, end_date=${end_date}, cutoff_date=${cutoff_date}`);
         
         // Si cutoff_date est fourni, utiliser cette date comme référence pour tous les calculs
         // Sinon, utiliser la logique actuelle (date du jour)
@@ -1694,6 +1757,15 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         let cashBictorysValue = 0;
         let creancesMoisValue = 25000;
         let stockPointVenteValue = 0;
+        
+        // Variables pour stocker les détails des calculs
+        let stockMataCurrentValue = 0, stockMataCurrentDate = null;
+        let stockMataPreviousValue = 0, stockMataPreviousDate = null;
+        let stockVivantCurrentValue = 0, stockVivantCurrentDate = null;
+        let stockVivantPreviousValue = 0, stockVivantPreviousDate = null;
+        let livraisonsPeriodStart = null, livraisonsPeriodEnd = null;
+        let livraisonsCount = 0, livraisonsNonValidees = 0;
+        let livraisonsDetailsList = [];
         
         try {
             // Récupérer la vraie valeur Cash Bictorys du mois
@@ -1898,6 +1970,12 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 const currentStockMata = Math.round(currentStockMataResult.rows[0]?.total_stock || 0);
                 const currentStockMataDate = currentStockMataResult.rows[0]?.latest_date;
                 
+                // Stocker les valeurs pour les détails
+                stockMataCurrentValue = currentStockMata;
+                stockMataCurrentDate = currentStockMataDate;
+                stockMataPreviousValue = previousStockMata;
+                stockMataPreviousDate = previousStockMataDate;
+                
                 // 4. Calculer l'écart : stock actuel - stock précédent
                 stockMataVariation = currentStockMata - previousStockMata;
                 
@@ -1996,6 +2074,12 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 const currentStock = Math.round(currentStockResult.rows[0]?.total_stock || 0);
                 const currentStockDate = currentStockResult.rows[0]?.latest_date;
                 
+                // Stocker les valeurs pour les détails
+                stockVivantCurrentValue = currentStock;
+                stockVivantCurrentDate = currentStockDate;
+                stockVivantPreviousValue = previousStock;
+                stockVivantPreviousDate = previousStockDate;
+                
                 // 3. Calculer l'écart : stock actuel - stock précédent
                 stockVivantVariation = currentStock - previousStock;
                 
@@ -2020,32 +2104,48 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             let startOfMonth, endOfMonth;
             
             if (cutoff_date) {
-                // Utiliser le mois de la cutoff_date - IMPORTANT: du 1er du mois jusqu'à cutoff_date inclus
-                const refDate = new Date(cutoff_date);
+                // Utiliser le mois de la cutoff_date - IMPORTANT: du 1er du mois de cutoff_date jusqu'à cutoff_date inclus
+                const refDate = new Date(cutoff_date + 'T00:00:00'); // Force locale time
                 const year = refDate.getFullYear();
-                const month = refDate.getMonth() + 1;
-                startOfMonth = new Date(year, month - 1, 1);
-                endOfMonth = new Date(cutoff_date);
-                console.log(`🚚 CALCUL LIVRAISONS PARTENAIRES - Cutoff_date utilisée: ${cutoff_date}`);
-            } else if (start_date && end_date) {
-                // Utiliser les dates de filtre
-                startOfMonth = new Date(start_date);
-                endOfMonth = new Date(end_date);
-                console.log(`🚚 CALCUL LIVRAISONS PARTENAIRES - Dates de filtre utilisées`);
+                const month = refDate.getMonth() + 1; // 1-based month (septembre = 9)
+                
+                // Créer les dates avec des chaînes pour éviter les problèmes de timezone
+                const startDateStr = `${year}-${month.toString().padStart(2, '0')}-01`;
+                startOfMonth = new Date(startDateStr + 'T00:00:00');
+                endOfMonth = new Date(cutoff_date + 'T23:59:59');
+                
+                console.log(`🚚 CALCUL LIVRAISONS PARTENAIRES - Cutoff_date utilisée: ${cutoff_date} (mois: ${year}-${month.toString().padStart(2, '0')})`);
+                console.log(`🚚 DEBUG - startDateStr: ${startDateStr}`);
+                console.log(`🚚 DEBUG - startOfMonth: ${startOfMonth.toISOString()}, endOfMonth: ${endOfMonth.toISOString()}`);
             } else {
-                // Si pas de dates, utiliser le mois en cours
+                // Si pas de cutoff_date, utiliser le mois en cours
                 const now = new Date();
                 const year = now.getFullYear();
-                const month = now.getMonth() + 1;
-                startOfMonth = new Date(year, month - 1, 1);
+                const month = now.getMonth(); // 0-based month
+                startOfMonth = new Date(year, month, 1);
                 endOfMonth = now;
-                console.log(`🚚 CALCUL LIVRAISONS PARTENAIRES - Mois en cours utilisé`);
+                console.log(`🚚 CALCUL LIVRAISONS PARTENAIRES - Mois en cours utilisé: ${year}-${(month + 1).toString().padStart(2, '0')}`);
+                console.log(`🚚 DEBUG - startOfMonth: ${startOfMonth.toISOString()}, endOfMonth: ${endOfMonth.toISOString()}`);
             }
 
             const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
             const endOfMonthStr = endOfMonth.toISOString().split('T')[0];
 
+            // CORRECTION TIMEZONE: Forcer les bonnes dates pour l'affichage frontend
+            if (cutoff_date) {
+                const refDate = new Date(cutoff_date + 'T00:00:00');
+                const year = refDate.getFullYear();
+                const month = refDate.getMonth() + 1;
+                livraisonsPeriodStart = `${year}-${month.toString().padStart(2, '0')}-01`;
+                livraisonsPeriodEnd = cutoff_date;
+            } else {
+                livraisonsPeriodStart = startOfMonthStr;
+                livraisonsPeriodEnd = endOfMonthStr;
+            }
+
             console.log(`🚚 Période de calcul des livraisons: ${startOfMonthStr} au ${endOfMonthStr} (INCLUS)`);
+            console.log(`🚚 DEBUG BACKEND - livraisonsPeriodStart: "${livraisonsPeriodStart}"`);
+            console.log(`🚚 DEBUG BACKEND - livraisonsPeriodEnd: "${livraisonsPeriodEnd}"`);
 
             // Récupérer les livraisons partenaires validées du mois
             const livraisonsQuery = `
@@ -2063,9 +2163,56 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
 
             const livraisonsResult = await pool.query(livraisonsQuery, [startOfMonthStr, endOfMonthStr]);
             livraisonsPartenaires = parseInt(livraisonsResult.rows[0].total_livraisons) || 0;
-            const totalDeliveries = parseInt(livraisonsResult.rows[0].total_deliveries) || 0;
+            const totalValidatedDeliveries = parseInt(livraisonsResult.rows[0].total_deliveries) || 0;
             
-            console.log(`🚚 RÉSULTAT: ${totalDeliveries} livraisons pour un total de ${livraisonsPartenaires} FCFA`);
+            // Récupérer aussi les livraisons non validées
+            const livraisonsNonValideesQuery = `
+                SELECT COUNT(pd.id) as total_non_validated
+                FROM partner_deliveries pd
+                JOIN accounts a ON pd.account_id = a.id
+                WHERE pd.delivery_date >= $1 
+                AND pd.delivery_date <= $2
+                AND (pd.validation_status != 'fully_validated' OR pd.is_validated = false OR pd.validation_status IS NULL)
+                AND a.account_type = 'partenaire'
+                AND a.is_active = true
+            `;
+
+            const livraisonsNonValideesResult = await pool.query(livraisonsNonValideesQuery, [startOfMonthStr, endOfMonthStr]);
+            const totalNonValidatedDeliveries = parseInt(livraisonsNonValideesResult.rows[0].total_non_validated) || 0;
+            
+            // Stocker les nombres pour les détails
+            livraisonsCount = totalValidatedDeliveries;
+            livraisonsNonValidees = totalNonValidatedDeliveries;
+            
+            // Récupérer les détails individuels des livraisons pour l'affichage
+            const livraisonsDetailsQuery = `
+                SELECT 
+                    pd.id,
+                    pd.delivery_date,
+                    pd.amount,
+                    pd.description,
+                    a.account_name as partner_name
+                FROM partner_deliveries pd
+                JOIN accounts a ON pd.account_id = a.id
+                WHERE pd.delivery_date >= $1 
+                AND pd.delivery_date <= $2
+                AND pd.validation_status = 'fully_validated'
+                AND pd.is_validated = true
+                AND a.account_type = 'partenaire'
+                AND a.is_active = true
+                ORDER BY pd.delivery_date DESC, a.account_name ASC
+            `;
+            
+            const livraisonsDetailsResult = await pool.query(livraisonsDetailsQuery, [startOfMonthStr, endOfMonthStr]);
+            const livraisonsDetailsList = livraisonsDetailsResult.rows.map(row => ({
+                id: row.id,
+                date: row.delivery_date.toISOString().split('T')[0],
+                amount: parseInt(row.amount),
+                description: row.description || '',
+                partnerName: row.partner_name
+            }));
+            
+            console.log(`🚚 RÉSULTAT: ${totalValidatedDeliveries} livraisons validées (${livraisonsPartenaires} FCFA) + ${totalNonValidatedDeliveries} non validées`);
             
             // Debug: vérifier toutes les livraisons dans la période (même non validées)
             const allDeliveriesDebugResult = await pool.query(`
@@ -2222,11 +2369,39 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                     jour: currentDay,
                     mois: currentMonth,
                     annee: currentYear
+                },
+                // Détails supplémentaires pour l'affichage enrichi
+                stockMataDetails: {
+                    currentStock: stockMataCurrentValue,
+                    currentStockDate: stockMataCurrentDate ? stockMataCurrentDate.toISOString().split('T')[0] : null,
+                    previousStock: stockMataPreviousValue,
+                    previousStockDate: stockMataPreviousDate ? stockMataPreviousDate.toISOString().split('T')[0] : null
+                },
+                stockVivantDetails: {
+                    currentStock: stockVivantCurrentValue,
+                    currentStockDate: stockVivantCurrentDate ? stockVivantCurrentDate.toISOString().split('T')[0] : null,
+                    previousStock: stockVivantPreviousValue,
+                    previousStockDate: stockVivantPreviousDate ? stockVivantPreviousDate.toISOString().split('T')[0] : null
+                },
+                livraisonsDetails: {
+                    totalLivraisons: livraisonsPartenaires,
+                    period: {
+                        startDate: livraisonsPeriodStart,
+                        endDate: livraisonsPeriodEnd
+                    },
+                    count: livraisonsCount,
+                    countNonValidated: livraisonsNonValidees,
+                    list: livraisonsDetailsList || []
                 }
             };
             
+            console.log(`🚚 DEBUG BACKEND - Envoi au frontend period.startDate: "${plCalculationDetails.livraisonsDetails.period.startDate}"`);
+            console.log(`🚚 DEBUG BACKEND - Envoi au frontend period.endDate: "${plCalculationDetails.livraisonsDetails.period.endDate}"`);
+            
         } catch (error) {
-            console.error('Erreur calcul PL avec estim charges:', error);
+            console.error('🚨 ERREUR calcul PL avec estim charges:', error);
+            console.log(`🚨 DEBUG ERREUR - livraisonsPeriodStart: "${livraisonsPeriodStart}"`);
+            console.log(`🚨 DEBUG ERREUR - livraisonsPeriodEnd: "${livraisonsPeriodEnd}"`);
             plEstimCharges = plSansStockCharges; // Fallback au PL de base
             plBrut = plSansStockCharges + stockVivantVariation - livraisonsPartenaires; // Fallback PL brut
             
@@ -2245,7 +2420,30 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 plFinal: Math.round(plEstimCharges),
                 prorata: { joursEcoules: 0, totalJours: 0, pourcentage: 0 },
                 date: { jour: 0, mois: 0, annee: 0 },
-                error: error.message
+                error: error.message,
+                // Détails supplémentaires même en cas d'erreur
+                stockMataDetails: {
+                    currentStock: stockMataCurrentValue,
+                    currentStockDate: stockMataCurrentDate ? stockMataCurrentDate.toISOString().split('T')[0] : null,
+                    previousStock: stockMataPreviousValue,
+                    previousStockDate: stockMataPreviousDate ? stockMataPreviousDate.toISOString().split('T')[0] : null
+                },
+                stockVivantDetails: {
+                    currentStock: stockVivantCurrentValue,
+                    currentStockDate: stockVivantCurrentDate ? stockVivantCurrentDate.toISOString().split('T')[0] : null,
+                    previousStock: stockVivantPreviousValue,
+                    previousStockDate: stockVivantPreviousDate ? stockVivantPreviousDate.toISOString().split('T')[0] : null
+                },
+                livraisonsDetails: {
+                    totalLivraisons: livraisonsPartenaires,
+                    period: {
+                        startDate: livraisonsPeriodStart,
+                        endDate: livraisonsPeriodEnd
+                    },
+                    count: livraisonsCount,
+                    countNonValidated: livraisonsNonValidees,
+                    list: livraisonsDetailsList || []
+                }
             };
         }
         
@@ -2932,9 +3130,9 @@ app.post('/api/expenses/:id/toggle-selection', requireAuth, async (req, res) => 
         
         // Les directeurs peuvent cocher/décocher leurs propres dépenses ET les dépenses du DG/PCA sur leurs comptes
         if (req.session.user.role === 'directeur') {
-            query += ` AND (user_id = $3 OR (
-                SELECT a.user_id FROM accounts a WHERE a.id = expenses.account_id
-            ) = $3)`;
+            query += ` AND (user_id = $3 OR account_id IN (
+                SELECT id FROM accounts WHERE user_id = $3
+            ))`;
             params.push(userId);
             console.log('🔄 TOGGLE SELECTION: Filtrage directeur ajouté, UserID:', userId);
         }
@@ -2981,9 +3179,9 @@ app.post('/api/expenses/select-all', requireAuth, async (req, res) => {
         
         // Les directeurs peuvent sélectionner leurs propres dépenses ET les dépenses du DG/PCA sur leurs comptes
         if (req.session.user.role === 'directeur') {
-            query += ` WHERE (user_id = $1 OR (
-                SELECT a.user_id FROM accounts a WHERE a.id = expenses.account_id
-            ) = $1)`;
+            query += ` WHERE (user_id = $1 OR account_id IN (
+                SELECT id FROM accounts WHERE user_id = $1
+            ))`;
             params.push(userId);
         }
         
@@ -3005,9 +3203,9 @@ app.post('/api/expenses/deselect-all', requireAuth, async (req, res) => {
         
         // Les directeurs peuvent désélectionner leurs propres dépenses ET les dépenses du DG/PCA sur leurs comptes
         if (req.session.user.role === 'directeur') {
-            query += ` WHERE (user_id = $1 OR (
-                SELECT a.user_id FROM accounts a WHERE a.id = expenses.account_id
-            ) = $1)`;
+            query += ` WHERE (user_id = $1 OR account_id IN (
+                SELECT id FROM accounts WHERE user_id = $1
+            ))`;
             params.push(userId);
         }
         
@@ -6003,6 +6201,24 @@ app.put('/api/admin/config/financial', requireAdminAuth, (req, res) => {
     }
 });
 
+// Endpoint public pour récupérer le statut de validation des dépenses
+app.get('/api/validation-status', requireAuth, (req, res) => {
+    try {
+        const financialConfig = getFinancialConfig();
+        const validateBalance = financialConfig.validate_expense_balance !== false; // défaut à true
+        
+        res.json({
+            validate_expense_balance: validateBalance,
+            message: validateBalance 
+                ? 'Validation des dépenses activée - Les dépenses ne peuvent pas dépasser le solde'
+                : 'Validation des dépenses désactivée - Les dépenses peuvent dépasser le solde'
+        });
+    } catch (error) {
+        console.error('Error reading validation status:', error);
+        res.status(500).json({ error: 'Error reading validation status' });
+    }
+});
+
 // Root endpoint
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -7802,12 +8018,24 @@ app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
         if (!source.is_active || !dest.is_active || !allowedTypes.includes(source.account_type) || !allowedTypes.includes(dest.account_type)) {
             return res.status(400).json({ error: 'Type ou statut de compte non autorisé' });
         }
-        // BYPASS TEMPORAIRE - VÉRIFICATION DE SOLDE POUR TRANSFERTS DÉSACTIVÉE
-        /*
-        if (source.current_balance < montantInt) {
-            return res.status(400).json({ error: 'Solde insuffisant sur le compte source' });
+        // Vérification du solde pour les transferts selon la configuration
+        const financialConfig = getFinancialConfig();
+        const validateBalance = financialConfig.validate_expense_balance;
+        
+        if (validateBalance && source.account_type !== 'statut') {
+            console.log('💰 Vérification du solde pour transfert');
+            console.log('  - Solde source:', source.current_balance);
+            console.log('  - Montant à transférer:', montantInt);
+            
+            if (source.current_balance < montantInt) {
+                console.log('❌ ERREUR 400: Solde insuffisant pour transfert');
+                return res.status(400).json({ error: 'Solde insuffisant sur le compte source' });
+            }
+            
+            console.log('✅ Validation du solde pour transfert passée');
+        } else {
+            console.log('⚠️ Validation des soldes pour transferts désactivée par configuration ou compte statut');
         }
-        */
         // Début transaction
         await pool.query('BEGIN');
         // Débiter le compte source

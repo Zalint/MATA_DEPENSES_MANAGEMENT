@@ -95,7 +95,12 @@ function formatCurrency(amount) {
 }
 
 function formatDate(dateString) {
-    return new Date(dateString).toLocaleDateString('fr-FR');
+    console.log('🚚 DEBUG formatDate - Input dateString:', dateString);
+    const date = new Date(dateString);
+    console.log('🚚 DEBUG formatDate - Parsed Date object:', date);
+    const formatted = date.toLocaleDateString('fr-FR');
+    console.log('🚚 DEBUG formatDate - Formatted result:', formatted);
+    return formatted;
 }
 
 function showNotification(message, type = 'info') {
@@ -258,6 +263,7 @@ async function showSection(sectionName) {
         case 'add-expense':
             loadCategories();
             setDefaultDate();
+            loadValidationStatus(); // Charger le statut de validation
             if (['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
                 loadAccountBalance();
                 loadUserAccounts();
@@ -12444,31 +12450,140 @@ function populateExpenseConfirmationSummary() {
         fileRow.style.display = 'none';
     }
 }
-// BYPASS TEMPORAIRE - FONCTION DE VALIDATION BUDGET DANS MODAL COMPLÈTEMENT DÉSACTIVÉE
+// FONCTION DE VALIDATION BUDGET DANS MODAL - AVEC CONFIGURATION DYNAMIQUE
 async function displayBudgetValidationInModal() {
     try {
         const budgetContainer = document.getElementById('budget-validation');
         const confirmBtn = document.getElementById('confirm-expense-btn');
         
-        // BYPASS TEMPORAIRE - TOUTE LA VALIDATION DÉSACTIVÉE
-        console.log('✅ BYPASS: Validation budget dans modal désactivée temporairement');
+        // Charger le statut de validation actuel
+        const response = await fetch('/api/validation-status');
+        let validationEnabled = true; // Par défaut
         
-        // Toujours afficher un message positif
-        budgetContainer.className = 'budget-validation budget-ok';
-        budgetContainer.innerHTML = `
-            <strong>✅ Validation temporairement désactivée</strong><br>
-            Vous pouvez procéder à l'ajout de cette dépense.
-        `;
+        if (response.ok) {
+            const statusData = await response.json();
+            validationEnabled = statusData.validate_expense_balance;
+        }
         
-        // Toujours activer le bouton de confirmation
-        if (confirmBtn) {
-            confirmBtn.disabled = false;
-            confirmBtn.style.opacity = '1';
-            confirmBtn.style.cursor = 'pointer';
+        console.log('💰 Statut validation dans modal:', validationEnabled ? 'ACTIVÉE' : 'DÉSACTIVÉE');
+        
+        if (validationEnabled) {
+            // Validation activée - vérifier le budget
+            await displayRealBudgetValidation(budgetContainer, confirmBtn);
+        } else {
+            // Validation désactivée - autoriser la dépense
+            budgetContainer.className = 'budget-validation budget-ok';
+            budgetContainer.innerHTML = `
+                <strong>⚠️ Validation des dépenses désactivée</strong><br>
+                Mode libre activé - Vous pouvez procéder à l'ajout de cette dépense.
+            `;
+            
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.style.opacity = '1';
+                confirmBtn.style.cursor = 'pointer';
+            }
         }
         
     } catch (error) {
         console.error('Erreur validation budget dans modal:', error);
+    }
+}
+
+// Fonction pour effectuer la vraie validation du budget quand elle est activée
+async function displayRealBudgetValidation(budgetContainer, confirmBtn) {
+    try {
+        // Récupérer les données du formulaire depuis window.pendingExpenseFormData
+        if (!window.pendingExpenseFormData) {
+            budgetContainer.className = 'budget-validation budget-warning';
+            budgetContainer.innerHTML = `
+                <strong>⚠️ Données de formulaire manquantes</strong><br>
+                Impossible de vérifier le budget.
+            `;
+            if (confirmBtn) confirmBtn.disabled = true;
+            return;
+        }
+        
+        const accountId = window.pendingExpenseFormData.get('account_id');
+        const totalAmount = parseInt(window.pendingExpenseFormData.get('total')) || parseInt(document.getElementById('total-amount').textContent.replace(/[^\d]/g, ''));
+        
+        if (!accountId) {
+            budgetContainer.className = 'budget-validation budget-warning';
+            budgetContainer.innerHTML = `
+                <strong>⚠️ Compte non sélectionné</strong><br>
+                Veuillez sélectionner un compte pour vérifier le budget.
+            `;
+            if (confirmBtn) confirmBtn.disabled = true;
+            return;
+        }
+        
+        // Récupérer les informations du compte
+        const response = await fetch(`/api/accounts/${accountId}/balance`);
+        if (!response.ok) {
+            budgetContainer.className = 'budget-validation budget-warning';
+            budgetContainer.innerHTML = `
+                <strong>⚠️ Erreur de vérification</strong><br>
+                Impossible de vérifier le solde du compte.
+            `;
+            if (confirmBtn) confirmBtn.disabled = true;
+            return;
+        }
+        
+        const accountData = await response.json();
+        const currentBalance = accountData.current_balance;
+        
+        console.log('💰 Vérification budget modal:');
+        console.log('  - Compte:', accountData.account_name);
+        console.log('  - Solde actuel:', currentBalance);
+        console.log('  - Montant demandé:', totalAmount);
+        
+        // Vérification du solde (sauf comptes statut)
+        if (accountData.account_type === 'statut') {
+            budgetContainer.className = 'budget-validation budget-ok';
+            budgetContainer.innerHTML = `
+                <strong>✅ Compte STATUT - Validation ignorée</strong><br>
+                Les comptes de statut ne sont pas soumis à la validation de solde.
+            `;
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.style.opacity = '1';
+                confirmBtn.style.cursor = 'pointer';
+            }
+        } else if (currentBalance >= totalAmount) {
+            budgetContainer.className = 'budget-validation budget-ok';
+            budgetContainer.innerHTML = `
+                <strong>✅ Budget suffisant</strong><br>
+                Solde disponible: ${currentBalance.toLocaleString()} FCFA<br>
+                Montant demandé: ${totalAmount.toLocaleString()} FCFA
+            `;
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.style.opacity = '1';
+                confirmBtn.style.cursor = 'pointer';
+            }
+        } else {
+            budgetContainer.className = 'budget-validation budget-error';
+            budgetContainer.innerHTML = `
+                <strong>❌ Budget insuffisant</strong><br>
+                Solde disponible: ${currentBalance.toLocaleString()} FCFA<br>
+                Montant demandé: ${totalAmount.toLocaleString()} FCFA<br>
+                Déficit: ${(totalAmount - currentBalance).toLocaleString()} FCFA
+            `;
+            if (confirmBtn) {
+                confirmBtn.disabled = true;
+                confirmBtn.style.opacity = '0.5';
+                confirmBtn.style.cursor = 'not-allowed';
+            }
+        }
+        
+    } catch (error) {
+        console.error('Erreur validation budget réelle:', error);
+        budgetContainer.className = 'budget-validation budget-warning';
+        budgetContainer.innerHTML = `
+            <strong>⚠️ Erreur de validation</strong><br>
+            Une erreur est survenue lors de la vérification du budget.
+        `;
+        if (confirmBtn) confirmBtn.disabled = true;
     }
 }
 
@@ -12827,6 +12942,9 @@ function setupConfigTabs() {
 }
 
 function setupConfigEventListeners() {
+    // Configuration des listeners pour l'interface financière conviviale
+    setupFinancialSettingsListeners();
+    
     // Événements pour la configuration des catégories
     document.getElementById('save-categories-config').addEventListener('click', saveCategoriesConfig);
     document.getElementById('reload-categories-config').addEventListener('click', loadCategoriesConfig);
@@ -13072,6 +13190,9 @@ async function loadFinancialConfig() {
             editor.value = JSON.stringify(config, null, 2);
             document.getElementById('save-financial-config').disabled = true;
             
+            // Mettre à jour l'interface conviviale
+            updateFinancialSettingsUI(config);
+            
             // Initialiser les fonctionnalités de l'éditeur
             updateLineNumbers('financial');
             updateCursorPosition('financial');
@@ -13125,6 +13246,12 @@ async function saveFinancialConfig() {
             const result = await response.json();
             showNotification(result.message, 'success');
             document.getElementById('save-financial-config').disabled = true;
+            
+            // Recharger le statut de validation si la section add-expense est active
+            const addExpenseSection = document.getElementById('add-expense-section');
+            if (addExpenseSection && addExpenseSection.classList.contains('active')) {
+                loadValidationStatus();
+            }
         } else {
             const error = await response.json();
             throw new Error(error.error || 'Erreur lors de la sauvegarde');
@@ -13138,6 +13265,121 @@ async function saveFinancialConfig() {
 // =====================================================
 // ENHANCED JSON EDITOR FUNCTIONS
 // =====================================================
+
+// Fonctions pour l'interface conviviale des paramètres financiers
+function updateFinancialSettingsUI(config) {
+    // Mettre à jour le champ des charges fixes
+    const chargesFixesInput = document.getElementById('charges-fixes-input');
+    if (chargesFixesInput && config.charges_fixes_estimation) {
+        chargesFixesInput.value = config.charges_fixes_estimation;
+    }
+    
+    // Mettre à jour le slider de validation
+    const validateToggle = document.getElementById('validate-balance-toggle');
+    const statusText = document.getElementById('validation-status-text');
+    const description = document.getElementById('validation-description');
+    const validationIcon = document.getElementById('validation-icon');
+    
+    if (validateToggle && statusText && description && validationIcon) {
+        const isValidationEnabled = config.validate_expense_balance !== false; // défaut à true
+        
+        validateToggle.checked = isValidationEnabled;
+        
+        // Mettre à jour le texte et les classes
+        statusText.textContent = isValidationEnabled ? 'Validation activée' : 'Validation désactivée';
+        statusText.className = isValidationEnabled ? 'slider-status enabled' : 'slider-status disabled';
+        
+        description.textContent = isValidationEnabled 
+            ? 'Les dépenses ne peuvent pas dépasser le solde du compte'
+            : 'Les dépenses peuvent dépasser le solde du compte (mode libre)';
+            
+        // Mettre à jour l'icône
+        validationIcon.className = isValidationEnabled 
+            ? 'fas fa-shield-alt slider-icon enabled' 
+            : 'fas fa-exclamation-triangle slider-icon disabled';
+    }
+}
+
+function setupFinancialSettingsListeners() {
+    // Listener pour les charges fixes
+    const chargesFixesInput = document.getElementById('charges-fixes-input');
+    if (chargesFixesInput) {
+        chargesFixesInput.addEventListener('input', function() {
+            updateFinancialConfigFromUI();
+        });
+    }
+    
+    // Listener pour le slider de validation
+    const validateToggle = document.getElementById('validate-balance-toggle');
+    if (validateToggle) {
+        validateToggle.addEventListener('change', function() {
+            const statusText = document.getElementById('validation-status-text');
+            const description = document.getElementById('validation-description');
+            const validationIcon = document.getElementById('validation-icon');
+            
+            if (statusText && description && validationIcon) {
+                const isEnabled = this.checked;
+                
+                // Mettre à jour le texte et les classes
+                statusText.textContent = isEnabled ? 'Validation activée' : 'Validation désactivée';
+                statusText.className = isEnabled ? 'slider-status enabled' : 'slider-status disabled';
+                
+                description.textContent = isEnabled 
+                    ? 'Les dépenses ne peuvent pas dépasser le solde du compte'
+                    : 'Les dépenses peuvent dépasser le solde du compte (mode libre)';
+                    
+                // Mettre à jour l'icône
+                validationIcon.className = isEnabled 
+                    ? 'fas fa-shield-alt slider-icon enabled' 
+                    : 'fas fa-exclamation-triangle slider-icon disabled';
+            }
+            
+            updateFinancialConfigFromUI();
+        });
+    }
+}
+
+function updateFinancialConfigFromUI() {
+    try {
+        const chargesFixesInput = document.getElementById('charges-fixes-input');
+        const validateToggle = document.getElementById('validate-balance-toggle');
+        const editor = document.getElementById('financial-json-editor');
+        
+        if (!editor) return;
+        
+        // Lire la configuration actuelle
+        let config;
+        try {
+            config = JSON.parse(editor.value);
+        } catch (e) {
+            config = {
+                description: "Paramètres financiers et estimations pour les calculs du système"
+            };
+        }
+        
+        // Mettre à jour avec les valeurs de l'interface
+        if (chargesFixesInput && chargesFixesInput.value) {
+            config.charges_fixes_estimation = parseInt(chargesFixesInput.value);
+        }
+        
+        if (validateToggle) {
+            config.validate_expense_balance = validateToggle.checked;
+        }
+        
+        // Mettre à jour l'éditeur JSON
+        editor.value = JSON.stringify(config, null, 2);
+        
+        // Activer le bouton de sauvegarde
+        document.getElementById('save-financial-config').disabled = false;
+        
+        // Mettre à jour les numéros de ligne et la validation
+        updateLineNumbers('financial');
+        validateJsonRealTime('financial');
+        
+    } catch (error) {
+        console.error('Erreur mise à jour config depuis UI:', error);
+    }
+}
 
 function updateLineNumbers(configType) {
     const editor = document.getElementById(`${configType}-json-editor`);
@@ -17368,6 +17610,32 @@ function exportPLDetailsToExcel() {
     XLSX.writeFile(wb, fileName);
 }
 
+// Fonction pour basculer l'affichage des détails PL
+function togglePLDetails(section) {
+    const detailsElement = document.getElementById(`pl-${section}-details`);
+    const itemElement = document.getElementById(`pl-${section}-item`);
+    
+    if (detailsElement && itemElement) {
+        const isVisible = detailsElement.classList.contains('show');
+        
+        if (isVisible) {
+            // Cacher les détails
+            detailsElement.classList.remove('show');
+            itemElement.classList.remove('expanded');
+            setTimeout(() => {
+                detailsElement.style.display = 'none';
+            }, 300);
+        } else {
+            // Afficher les détails
+            detailsElement.style.display = 'block';
+            setTimeout(() => {
+                detailsElement.classList.add('show');
+                itemElement.classList.add('expanded');
+            }, 10);
+        }
+    }
+}
+
 // Fonction pour remplir le modal avec les détails PL
 function fillPLDetailsModal(details) {
     // Section PL de base
@@ -17377,24 +17645,133 @@ function fillPLDetailsModal(details) {
     document.getElementById('pl-cash-burn').textContent = formatCurrency(details.cashBurn);
     document.getElementById('pl-base-result').textContent = formatCurrency(details.plBase);
     
+    // Détails Stock Mata [[memory:290203]]
+    if (details.stockMataDetails) {
+        const stockMataDetails = document.getElementById('pl-stock-mata-details');
+        if (stockMataDetails) {
+            // Vérifier si on a des données valides
+            if (details.stockMataDetails.currentStock !== undefined && details.stockMataDetails.previousStock !== undefined) {
+                // Remplir les données
+                document.getElementById('pl-stock-mata-current-date').textContent = 
+                    details.stockMataDetails.currentStockDate ? formatDate(details.stockMataDetails.currentStockDate) : 'N/A';
+                document.getElementById('pl-stock-mata-current').textContent = 
+                    formatCurrency(details.stockMataDetails.currentStock);
+                document.getElementById('pl-stock-mata-previous-date').textContent = 
+                    details.stockMataDetails.previousStockDate ? formatDate(details.stockMataDetails.previousStockDate) : 'N/A';
+                document.getElementById('pl-stock-mata-previous').textContent = 
+                    formatCurrency(details.stockMataDetails.previousStock);
+                document.getElementById('pl-stock-mata-calculation').textContent = 
+                    `${formatCurrency(details.stockMataDetails.currentStock)} - ${formatCurrency(details.stockMataDetails.previousStock)} = ${formatCurrency(details.stockPointVente)}`;
+                
+                // Ne pas afficher automatiquement les détails (ils seront affichés au clic)
+            }
+        }
+    }
+    
     // Section Ajustements
     document.getElementById('pl-stock-vivant').textContent = formatCurrency(details.stockVivantVariation || 0);
     document.getElementById('pl-livraisons').textContent = formatCurrency(details.livraisonsPartenaires || 0);
     
+    // Détails Stock Vivant
+    if (details.stockVivantDetails) {
+        const stockVivantDetails = document.getElementById('pl-stock-vivant-details');
+        if (stockVivantDetails) {
+            // Vérifier si on a des données valides
+            if (details.stockVivantDetails.currentStock !== undefined && details.stockVivantDetails.previousStock !== undefined) {
+                // Remplir les données
+                document.getElementById('pl-stock-vivant-current-date').textContent = 
+                    details.stockVivantDetails.currentStockDate ? formatDate(details.stockVivantDetails.currentStockDate) : 'N/A';
+                document.getElementById('pl-stock-vivant-current').textContent = 
+                    formatCurrency(details.stockVivantDetails.currentStock);
+                document.getElementById('pl-stock-vivant-previous-date').textContent = 
+                    details.stockVivantDetails.previousStockDate ? formatDate(details.stockVivantDetails.previousStockDate) : 'N/A';
+                document.getElementById('pl-stock-vivant-previous').textContent = 
+                    formatCurrency(details.stockVivantDetails.previousStock);
+                document.getElementById('pl-stock-vivant-calculation').textContent = 
+                    `${formatCurrency(details.stockVivantDetails.currentStock)} - ${formatCurrency(details.stockVivantDetails.previousStock)} = ${formatCurrency(details.stockVivantVariation || 0)}`;
+                
+                // Ne pas afficher automatiquement les détails (ils seront affichés au clic)
+            }
+        }
+    }
+    
+    // Détails Livraisons
+    if (details.livraisonsDetails) {
+        const livraisonsDetails = document.getElementById('pl-livraisons-details');
+        if (livraisonsDetails) {
+            // Remplir les données
+            console.log('🚚 DEBUG FRONTEND - Reçu details.livraisonsDetails:', details.livraisonsDetails);
+            console.log('🚚 DEBUG FRONTEND - period.startDate:', details.livraisonsDetails.period?.startDate);
+            console.log('🚚 DEBUG FRONTEND - period.endDate:', details.livraisonsDetails.period?.endDate);
+            
+            if (details.livraisonsDetails.period && details.livraisonsDetails.period.startDate && details.livraisonsDetails.period.endDate) {
+                const formattedStart = formatDate(details.livraisonsDetails.period.startDate);
+                const formattedEnd = formatDate(details.livraisonsDetails.period.endDate);
+                console.log('🚚 DEBUG FRONTEND - formatDate(startDate):', formattedStart);
+                console.log('🚚 DEBUG FRONTEND - formatDate(endDate):', formattedEnd);
+                
+                document.getElementById('pl-livraisons-period').textContent = 
+                    `du ${formattedStart} au ${formattedEnd}`;
+            } else {
+                document.getElementById('pl-livraisons-period').textContent = 'Période non définie';
+            }
+            
+            document.getElementById('pl-livraisons-count').textContent = 
+                details.livraisonsDetails.count || 0;
+            document.getElementById('pl-livraisons-count-non-validated').textContent = 
+                details.livraisonsDetails.countNonValidated || 0;
+            document.getElementById('pl-livraisons-total').textContent = 
+                formatCurrency(details.livraisonsDetails.totalLivraisons || 0);
+            
+            // Remplir la liste des livraisons individuelles
+            const livraisonsListElement = document.getElementById('pl-livraisons-list');
+            if (livraisonsListElement && details.livraisonsDetails.list && details.livraisonsDetails.list.length > 0) {
+                livraisonsListElement.innerHTML = ''; // Vider la liste existante
+                
+                details.livraisonsDetails.list.forEach(livraison => {
+                    const livraisonDiv = document.createElement('div');
+                    livraisonDiv.className = 'livraison-item';
+                    
+                    livraisonDiv.innerHTML = `
+                        <div class="livraison-info">
+                            <div class="livraison-partner">${livraison.partnerName}</div>
+                            <div class="livraison-date">📅 ${formatDate(livraison.date)}</div>
+                        </div>
+                        <div class="livraison-amount">${formatCurrency(livraison.amount)}</div>
+                    `;
+                    
+                    livraisonsListElement.appendChild(livraisonDiv);
+                });
+            } else if (livraisonsListElement) {
+                // Si on a des livraisons mais pas de liste détaillée, afficher un message informatif
+                if (details.livraisonsDetails.count > 0) {
+                    livraisonsListElement.innerHTML = '<div style="text-align: center; color: #28a745; font-style: italic; padding: 10px;">📋 Détails des livraisons disponibles dans le système</div>';
+                } else {
+                    livraisonsListElement.innerHTML = '<div style="text-align: center; color: #6c757d; font-style: italic; padding: 10px;">Aucune livraison validée dans cette période</div>';
+                }
+            }
+            
+            // Ne pas afficher automatiquement les détails (ils seront affichés au clic)
+        }
+    }
+    
     // Section Charges Fixes
+    document.getElementById('pl-charges-prorata').textContent = formatCurrency(details.chargesProrata);
     document.getElementById('pl-charges-fixes').textContent = formatCurrency(details.chargesFixesEstimation);
     
     if (details.prorata && details.prorata.totalJours > 0) {
         document.getElementById('pl-jours-ouvrables').textContent = details.prorata.joursEcoules;
         document.getElementById('pl-total-jours').textContent = details.prorata.totalJours;
         document.getElementById('pl-pourcentage').textContent = details.prorata.pourcentage + '%';
+        document.getElementById('pl-charges-calculation').textContent = 
+            `${formatCurrency(details.chargesFixesEstimation)} × ${details.prorata.pourcentage}% = ${formatCurrency(details.chargesProrata)}`;
     } else {
         document.getElementById('pl-jours-ouvrables').textContent = '0';
         document.getElementById('pl-total-jours').textContent = '0';
         document.getElementById('pl-pourcentage').textContent = '0%';
+        document.getElementById('pl-charges-calculation').textContent = 
+            `${formatCurrency(details.chargesFixesEstimation)} × 0% = ${formatCurrency(details.chargesProrata)}`;
     }
-    
-    document.getElementById('pl-charges-prorata').textContent = formatCurrency(details.chargesProrata);
     
     // Section PL Final
     document.getElementById('pl-final-result').textContent = formatCurrency(details.plFinal);
@@ -17731,3 +18108,55 @@ function generateCashDetailHTML() {
 }
 
 // ====== FIN FONCTIONS SYNCHRONISATION ======
+
+// Fonction pour charger le statut de validation des dépenses
+async function loadValidationStatus() {
+    try {
+        const response = await fetch('/api/validation-status');
+        
+        if (response.ok) {
+            const statusData = await response.json();
+            updateValidationStatusUI(statusData);
+        } else {
+            console.error('Erreur lors du chargement du statut de validation');
+            // Interface par défaut en cas d'erreur
+            updateValidationStatusUI({
+                validate_expense_balance: true,
+                message: 'Validation des dépenses activée par défaut'
+            });
+        }
+    } catch (error) {
+        console.error('Erreur loadValidationStatus:', error);
+        // Interface par défaut en cas d'erreur
+        updateValidationStatusUI({
+            validate_expense_balance: true,
+            message: 'Validation des dépenses activée par défaut'
+        });
+    }
+}
+
+// Fonction pour mettre à jour l'interface du statut de validation
+function updateValidationStatusUI(statusData) {
+    const statusCard = document.getElementById('validation-status-info');
+    const icon = document.getElementById('validation-icon');
+    const message = document.getElementById('validation-message');
+    const details = document.getElementById('validation-details');
+    
+    if (!statusCard || !icon || !message || !details) return;
+    
+    const isValidationEnabled = statusData.validate_expense_balance;
+    
+    // Mettre à jour les classes CSS
+    statusCard.className = 'validation-status-card';
+    if (isValidationEnabled) {
+        statusCard.classList.add('enabled');
+        icon.className = 'fas fa-shield-alt';
+        message.textContent = 'Validation des dépenses activée';
+        details.textContent = 'Les dépenses ne peuvent pas dépasser le solde du compte (sauf comptes statut)';
+    } else {
+        statusCard.classList.add('disabled');
+        icon.className = 'fas fa-exclamation-triangle';
+        message.textContent = 'Validation des dépenses désactivée';
+        details.textContent = 'Les dépenses peuvent dépasser le solde du compte - Mode libre activé';
+    }
+}

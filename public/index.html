@@ -641,6 +641,19 @@
                 <section id="add-expense-section" class="section">
                     <h2>Ajouter une Dépense</h2>
                     
+                    <!-- Indicateur de validation des dépenses -->
+                    <div id="validation-status-info" class="validation-status-card">
+                        <div class="validation-content">
+                            <div class="validation-indicator">
+                                <i id="validation-icon" class="fas fa-shield-alt"></i>
+                                <span id="validation-message">Chargement du statut de validation...</span>
+                            </div>
+                            <small id="validation-details" class="validation-help">
+                                Vérification en cours...
+                            </small>
+                        </div>
+                    </div>
+                    
                     <!-- Affichage du solde pour les directeurs -->
                     <div id="balance-info" class="balance-card" style="display: none;">
                         <div class="balance-content">
@@ -2371,7 +2384,7 @@
                         <!-- Configuration des Paramètres Financiers -->
                         <div id="financial-config" class="config-panel">
                             <div class="config-header">
-                                <h3> Paramètres Financiers</h3>
+                                <h3><i class="fas fa-chart-line"></i> Paramètres Financiers</h3>
                                 <div class="config-actions">
                                     <button type="button" id="save-financial-config" class="btn btn-success" disabled>
                                         <i class="fas fa-save"></i> Sauvegarder
@@ -2379,6 +2392,51 @@
                                     <button type="button" id="reload-financial-config" class="btn btn-secondary">
                                         <i class="fas fa-sync"></i> Recharger
                                     </button>
+                                </div>
+                            </div>
+
+                            <!-- Interface conviviale pour les paramètres principaux -->
+                            <div class="financial-settings-panel">
+                                <h4><i class="fas fa-sliders-h"></i> Paramètres Principaux</h4>
+                                
+                                <div class="form-row">
+                                    <div class="form-group col-md-6">
+                                        <label for="charges-fixes-input">
+                                            <i class="fas fa-calculator"></i> Estimation des charges fixes mensuelles (FCFA)
+                                        </label>
+                                        <input type="number" class="form-control" id="charges-fixes-input" 
+                                               min="0" step="1000" placeholder="5320000">
+                                        <small class="form-text text-muted">
+                                            Montant utilisé pour les calculs de charges prorata dans le PL
+                                        </small>
+                                    </div>
+                                    
+                                    <div class="form-group col-md-6">
+                                        <label>
+                                            <i class="fas fa-shield-alt"></i> Validation des dépenses
+                                        </label>
+                                        <div class="validation-slider-container">
+                                            <label class="slider-switch">
+                                                <input type="checkbox" id="validate-balance-toggle" checked>
+                                                <span class="slider"></span>
+                                            </label>
+                                            <div class="slider-label">
+                                                <div class="slider-status enabled" id="validation-status-text">Validation activée</div>
+                                                <div class="slider-description" id="validation-description">Les dépenses ne peuvent pas dépasser le solde du compte</div>
+                                            </div>
+                                            <i class="fas fa-shield-alt slider-icon enabled" id="validation-icon"></i>
+                                        </div>
+                                        <small class="form-text text-muted">
+                                            Cette option permet d'activer ou désactiver la vérification de solde lors des dépenses
+                                        </small>
+                                    </div>
+                                </div>
+
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle"></i>
+                                    <strong>Note :</strong> La désactivation de la validation des dépenses permet d'autoriser les dépenses 
+                                    même si le solde du compte est insuffisant. Cette option est réservée aux rôles Directeur Général, 
+                                    PCA et Admin uniquement.
                                 </div>
                             </div>
                             
@@ -3572,9 +3630,23 @@
                                 <span class="label">💳 Créances du mois:</span>
                                 <span class="value" id="pl-creances">0 FCFA</span>
                             </div>
-                            <div class="formula-item">
+                            <div class="formula-item" onclick="togglePLDetails('stock-mata')" id="pl-stock-mata-item">
                                 <span class="label">📦 Écart Stock Mata Mensuel:</span>
                                 <span class="value" id="pl-stock-mata">0 FCFA</span>
+                            </div>
+                            <div class="formula-details" id="pl-stock-mata-details" style="display: none;">
+                                <div class="detail-line">
+                                    <span class="detail-label">📅 Stock actuel (<span id="pl-stock-mata-current-date">DATE</span>):</span>
+                                    <span class="detail-value" id="pl-stock-mata-current">0 FCFA</span>
+                                </div>
+                                <div class="detail-line">
+                                    <span class="detail-label">📅 Stock précédent (<span id="pl-stock-mata-previous-date">DATE</span>):</span>
+                                    <span class="detail-value" id="pl-stock-mata-previous">0 FCFA</span>
+                                </div>
+                                <div class="detail-line calculation">
+                                    <span class="detail-label">➡️ Écart:</span>
+                                    <span class="detail-value" id="pl-stock-mata-calculation">0 - 0 = 0 FCFA</span>
+                                </div>
                             </div>
                             <div class="formula-item negative">
                                 <span class="label">💸 Cash Burn du mois:</span>
@@ -3591,13 +3663,48 @@
                     <div class="pl-section">
                         <h3><i class="fas fa-adjust"></i> Ajustements</h3>
                         <div class="pl-formula">
-                            <div class="formula-item">
+                            <div class="formula-item" onclick="togglePLDetails('stock-vivant')" id="pl-stock-vivant-item">
                                 <span class="label">🌱 Écart Stock Vivant Mensuel:</span>
                                 <span class="value" id="pl-stock-vivant">0 FCFA</span>
                             </div>
-                            <div class="formula-item negative">
+                            <div class="formula-details" id="pl-stock-vivant-details" style="display: none;">
+                                <div class="detail-line">
+                                    <span class="detail-label">📅 Stock actuel (<span id="pl-stock-vivant-current-date">DATE</span>):</span>
+                                    <span class="detail-value" id="pl-stock-vivant-current">0 FCFA</span>
+                                </div>
+                                <div class="detail-line">
+                                    <span class="detail-label">📅 Stock précédent (<span id="pl-stock-vivant-previous-date">DATE</span>):</span>
+                                    <span class="detail-value" id="pl-stock-vivant-previous">0 FCFA</span>
+                                </div>
+                                <div class="detail-line calculation">
+                                    <span class="detail-label">➡️ Écart:</span>
+                                    <span class="detail-value" id="pl-stock-vivant-calculation">0 - 0 = 0 FCFA</span>
+                                </div>
+                            </div>
+                            <div class="formula-item negative" onclick="togglePLDetails('livraisons')" id="pl-livraisons-item">
                                 <span class="label">🚚 Livraisons partenaires du mois:</span>
                                 <span class="value" id="pl-livraisons">0 FCFA</span>
+                            </div>
+                            <div class="formula-details" id="pl-livraisons-details" style="display: none;">
+                                <div class="detail-line">
+                                    <span class="detail-label">📅 Période:</span>
+                                    <span class="detail-value" id="pl-livraisons-period">du XX/XX/XXXX au XX/XX/XXXX</span>
+                                </div>
+                                <div class="detail-line">
+                                    <span class="detail-label">✅ Nombre de livraisons validées:</span>
+                                    <span class="detail-value" id="pl-livraisons-count">0</span>
+                                </div>
+                                <div class="detail-line">
+                                    <span class="detail-label">⏳ Nombre de livraisons non validées:</span>
+                                    <span class="detail-value" id="pl-livraisons-count-non-validated">0</span>
+                                </div>
+                                <div class="livraisons-list" id="pl-livraisons-list">
+                                    <!-- Les livraisons individuelles seront ajoutées ici -->
+                                </div>
+                                <div class="detail-line calculation">
+                                    <span class="detail-label">💰 Total livraisons:</span>
+                                    <span class="detail-value" id="pl-livraisons-total">0 FCFA</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -3606,25 +3713,31 @@
                     <div class="pl-section">
                         <h3><i class="fas fa-cogs"></i> Estimation Charges Fixes</h3>
                         <div class="pl-formula">
-                            <div class="formula-item">
-                                <span class="label">⚙️ Estimation charges fixes mensuelle:</span>
-                                <span class="value" id="pl-charges-fixes">0 FCFA</span>
-                            </div>
-                            <div class="formula-item">
-                                <span class="label">📅 Jours ouvrables écoulés:</span>
-                                <span class="value" id="pl-jours-ouvrables">0</span>
-                            </div>
-                            <div class="formula-item">
-                                <span class="label">📅 Total jours ouvrables dans le mois:</span>
-                                <span class="value" id="pl-total-jours">0</span>
-                            </div>
-                            <div class="formula-item">
-                                <span class="label">📅 Pourcentage du mois écoulé:</span>
-                                <span class="value" id="pl-pourcentage">0%</span>
-                            </div>
-                            <div class="formula-item negative">
+                            <div class="formula-item negative" onclick="togglePLDetails('charges-fixes')" id="pl-charges-fixes-item">
                                 <span class="label">⏰ Charges prorata (jours ouvrables):</span>
                                 <span class="value" id="pl-charges-prorata">0 FCFA</span>
+                            </div>
+                            <div class="formula-details" id="pl-charges-fixes-details" style="display: none;">
+                                <div class="detail-line">
+                                    <span class="detail-label">⚙️ Estimation charges fixes mensuelle:</span>
+                                    <span class="detail-value" id="pl-charges-fixes">0 FCFA</span>
+                                </div>
+                                <div class="detail-line">
+                                    <span class="detail-label">📅 Jours ouvrables écoulés:</span>
+                                    <span class="detail-value" id="pl-jours-ouvrables">0</span>
+                                </div>
+                                <div class="detail-line">
+                                    <span class="detail-label">📅 Total jours ouvrables dans le mois:</span>
+                                    <span class="detail-value" id="pl-total-jours">0</span>
+                                </div>
+                                <div class="detail-line">
+                                    <span class="detail-label">📅 Pourcentage du mois écoulé:</span>
+                                    <span class="detail-value" id="pl-pourcentage">0%</span>
+                                </div>
+                                <div class="detail-line calculation">
+                                    <span class="detail-label">🧮 Calcul prorata:</span>
+                                    <span class="detail-value" id="pl-charges-calculation">0 FCFA × 0% = 0 FCFA</span>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -4142,6 +4255,139 @@
             z-index: 1040;
         }
         
+        /* Styles pour les détails PL */
+        .formula-details {
+            margin-left: 20px;
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-left: 3px solid #007bff;
+            border-radius: 4px;
+            font-size: 0.9em;
+            display: none;
+            transition: all 0.3s ease;
+        }
+        
+        .formula-details.show {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+        
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .detail-line {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+            padding: 3px 0;
+        }
+        
+        .detail-line:last-child {
+            margin-bottom: 0;
+        }
+        
+        .detail-line.calculation {
+            border-top: 1px solid #dee2e6;
+            margin-top: 8px;
+            padding-top: 8px;
+            font-weight: 600;
+            color: #495057;
+        }
+        
+        .detail-label {
+            font-weight: 500;
+            color: #6c757d;
+        }
+        
+        .detail-value {
+            font-weight: 600;
+            color: #212529;
+        }
+        
+        /* Indicateur cliquable */
+        .formula-item {
+            position: relative;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        
+        .formula-item:hover {
+            background-color: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .formula-item::after {
+            content: "ⓘ";
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #007bff;
+            font-size: 14px;
+            opacity: 0.7;
+            transition: opacity 0.2s ease;
+        }
+        
+        .formula-item:hover::after {
+            opacity: 1;
+        }
+        
+        .formula-item.expanded::after {
+            content: "▼";
+            color: #28a745;
+        }
+        
+        /* Styles pour la liste des livraisons */
+        .livraisons-list {
+            margin: 10px 0;
+            padding: 0;
+        }
+        
+        .livraison-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 12px;
+            margin: 5px 0;
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+        
+        .livraison-info {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+        
+        .livraison-partner {
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 2px;
+        }
+        
+        .livraison-date {
+            font-size: 0.9em;
+            color: #6c757d;
+        }
+        
+        .livraison-amount {
+            font-weight: 600;
+            color: #28a745;
+            white-space: nowrap;
+        }
+        
         /* Responsive pour le modal */
         @media (max-width: 768px) {
             .modal {
@@ -4160,6 +4406,221 @@
             .modal-footer .btn {
                 width: 100%;
             }
+            
+            .formula-details {
+                margin-left: 10px;
+                font-size: 0.8em;
+            }
+            
+            .detail-line {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 2px;
+            }
+        }
+
+        /* Styles pour la configuration financière */
+        .financial-settings-panel {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .financial-settings-panel h4 {
+            color: #495057;
+            margin-bottom: 20px;
+            font-weight: 600;
+        }
+
+        .custom-control-label {
+            font-weight: 500;
+            color: #495057;
+        }
+
+        #validation-status-text {
+            margin-left: 5px;
+        }
+
+        .financial-settings-panel .alert-info {
+            margin-bottom: 0;
+            margin-top: 15px;
+        }
+
+        /* Styles pour le slider moderne de validation */
+        .validation-slider-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px;
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            margin-top: 8px;
+            transition: box-shadow 0.3s ease;
+        }
+
+        .validation-slider-container:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .slider-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 30px;
+        }
+
+        .slider-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #dc3545;
+            transition: .4s;
+            border-radius: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 22px;
+            width: 22px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        input:checked + .slider {
+            background-color: #28a745;
+        }
+
+        input:focus + .slider {
+            box-shadow: 0 0 8px rgba(40, 167, 69, 0.3);
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(30px);
+        }
+
+        .slider-label {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+        }
+
+        .slider-status {
+            font-weight: 600;
+            font-size: 16px;
+            margin: 0;
+            transition: color 0.3s ease;
+        }
+
+        .slider-status.enabled {
+            color: #28a745;
+        }
+
+        .slider-status.disabled {
+            color: #dc3545;
+        }
+
+        .slider-description {
+            font-size: 14px;
+            color: #6c757d;
+            margin: 4px 0 0 0;
+            line-height: 1.3;
+        }
+
+        .slider-icon {
+            font-size: 24px;
+            margin-left: 10px;
+            transition: color 0.3s ease;
+        }
+
+        .slider-icon.enabled {
+            color: #28a745;
+        }
+
+        .slider-icon.disabled {
+            color: #dc3545;
+        }
+
+        .config-panel .form-group label {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .config-panel .form-group label i {
+            margin-right: 8px;
+            color: #6c757d;
+        }
+
+        /* Styles pour l'indicateur de validation des dépenses */
+        .validation-status-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .validation-content {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .validation-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+        }
+
+        .validation-status-card.enabled {
+            background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
+            border-color: #c3e6cb;
+        }
+
+        .validation-status-card.disabled {
+            background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
+            border-color: #f5c6cb;
+        }
+
+        .validation-status-card.enabled #validation-icon {
+            color: #155724;
+        }
+
+        .validation-status-card.disabled #validation-icon {
+            color: #721c24;
+        }
+
+        .validation-status-card.enabled #validation-message {
+            color: #155724;
+        }
+
+        .validation-status-card.disabled #validation-message {
+            color: #721c24;
+        }
+
+        .validation-help {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-left: 30px;
         }
     </style>
 
