@@ -143,6 +143,44 @@ async function forceSyncAllAccountsAfterCreditOperation() {
     }
 }
 
+// Fonction helper générique pour vérifier le type de compte et déclencher la synchronisation automatique
+// COPIE EXACTE DE server.js lignes 95-129 SANS AUCUN CHANGEMENT
+async function triggerAutoSyncIfNeeded(accountId, operationType = 'modification') {
+    try {
+        if (!accountId) {
+            console.log('⚠️ AUTO-SYNC: Aucun compte ID fourni, synchronisation ignorée');
+            return { success: false, message: 'Aucun compte ID fourni' };
+        }
+
+        // Vérifier le type de compte
+        const accountTypeCheck = await pool.query('SELECT account_type, account_name FROM accounts WHERE id = $1', [accountId]);
+        
+        if (accountTypeCheck.rows.length === 0) {
+            console.log(`⚠️ AUTO-SYNC: Compte ${accountId} non trouvé, synchronisation ignorée`);
+            return { success: false, message: 'Compte non trouvé' };
+        }
+
+        const account = accountTypeCheck.rows[0];
+        
+        // Déclencher la synchronisation UNIQUEMENT pour les comptes classiques
+        if (account.account_type === 'classique') {
+            console.log(`🔄 AUTO-SYNC: Déclenchement synchronisation après ${operationType} sur compte classique "${account.account_name}"`);
+            return await forceSyncAllAccountsAfterCreditOperation();
+        } else {
+            console.log(`ℹ️ AUTO-SYNC: Compte "${account.account_name}" de type "${account.account_type}" - synchronisation automatique non nécessaire`);
+            return { success: true, message: `Compte ${account.account_type} - pas de sync automatique` };
+        }
+        
+    } catch (error) {
+        console.error('❌ AUTO-SYNC: Erreur lors de la vérification du type de compte:', error);
+        return {
+            success: false,
+            message: 'Erreur lors de la vérification du type de compte',
+            error: error.message
+        };
+    }
+}
+
 // Fonction pour synchroniser TOUS les comptes 
 // COPIE EXACTE DE server.js lignes 12269-12292
 async function syncAllAccounts() {
@@ -298,10 +336,7 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
                 
                 // Vérifier si le compte est de type classique pour la synchronisation
                 // COPIE EXACTE DE server.js
-                const accountTypeCheck = await pool.query('SELECT account_type FROM accounts WHERE id = $1', [accountId]);
-                if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
-                    await forceSyncAllAccountsAfterCreditOperation();
-                }
+                await triggerAutoSyncIfNeeded(accountId, 'opération de crédit');
 
                 // Ajouter dépense
                 const expenseResult = await pool.query(
@@ -361,10 +396,7 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
                 
                 // Vérifier si le compte est de type classique pour la synchronisation
                 // COPIE EXACTE DE server.js
-                const accountTypeCheck = await pool.query('SELECT account_type FROM accounts WHERE id = $1', [accountId]);
-                if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
-                    await forceSyncAllAccountsAfterCreditOperation();
-                }
+                await triggerAutoSyncIfNeeded(accountId, 'opération de crédit');
                 creditId = creditResult.rows[0].id;
 
                 await pool.query(
@@ -395,10 +427,7 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
                 
                 // Vérifier si le compte est de type classique pour la synchronisation
                 // COPIE EXACTE DE server.js
-                const accountTypeCheck = await pool.query('SELECT account_type FROM accounts WHERE id = $1', [accountId]);
-                if (accountTypeCheck.rows.length > 0 && accountTypeCheck.rows[0].account_type === 'classique') {
-                    await forceSyncAllAccountsAfterCreditOperation();
-                }
+                await triggerAutoSyncIfNeeded(accountId, 'opération de crédit');
                 await pool.query('COMMIT');
                 
                 await checkBalanceConsistency(accountId, 'Après suppression créance 500 FCFA');
