@@ -123,11 +123,12 @@ async function forceSyncAllAccountsAfterCreditOperation() {
         const result = await pool.query('SELECT force_sync_all_accounts_simple()');
         const syncData = result.rows[0].force_sync_all_accounts_simple;
         
-        console.log(`✅ AUTO-SYNC: Synchronisation terminée - ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`);
+        // Production retourne: synchronized_accounts, errors, message
+        console.log(`✅ AUTO-SYNC: Synchronisation terminée - ${syncData.synchronized_accounts} comptes synchronisés, ${syncData.errors} erreurs`);
         
         return {
             success: true,
-            message: `Synchronisation automatique: ${syncData.total_corrected} comptes corrigés sur ${syncData.total_accounts}`,
+            message: `Synchronisation automatique: ${syncData.message}`,
             data: syncData
         };
         
@@ -184,12 +185,16 @@ async function syncAccountBalance(accountId) {
         const accountName = accountCheck.rows[0].account_name;
         
         // Synchroniser le compte
-        const result = await pool.query('SELECT force_sync_account($1)', [accountId]);
-        const syncData = result.rows[0].force_sync_account;
+        // Synchroniser le compte - EXACTEMENT COMME EN PRODUCTION (VOID)
+        await pool.query('SELECT force_sync_account($1)', [accountId]);
         
-        console.log(`✅ ${accountName} synchronisé: ${parseFloat(syncData.new_balance).toLocaleString()} FCFA (${syncData.status})`);
+        // Récupérer le nouveau solde après synchronisation
+        const balanceResult = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [accountId]);
+        const newBalance = parseFloat(balanceResult.rows[0].current_balance) || 0;
         
-        return parseFloat(syncData.new_balance);
+        console.log(`✅ ${accountName} synchronisé: ${newBalance.toLocaleString()} FCFA`);
+        
+        return newBalance;
         
     } catch (error) {
         console.error('❌ Erreur synchronisation compte:', error);

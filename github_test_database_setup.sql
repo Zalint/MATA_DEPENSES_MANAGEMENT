@@ -187,119 +187,230 @@ CREATE TABLE IF NOT EXISTS financial_settings (
 -- POSTGRESQL FUNCTIONS (Missing from GitHub Actions)
 -- =====================================================
 
--- Function to synchronize a single account
-CREATE OR REPLACE FUNCTION force_sync_account(account_id_param INTEGER)
-RETURNS JSON AS $$
+-- FONCTION PRODUCTION EXACTE - force_sync_account
+CREATE OR REPLACE FUNCTION public.force_sync_account(p_account_id integer)
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
 DECLARE
-    account_type_val VARCHAR(20);
-    total_credited_calc INTEGER;
-    total_spent_calc INTEGER;
-    transfer_net_calc INTEGER;
-    current_balance_calc INTEGER;
-    old_balance INTEGER;
-    account_name_val VARCHAR(100);
+    account_type_val TEXT;
+    total_expenses DECIMAL(15,2) := 0;
+    total_credits DECIMAL(15,2) := 0;
+    total_special_credits DECIMAL(15,2) := 0;
+    net_transfers DECIMAL(15,2) := 0;
+    current_month_adjustment DECIMAL(15,2) := 0;
+    new_balance DECIMAL(15,2) := 0;
+    latest_transaction_amount DECIMAL(15,2) := 0;
+    latest_transaction_date TIMESTAMP;
+    partner_remaining DECIMAL(15,2) := 0;
 BEGIN
-    -- Get account info
-    SELECT account_type, current_balance, account_name 
-    INTO account_type_val, old_balance, account_name_val
-    FROM accounts WHERE id = account_id_param;
-    
-    IF NOT FOUND THEN
-        RETURN json_build_object(
-            'status', 'error',
-            'message', 'Account not found',
-            'account_id', account_id_param
-        );
-    END IF;
-    
-    -- Calculate total credited
-    SELECT COALESCE(SUM(amount), 0) INTO total_credited_calc
-    FROM credit_history WHERE account_id = account_id_param;
-    
-    -- Add special credits
-    total_credited_calc := total_credited_calc + COALESCE((
-        SELECT SUM(amount) FROM special_credit_history 
-        WHERE account_id = account_id_param
-    ), 0);
-    
-    -- Calculate total spent
-    SELECT COALESCE(SUM(total), 0) INTO total_spent_calc
-    FROM expenses WHERE account_id = account_id_param;
-    
-    -- Calculate net transfers
-    SELECT COALESCE(
-        (SELECT SUM(montant) FROM transfer_history WHERE destination_id = account_id_param) -
-        (SELECT SUM(montant) FROM transfer_history WHERE source_id = account_id_param),
-        0
-    ) INTO transfer_net_calc;
-    
-    -- Calculate new balance based on account type
-    IF account_type_val = 'partenaire' THEN
-        -- For partner accounts: total_credited - validated deliveries
-        SELECT total_credited_calc - COALESCE(SUM(amount), 0) INTO current_balance_calc
-        FROM partner_deliveries 
-        WHERE account_id = account_id_param AND status = 'fully_validated';
-    ELSE
-        -- For other accounts: credited - spent + transfers
-        current_balance_calc := total_credited_calc - total_spent_calc + transfer_net_calc;
-    END IF;
-    
-    -- Update the account
-    UPDATE accounts 
-    SET 
-        current_balance = current_balance_calc,
-        total_credited = total_credited_calc,
-        total_spent = total_spent_calc,
-        updated_at = CURRENT_TIMESTAMP
-    WHERE id = account_id_param;
-    
-    RETURN json_build_object(
-        'status', 'success',
-        'account_id', account_id_param,
-        'account_name', account_name_val,
-        'old_balance', old_balance,
-        'new_balance', current_balance_calc,
-        'total_credited', total_credited_calc,
-        'total_spent', total_spent_calc,
-        'transfer_net', transfer_net_calc,
-        'balance_changed', (old_balance != current_balance_calc)
-    );
-END;
-$$ LANGUAGE plpgsql;
+    -- Récupérer le type de compte
+    SELECT COALESCE(account_type, 'classique') INTO account_type_val
+    FROM accounts
+    WHERE id = p_account_id;
 
--- Function to synchronize all accounts
-CREATE OR REPLACE FUNCTION force_sync_all_accounts_simple()
-RETURNS JSON AS $$
+    -- LOGIQUE DIFFÉRENTE SELON LE TYPE DE COMPTE
+    IF account_type_val = 'partenaire' THEN
+        -- =============================================================
+        -- LOGIQUE PARTENAIRES: Restant = total_credited - total_delivered
+        -- =============================================================
+        SELECT COALESCE(total_credited - total_delivered, 0)
+        INTO partner_remaining
+        FROM partner_delivery_summary
+        WHERE account_id = p_account_id;
+
+        new_balance := COALESCE(partner_remaining, 0);
+
+        RAISE NOTICE 'Compte PARTENAIRE ID %: Restant partner_delivery_summary = %', 
+            p_account_id, new_balance;
+
+    ELSIF account_type_val = 'statut' THEN
+        -- =============================================================
+        -- LOGIQUE STATUT: Dernière transaction chronologique
+        -- =============================================================
+        WITH all_transactions AS (
+            -- Crédits réguliers
+            SELECT amount, created_at as transaction_date
+            FROM credit_history
+            WHERE account_id = p_account_id
+
+            UNION ALL
+
+            -- Crédits spéciaux
+            SELECT amount, created_at as transaction_date
+            FROM special_credit_history
+            WHERE account_id = p_account_id
+
+            UNION ALL
+
+            -- Dépenses (négatif)
+            SELECT -total as amount, created_at as transaction_date
+            FROM expenses
+            WHERE account_id = p_account_id
+
+            UNION ALL
+
+            -- Transferts entrants (positif)
+            SELECT montant as amount, created_at as transaction_date
+            FROM transfer_history
+            WHERE destination_id = p_account_id
+
+            UNION ALL
+
+            -- Transferts sortants (négatif)
+            SELECT -montant as amount, created_at as transaction_date
+            FROM transfer_history
+            WHERE source_id = p_account_id
+        )
+        SELECT COALESCE(amount, 0), transaction_date
+        INTO latest_transaction_amount, latest_transaction_date
+        FROM all_transactions
+        ORDER BY transaction_date DESC
+        LIMIT 1;
+
+        new_balance := COALESCE(latest_transaction_amount, 0);
+
+        RAISE NOTICE 'Compte STATUT ID %: Dernière transaction (%) = %',
+            p_account_id, latest_transaction_date, new_balance;
+
+    ELSE
+        -- =============================================================
+        -- LOGIQUE CLASSIQUE: Cumul de toutes les transactions
+        -- =============================================================
+
+        -- Calculer le total des dépenses
+        SELECT COALESCE(SUM(total), 0) INTO total_expenses
+        FROM expenses
+        WHERE account_id = p_account_id;
+
+        -- Calculer le total des crédits réguliers
+        SELECT COALESCE(SUM(amount), 0) INTO total_credits
+        FROM credit_history
+        WHERE account_id = p_account_id;
+
+        -- Calculer le total des crédits spéciaux
+        SELECT COALESCE(SUM(amount), 0) INTO total_special_credits
+        FROM special_credit_history
+        WHERE account_id = p_account_id;
+
+        -- Calculer les transferts nets
+        SELECT COALESCE(
+            SUM(CASE
+                WHEN destination_id = p_account_id THEN montant
+                WHEN source_id = p_account_id THEN -montant
+                ELSE 0
+            END), 0
+        ) INTO net_transfers
+        FROM transfer_history
+        WHERE destination_id = p_account_id OR source_id = p_account_id;
+
+        -- Calculer l'ajustement du mois courant
+        SELECT COALESCE(montant, 0) INTO current_month_adjustment
+        FROM montant_debut_mois
+        WHERE account_id = p_account_id
+        AND year = EXTRACT(YEAR FROM CURRENT_DATE)
+        AND month = EXTRACT(MONTH FROM CURRENT_DATE);
+
+        new_balance := COALESCE(total_credits, 0) + COALESCE(total_special_credits, 0) - COALESCE(total_expenses, 0) + COALESCE(net_transfers, 0) + COALESCE(current_month_adjustment, 0);
+
+        RAISE NOTICE 'Compte CLASSIQUE ID %: Balance cumulative = %',
+            p_account_id, new_balance;
+    END IF;
+
+    -- S'assurer que new_balance n'est jamais NULL
+    new_balance := COALESCE(new_balance, 0);
+
+    -- Mettre à jour la table accounts (différent selon le type)
+    IF account_type_val = 'partenaire' THEN
+        -- Pour les partenaires, ne pas calculer total_spent/total_credited depuis transactions
+        UPDATE accounts SET
+            current_balance = new_balance,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = p_account_id;
+    ELSE
+        -- Pour classique et statut, calculer aussi total_spent et total_credited
+        UPDATE accounts SET
+            total_spent = COALESCE(total_expenses, 0),
+            total_credited = COALESCE(total_credits, 0) + COALESCE(total_special_credits, 0),
+            current_balance = new_balance,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = p_account_id;
+    END IF;
+
+    RAISE NOTICE 'Compte ID % [%] mis à jour: balance = %', p_account_id, account_type_val, new_balance;
+
+END;
+$function$
+
+-- FONCTION PRODUCTION EXACTE - force_sync_all_accounts_simple
+CREATE OR REPLACE FUNCTION public.force_sync_all_accounts_simple()
+ RETURNS json
+ LANGUAGE plpgsql
+AS $function$
 DECLARE
     account_record RECORD;
-    total_accounts INTEGER := 0;
-    total_corrected INTEGER := 0;
-    sync_result JSON;
+    sync_count INTEGER := 0;
+    error_count INTEGER := 0;
+    result_json JSON;
 BEGIN
-    -- Count total accounts
-    SELECT COUNT(*) INTO total_accounts FROM accounts WHERE is_active = true;
-    
-    -- Loop through all active accounts
-    FOR account_record IN 
-        SELECT id FROM accounts WHERE is_active = true ORDER BY id
+    -- Synchroniser tous les comptes actifs
+    FOR account_record IN
+        SELECT id, account_name
+        FROM accounts
+        WHERE is_active = true
     LOOP
-        -- Sync each account
-        SELECT force_sync_account(account_record.id) INTO sync_result;
-        
-        -- Check if balance was changed
-        IF (sync_result->>'balance_changed')::boolean THEN
-            total_corrected := total_corrected + 1;
-        END IF;
+        BEGIN
+            -- Appeler la fonction de synchronisation pour chaque compte
+            PERFORM force_sync_account(account_record.id);
+            sync_count := sync_count + 1;
+
+            RAISE NOTICE 'Compte synchronisé: % (ID: %)', account_record.account_name, account_record.id;
+
+        EXCEPTION WHEN OTHERS THEN
+            error_count := error_count + 1;
+            RAISE NOTICE 'Erreur synchronisation compte % (ID: %): %',
+                account_record.account_name, account_record.id, SQLERRM;
+        END;
     END LOOP;
-    
-    RETURN json_build_object(
+
+    -- Construire le résultat JSON
+    SELECT json_build_object(
         'status', 'success',
-        'total_accounts', total_accounts,
-        'total_corrected', total_corrected,
-        'sync_date', CURRENT_TIMESTAMP
-    );
+        'synchronized_accounts', sync_count,
+        'errors', error_count,
+        'message', CASE
+            WHEN error_count = 0 THEN 'Tous les comptes ont été synchronisés avec succès'
+            ELSE format('%s comptes synchronisés, %s erreurs', sync_count, error_count)
+        END
+    ) INTO result_json;
+
+    RETURN result_json;
 END;
-$$ LANGUAGE plpgsql;
+$function$
+
+-- =====================================================
+-- TABLES MANQUANTES POUR PRODUCTION
+-- =====================================================
+
+-- Table partner_delivery_summary pour logique partenaires
+CREATE TABLE IF NOT EXISTS partner_delivery_summary (
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    total_credited INTEGER DEFAULT 0,
+    total_delivered INTEGER DEFAULT 0,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (account_id)
+);
+
+-- Table montant_debut_mois pour ajustements mensuels
+CREATE TABLE IF NOT EXISTS montant_debut_mois (
+    id SERIAL PRIMARY KEY,
+    account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    year INTEGER NOT NULL,
+    month INTEGER NOT NULL,
+    montant INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(account_id, year, month)
+);
 
 -- =====================================================
 -- INDEXES FOR PERFORMANCE
