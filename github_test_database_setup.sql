@@ -340,7 +340,7 @@ BEGIN
     RAISE NOTICE 'Compte ID % [%] mis à jour: balance = %', p_account_id, account_type_val, new_balance;
 
 END;
-$function$
+$function$;
 
 -- FONCTION PRODUCTION EXACTE - force_sync_all_accounts_simple
 CREATE OR REPLACE FUNCTION public.force_sync_all_accounts_simple()
@@ -386,7 +386,7 @@ BEGIN
 
     RETURN result_json;
 END;
-$function$
+$function$;
 
 -- =====================================================
 -- TABLES MANQUANTES POUR PRODUCTION
