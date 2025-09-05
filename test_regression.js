@@ -77,6 +77,27 @@ async function calculateNetBalance(accountId) {
     return parseInt(result.rows[0].net_balance) || 0;
 }
 
+// Fonction pour vérifier la cohérence des colonnes de transferts
+async function verifyTransferCoherence(accountId) {
+    const result = await pool.query(`
+        SELECT 
+            a.transfert_entrants,
+            a.transfert_sortants,
+            COALESCE((SELECT SUM(th.montant) FROM transfer_history th WHERE th.destination_id = a.id), 0) as calculated_entrants,
+            COALESCE((SELECT SUM(th.montant) FROM transfer_history th WHERE th.source_id = a.id), 0) as calculated_sortants
+        FROM accounts a
+        WHERE a.id = $1
+    `, [accountId]);
+    
+    if (result.rows.length === 0) return false;
+    
+    const row = result.rows[0];
+    const entrantsMatch = Math.abs(parseFloat(row.transfert_entrants) - parseFloat(row.calculated_entrants)) < 0.01;
+    const sortantsMatch = Math.abs(parseFloat(row.transfert_sortants) - parseFloat(row.calculated_sortants)) < 0.01;
+    
+    return entrantsMatch && sortantsMatch;
+}
+
 // Fonction pour calculer la somme des transactions de l'audit flux
 async function calculateAuditFluxSum(accountName) {
     const creditsResult = await pool.query(`
@@ -2367,11 +2388,165 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
             console.log('✅ Test 17 terminé - Validation du budget testée avec succès');
         });
     });
+
+    // ===== NOUVEAU TEST 19 : COHÉRENCE COLONNES TRANSFERTS =====
+    describe('Test 19: Cohérence des colonnes transfert_entrants et transfert_sortants', function() {
+        let testAccountId_source, testAccountId_dest;
+
+        before(async function() {
+            console.log('\n🆕 Test 19 - Début: Cohérence colonnes transferts');
+            
+            // Créer deux comptes de test
+            const sourceResult = await pool.query(
+                'INSERT INTO accounts (account_name, current_balance, total_credited, total_spent, transfert_entrants, transfert_sortants, account_type) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+                ['COMPTE_SOURCE_TEST_REG', 50000, 50000, 0, 0, 0, 'classique']
+            );
+            testAccountId_source = sourceResult.rows[0].id;
+            
+            const destResult = await pool.query(
+                'INSERT INTO accounts (account_name, current_balance, total_credited, total_spent, transfert_entrants, transfert_sortants, account_type) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+                ['COMPTE_DEST_TEST_REG', 30000, 30000, 0, 0, 0, 'classique']
+            );
+            testAccountId_dest = destResult.rows[0].id;
+            
+            console.log(`✅ Comptes de test créés: Source ID ${testAccountId_source}, Dest ID ${testAccountId_dest}`);
+        });
+
+        it('devrait synchroniser automatiquement les colonnes de transferts lors d\'ajout', async function() {
+            console.log('\n🔄 Ajout d\'un transfert de test...');
+            
+            // Vérifier les valeurs initiales
+            let coherenceSource = await verifyTransferCoherence(testAccountId_source);
+            let coherenceDest = await verifyTransferCoherence(testAccountId_dest);
+            assert(coherenceSource, 'Cohérence initiale source OK');
+            assert(coherenceDest, 'Cohérence initiale destination OK');
+            console.log('✅ Cohérence initiale vérifiée');
+            
+            // Ajouter un transfert
+            const transferResult = await pool.query(
+                'INSERT INTO transfer_history (source_id, destination_id, montant, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id',
+                [testAccountId_source, testAccountId_dest, 15000]
+            );
+            const transferId = transferResult.rows[0].id;
+            console.log(`✅ Transfert ajouté: ${15000} FCFA, ID ${transferId}`);
+            
+            // Vérifier que les colonnes ont été mises à jour automatiquement
+            coherenceSource = await verifyTransferCoherence(testAccountId_source);
+            coherenceDest = await verifyTransferCoherence(testAccountId_dest);
+            
+            assert(coherenceSource, 'Cohérence source après transfert');
+            assert(coherenceDest, 'Cohérence destination après transfert');
+            
+            // Vérifier les valeurs spécifiques
+            const sourceData = await pool.query('SELECT transfert_entrants, transfert_sortants FROM accounts WHERE id = $1', [testAccountId_source]);
+            const destData = await pool.query('SELECT transfert_entrants, transfert_sortants FROM accounts WHERE id = $1', [testAccountId_dest]);
+            
+            assert.strictEqual(parseFloat(sourceData.rows[0].transfert_sortants), 15000, 'Transferts sortants source = 15000');
+            assert.strictEqual(parseFloat(destData.rows[0].transfert_entrants), 15000, 'Transferts entrants destination = 15000');
+            
+            console.log('✅ Synchronisation automatique des transferts validée');
+            
+            // Nettoyer
+            await pool.query('DELETE FROM transfer_history WHERE id = $1', [transferId]);
+        });
+
+        it('devrait maintenir la cohérence lors de suppression de transfert', async function() {
+            console.log('\n🗑️ Test suppression transfert...');
+            
+            // Ajouter un transfert
+            const transferResult = await pool.query(
+                'INSERT INTO transfer_history (source_id, destination_id, montant, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id',
+                [testAccountId_source, testAccountId_dest, 25000]
+            );
+            const transferId = transferResult.rows[0].id;
+            
+            // Vérifier qu'il est bien ajouté
+            let coherenceSource = await verifyTransferCoherence(testAccountId_source);
+            let coherenceDest = await verifyTransferCoherence(testAccountId_dest);
+            assert(coherenceSource && coherenceDest, 'Cohérence après ajout OK');
+            
+            // Supprimer le transfert
+            await pool.query('DELETE FROM transfer_history WHERE id = $1', [transferId]);
+            console.log(`✅ Transfert supprimé: ID ${transferId}`);
+            
+            // Vérifier que les colonnes sont revenues à 0
+            coherenceSource = await verifyTransferCoherence(testAccountId_source);
+            coherenceDest = await verifyTransferCoherence(testAccountId_dest);
+            
+            assert(coherenceSource, 'Cohérence source après suppression');
+            assert(coherenceDest, 'Cohérence destination après suppression');
+            
+            const sourceData = await pool.query('SELECT transfert_entrants, transfert_sortants FROM accounts WHERE id = $1', [testAccountId_source]);
+            const destData = await pool.query('SELECT transfert_entrants, transfert_sortants FROM accounts WHERE id = $1', [testAccountId_dest]);
+            
+            assert.strictEqual(parseFloat(sourceData.rows[0].transfert_sortants), 0, 'Transferts sortants remis à 0');
+            assert.strictEqual(parseFloat(destData.rows[0].transfert_entrants), 0, 'Transferts entrants remis à 0');
+            
+            console.log('✅ Synchronisation lors de suppression validée');
+        });
+
+        it('devrait vérifier la cohérence avec des transferts multiples', async function() {
+            console.log('\n🔢 Test transferts multiples...');
+            
+            // Ajouter plusieurs transferts
+            const transfers = [
+                { montant: 10000, from: testAccountId_source, to: testAccountId_dest },
+                { montant: 5000, from: testAccountId_dest, to: testAccountId_source },
+                { montant: 8000, from: testAccountId_source, to: testAccountId_dest }
+            ];
+            
+            const transferIds = [];
+            for (const transfer of transfers) {
+                const result = await pool.query(
+                    'INSERT INTO transfer_history (source_id, destination_id, montant, created_at) VALUES ($1, $2, $3, NOW()) RETURNING id',
+                    [transfer.from, transfer.to, transfer.montant]
+                );
+                transferIds.push(result.rows[0].id);
+            }
+            
+            console.log(`✅ ${transfers.length} transferts ajoutés`);
+            
+            // Vérifier la cohérence finale
+            const coherenceSource = await verifyTransferCoherence(testAccountId_source);
+            const coherenceDest = await verifyTransferCoherence(testAccountId_dest);
+            
+            assert(coherenceSource, 'Cohérence source avec transferts multiples');
+            assert(coherenceDest, 'Cohérence destination avec transferts multiples');
+            
+            // Vérifier les calculs attendus
+            // Source: sortants = 10000 + 8000 = 18000, entrants = 5000
+            // Dest: entrants = 10000 + 8000 = 18000, sortants = 5000
+            const sourceData = await pool.query('SELECT transfert_entrants, transfert_sortants FROM accounts WHERE id = $1', [testAccountId_source]);
+            const destData = await pool.query('SELECT transfert_entrants, transfert_sortants FROM accounts WHERE id = $1', [testAccountId_dest]);
+            
+            assert.strictEqual(parseFloat(sourceData.rows[0].transfert_sortants), 18000, 'Source sortants = 18000');
+            assert.strictEqual(parseFloat(sourceData.rows[0].transfert_entrants), 5000, 'Source entrants = 5000');
+            assert.strictEqual(parseFloat(destData.rows[0].transfert_entrants), 18000, 'Dest entrants = 18000');
+            assert.strictEqual(parseFloat(destData.rows[0].transfert_sortants), 5000, 'Dest sortants = 5000');
+            
+            console.log('✅ Cohérence avec transferts multiples validée');
+            
+            // Nettoyer
+            for (const transferId of transferIds) {
+                await pool.query('DELETE FROM transfer_history WHERE id = $1', [transferId]);
+            }
+        });
+
+        after(async function() {
+            console.log('\n🧹 Nettoyage Test 19...');
+            
+            // Supprimer les comptes de test
+            await pool.query('DELETE FROM accounts WHERE id IN ($1, $2)', [testAccountId_source, testAccountId_dest]);
+            
+            console.log('✅ Test 19 terminé - Cohérence des colonnes transferts validée');
+        });
+    });
 });
 
 module.exports = {
     calculateNetBalance,
     calculateAuditFluxSum,
-    checkBalanceConsistency
+    checkBalanceConsistency,
+    verifyTransferCoherence
 };
 

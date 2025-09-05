@@ -81,8 +81,10 @@ jobs:
         echo "  • Test 4: Suppression créance 500 FCFA"  
         echo "  • Test 5: Ajout transfert 750 FCFA"
         echo "  • Test 6: Suppression transfert 750 FCFA"
+        echo "  • Test 19: Cohérence colonnes transferts"
         echo "  • Vérification: Solde actuel = Solde Net"
         echo "  • Vérification: Audit Flux = Solde Net"
+        echo "  • Vérification: Transferts automatiquement synchronisés"
 
     - name: 📧 Notification en cas d'échec
       if: failure()

@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     current_balance INTEGER DEFAULT 0 NOT NULL,
     total_credited INTEGER DEFAULT 0 NOT NULL,
     total_spent INTEGER DEFAULT 0 NOT NULL,
+    transfert_entrants DECIMAL(15,2) DEFAULT 0 NOT NULL,
+    transfert_sortants DECIMAL(15,2) DEFAULT 0 NOT NULL,
     created_by INTEGER REFERENCES users(id),
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -424,10 +426,77 @@ CREATE TABLE IF NOT EXISTS montant_debut_mois (
 );
 
 -- =====================================================
+-- TRANSFER SYNCHRONIZATION FUNCTIONS AND TRIGGERS
+-- =====================================================
+
+-- Function to synchronize transfer columns for a specific account
+CREATE OR REPLACE FUNCTION sync_transferts_account(p_account_id INTEGER)
+RETURNS VOID AS $$
+DECLARE
+    total_entrants DECIMAL(15,2) := 0;
+    total_sortants DECIMAL(15,2) := 0;
+BEGIN
+    -- Calculate incoming transfers
+    SELECT COALESCE(SUM(montant), 0) INTO total_entrants
+    FROM transfer_history
+    WHERE destination_id = p_account_id;
+
+    -- Calculate outgoing transfers
+    SELECT COALESCE(SUM(montant), 0) INTO total_sortants
+    FROM transfer_history
+    WHERE source_id = p_account_id;
+
+    -- Update accounts table
+    UPDATE accounts 
+    SET 
+        transfert_entrants = total_entrants,
+        transfert_sortants = total_sortants
+    WHERE id = p_account_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger function for automatic synchronization
+CREATE OR REPLACE FUNCTION trigger_sync_transferts()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- Synchronize source account (OLD and NEW for updates)
+    IF TG_OP = 'DELETE' THEN
+        PERFORM sync_transferts_account(OLD.source_id);
+        PERFORM sync_transferts_account(OLD.destination_id);
+        RETURN OLD;
+    END IF;
+    
+    IF TG_OP = 'UPDATE' THEN
+        -- If accounts changed, synchronize old accounts
+        IF OLD.source_id != NEW.source_id THEN
+            PERFORM sync_transferts_account(OLD.source_id);
+        END IF;
+        IF OLD.destination_id != NEW.destination_id THEN
+            PERFORM sync_transferts_account(OLD.destination_id);
+        END IF;
+    END IF;
+    
+    -- Synchronize new accounts
+    PERFORM sync_transferts_account(NEW.source_id);
+    PERFORM sync_transferts_account(NEW.destination_id);
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Create the trigger
+DROP TRIGGER IF EXISTS trig_sync_transferts ON transfer_history;
+CREATE TRIGGER trig_sync_transferts
+    AFTER INSERT OR UPDATE OR DELETE ON transfer_history
+    FOR EACH ROW
+    EXECUTE FUNCTION trigger_sync_transferts();
+
+-- =====================================================
 -- INDEXES FOR PERFORMANCE
 -- =====================================================
 CREATE INDEX IF NOT EXISTS idx_accounts_user_id ON accounts(user_id);
 CREATE INDEX IF NOT EXISTS idx_accounts_type ON accounts(account_type);
+CREATE INDEX IF NOT EXISTS idx_accounts_transferts ON accounts(transfert_entrants, transfert_sortants);
 CREATE INDEX IF NOT EXISTS idx_expenses_account_id ON expenses(account_id);
 CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(expense_date);
 CREATE INDEX IF NOT EXISTS idx_credit_history_account_id ON credit_history(account_id);
