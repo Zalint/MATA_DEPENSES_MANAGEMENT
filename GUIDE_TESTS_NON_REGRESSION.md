@@ -1,5 +1,5 @@
    # 🧪 Guide des Tests de Non-Régression
-   *Système de validation automatisée complet - 26 Tests*
+   *Système de validation automatisée complet - 28 Tests*
 
    ---
 
@@ -13,8 +13,8 @@
    - **Fonctionnalités avancées** (PL, Cash, Stock, Factures, Validation)
 
    ### 🎯 **Résultats Actuels**
-   - ✅ **26 tests passent** (100% de réussite)
-   - ⏱️ **Temps d'exécution : ~940ms**
+   - ✅ **28 tests passent** (100% de réussite)
+   - ⏱️ **Temps d'exécution : ~1050ms**
    - 🔄 **Synchronisation EXACTEMENT identique à la PRODUCTION**
    - 📊 **Base de test isolée** (`github_test_database_setup.sql`)
    - 🏭 **Fonctions PostgreSQL PROD extraites directement**
@@ -22,7 +22,7 @@
 
    ---
 
-   ## 🧪 **Tests Implémentés (26 Tests Complets)**
+   ## 🧪 **Tests Implémentés (28 Tests Complets)**
 
    ### **🐄 Tests Compte CLASSIQUE (BOVIN) - Tests 1-6**
 
@@ -174,7 +174,7 @@
    ⚙️ Configuration dynamique via financial_settings.json
    ```
 
-   #### **Test 18 : Cut-off Date - Analyse Historique** 🆕
+   #### **Test 18 : Cut-off Date - Analyse Historique**
    ```javascript
    📅 Dates test : 2025-01-05 à 2025-01-20 (transactions étalées)
    💰 Cut-off référence : 2025-01-15
@@ -190,6 +190,32 @@
    ✓ Support multiple dates de référence
    ```
 
+   #### **Test 19 : Cohérence Colonnes Transferts** 🆕
+   ```javascript
+   🔄 SYNCHRONISATION AUTOMATIQUE:
+      • Ajout transfert → Colonnes mises à jour automatiquement
+      • Suppression transfert → Colonnes remises à zéro
+      • Transferts multiples → Calculs cumulés corrects
+
+   🧪 SCÉNARIOS TESTÉS:
+      • Compte Source (50K FCFA) ⟷ Compte Destination (30K FCFA)
+      • Transfert simple : 15K FCFA → Vérification entrants/sortants
+      • Suppression : Retour à 0 → Vérification cohérence
+      • Multiples : 10K + 5K + 8K → Calculs cumulés exacts
+
+   📊 VALIDATION COHÉRENCE:
+      ✓ transfert_entrants = SUM(transfer_history WHERE destination_id)
+      ✓ transfert_sortants = SUM(transfer_history WHERE source_id)
+      ✓ Trigger PostgreSQL automatique (INSERT/UPDATE/DELETE)
+      ✓ Interface UI utilise nouvelles colonnes
+      ✓ API backend retourne colonnes transferts
+
+   🎯 OBJECTIF: Éliminer l'incohérence entre "Informations du Compte" 
+   et "Historique des Mouvements" grâce aux colonnes de transferts
+   
+   📈 RÉSULTAT: Cohérence parfaite 7,432,987 FCFA = 7,432,987 FCFA
+   ```
+
    ### **🔍 Test de Vérification Finale**
    - Synthèse complète de tous les tests
    - Rapport de cohérence globale
@@ -202,7 +228,7 @@
 
    ### **📁 Fichiers Principaux**
    ```
-   test_regression_new.js         # Tests de non-régression (26 tests)
+   test_regression_new.js         # Tests de non-régression (28 tests)
    copy_preprod_to_test.ps1       # Script copie base préprod → test
    package.json                   # Scripts npm configurés
    .github/workflows/             # Automatisation CI/CD

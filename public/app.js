@@ -16814,6 +16814,12 @@ function displayAuditAccountInfo(account) {
     document.getElementById('audit-account-credited').textContent = `${account.total_credited.toLocaleString('fr-FR')} FCFA`;
     document.getElementById('audit-account-spent').textContent = `${account.total_spent.toLocaleString('fr-FR')} FCFA`;
     
+    // Afficher les transferts
+    const transfertEntrants = account.transfert_entrants || 0;
+    const transfertSortants = account.transfert_sortants || 0;
+    document.getElementById('audit-account-transfert-entrants').textContent = `${transfertEntrants.toLocaleString('fr-FR')} FCFA`;
+    document.getElementById('audit-account-transfert-sortants').textContent = `${transfertSortants.toLocaleString('fr-FR')} FCFA`;
+    
     // Afficher les ajustements du mois courant seulement si différent de zéro
     const adjustmentItem = document.getElementById('audit-adjustment-item');
     const adjustmentValue = document.getElementById('audit-account-adjustment');

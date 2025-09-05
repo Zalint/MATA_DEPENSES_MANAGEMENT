@@ -713,7 +713,7 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
     try {
         console.log('Récupération des comptes pour utilisateur:', req.session.user.username, 'Role:', req.session.user.role);
         let query = `
-            SELECT a.id, a.account_name, a.user_id, a.current_balance, a.total_credited, a.total_spent,
+            SELECT a.id, a.account_name, a.user_id, a.current_balance, a.total_credited, a.total_spent, a.transfert_entrants, a.transfert_sortants,
                    a.is_active, a.created_at, a.updated_at, 
                    COALESCE(a.account_type, 'classique') as account_type,
                    a.category_type, a.access_restricted, a.allowed_roles, a.created_by,
@@ -1053,7 +1053,7 @@ app.get('/api/account/balance', requireAuth, async (req, res) => {
         }
         
         const result = await pool.query(
-            'SELECT id, current_balance, total_credited, total_spent FROM accounts WHERE user_id = $1 AND is_active = true',
+            'SELECT id, current_balance, total_credited, total_spent, transfert_entrants, transfert_sortants FROM accounts WHERE user_id = $1 AND is_active = true',
             [user_id]
         );
         
@@ -1100,7 +1100,7 @@ app.get('/api/account/:accountId/balance', requireAuth, async (req, res) => {
         const userId = req.session.user.id;
         
         // Vérifications d'accès selon le rôle
-        let accessQuery = 'SELECT id, current_balance, total_credited, total_spent FROM accounts WHERE id = $1 AND is_active = true';
+        let accessQuery = 'SELECT id, current_balance, total_credited, total_spent, transfert_entrants, transfert_sortants FROM accounts WHERE id = $1 AND is_active = true';
         let accessParams = [accountId];
         
         if (userRole === 'directeur') {
@@ -4754,8 +4754,8 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
         
         // Créer le compte avec le type spécifié
         const accountResult = await pool.query(
-            `INSERT INTO accounts (user_id, account_name, current_balance, total_credited, total_spent, created_by, account_type, access_restricted, allowed_roles, category_type) 
-             VALUES ($1, $2, $3, $4, 0, $5, $6, $7, $8, $9) RETURNING *`,
+            `INSERT INTO accounts (user_id, account_name, current_balance, total_credited, total_spent, transfert_entrants, transfert_sortants, created_by, account_type, access_restricted, allowed_roles, category_type) 
+             VALUES ($1, $2, $3, $4, 0, 0, 0, $5, $6, $7, $8, $9) RETURNING *`,
             [
                 (finalAccountType === 'classique' || finalAccountType === 'creance') ? user_id : null,
                 account_name, 
@@ -11694,6 +11694,8 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                 a.current_balance,
                 a.total_credited,
                 a.total_spent,
+                a.transfert_entrants,
+                a.transfert_sortants,
                 a.is_active,
                 u.full_name as user_name,
                 u.username
@@ -11896,6 +11898,8 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
                 current_balance: parseInt(account.current_balance) || 0,
                 total_credited: parseInt(account.total_credited) || 0,
                 total_spent: parseInt(account.total_spent) || 0,
+                transfert_entrants: parseFloat(account.transfert_entrants) || 0,
+                transfert_sortants: parseFloat(account.transfert_sortants) || 0,
                 current_month_adjustment: currentMonthAdjustment,
                 user_name: account.user_name,
                 username: account.username
