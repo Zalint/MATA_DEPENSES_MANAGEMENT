@@ -1588,6 +1588,7 @@ function displayExpenses(expenses) {
         
         // Formater les dates
         const expenseDate = formatDate(expense.expense_date);
+        
         const timestamp = new Date(expense.timestamp_creation);
         const timestampDate = timestamp.toLocaleDateString('fr-FR');
         const timestampTime = timestamp.toLocaleTimeString('fr-FR', { 
@@ -6114,6 +6115,7 @@ function displayModalExpenses(expenses) {
         
         // Formater les dates
         const expenseDate = formatDate(expense.expense_date);
+        
         const timestamp = new Date(expense.timestamp_creation);
         const timestampDate = timestamp.toLocaleDateString('fr-FR');
         const timestampTime = timestamp.toLocaleTimeString('fr-FR', { 

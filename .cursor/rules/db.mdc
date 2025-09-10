@@ -17,7 +17,8 @@ DB_PASSWORD=bonea2024
    - SYMPTÔME: Période affichée "31/08/2025 au 04/09/2025" au lieu de "01/09/2025 au 04/09/2025" 
 4. Mettre a jour GUIDE_TESTS_NON_REGRESSION.md au fur et a mesure que l'application evolue.
 5. Toujours lire GUIDE_TESTS_NON_REGRESSION.md
-6. psql n'est pas disponible. il faut executer les scripts SQL via Node.js :
+6. psql n'est pas disponible. il faut executer les scripts SQL via Node.js 
+7. Always update github_test_database_setup.sql when the SQLschema change
 
 globs:
 alwaysApply: true

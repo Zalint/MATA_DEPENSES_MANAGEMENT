@@ -1200,6 +1200,7 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
         
         const { rows } = await pool.query(query, params);
 
+
         // Correction pour les dépenses sans type
         rows.forEach(row => {
             if (!row.expense_type) {
@@ -2891,6 +2892,7 @@ app.get('/api/accounts/:accountName/expenses', requireAuth, async (req, res) => 
                 e.total,
                 e.predictable,
                 e.description,
+                e.created_at as timestamp_creation,
                 u.full_name as user_name,
                 u.username,
                 a.account_name,
