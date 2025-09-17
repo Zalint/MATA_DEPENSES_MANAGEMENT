@@ -3075,6 +3075,11 @@
                                     <label for="transfert-montant">Montant à transférer</label>
                                     <input type="number" id="transfert-montant" min="1" step="1" required placeholder="Montant en FCFA">
                                 </div>
+                                <div class="form-group">
+                                    <label for="transfert-comment">Commentaire (optionnel)</label>
+                                    <textarea id="transfert-comment" placeholder="Motif du transfert, note de rappel..." rows="2" style="resize: vertical;"></textarea>
+                                    <small class="form-help">Ajoutez une note pour vous souvenir de ce transfert</small>
+                                </div>
                                 <button type="submit" class="btn btn-primary">Transférer</button>
                                 <div id="transfert-notification" class="notification" style="display:none;"></div>
                             </form>

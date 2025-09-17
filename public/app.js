@@ -5374,9 +5374,9 @@ async function showAccountExpenseDetails(accountName, totalAmount, remainingAmou
             endDate = snapshotDate;
             
             // Date début = 1er du mois de la date de snapshot
-            const snapshotDateObj = new Date(snapshotDate + 'T00:00:00'); // Éviter les problèmes de fuseau horaire
-            const year = snapshotDateObj.getFullYear();
-            const month = String(snapshotDateObj.getMonth() + 1).padStart(2, '0'); // +1 car getMonth() retourne 0-11
+            // CORRECTION TIMEZONE: Utiliser des chaînes de dates fixes au lieu de new Date()
+            const year = snapshotDate.substring(0, 4);
+            const month = snapshotDate.substring(5, 7);
             startDate = `${year}-${month}-01`;
         } else {
             // Fallback sur les dates du dashboard si pas de date de snapshot
@@ -8069,7 +8069,8 @@ async function handleTransfertSubmit(e) {
     const sourceId = form['transfert-source'].value;
     const destId = form['transfert-destination'].value;
     const montant = parseInt(form['transfert-montant'].value);
-    console.log('[Transfert] Submit:', { sourceId, destId, montant });
+    const comment = form['transfert-comment'].value.trim();
+    console.log('[Transfert] Submit:', { sourceId, destId, montant, comment });
     if (!sourceId || !destId || !montant || sourceId === destId) {
         notif.textContent = 'Veuillez remplir tous les champs correctement.';
         notif.className = 'notification error';
@@ -8110,7 +8111,7 @@ async function handleTransfertSubmit(e) {
         const resp = await fetch('/api/transfert', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source_id: sourceId, destination_id: destId, montant })
+            body: JSON.stringify({ source_id: sourceId, destination_id: destId, montant, comment })
         });
         const data = await resp.json();
         console.log('[Transfert] Réponse API:', data);
@@ -8370,6 +8371,7 @@ function displayTransfertHistory(data) {
                         <th>Type</th>
                         <th>Compte</th>
                         <th>Montant</th>
+                        <th>Commentaire</th>
                         <th>Par</th>
                         <th class="transfert-actions-column">Actions</th>
                     </tr>
@@ -8392,6 +8394,10 @@ function displayTransfertHistory(data) {
         // Vérifier si l'utilisateur peut supprimer des transferts
         const canDelete = ['directeur_general', 'pca', 'admin'].includes(currentUser.role);
         
+        const commentDisplay = transfer.comment ? 
+            `<span class="transfert-comment" title="${transfer.comment}">${transfer.comment.length > 30 ? transfer.comment.substring(0, 30) + '...' : transfer.comment}</span>` : 
+            '<span class="text-muted">-</span>';
+        
         html += `
             <tr>
                 <td class="transfert-date">${date}<br><small>${time}</small></td>
@@ -8404,6 +8410,7 @@ function displayTransfertHistory(data) {
                 <td class="transfert-amount ${isSortant ? 'negative' : 'positive'}">
                     ${isSortant ? '-' : '+'}${montant}
                 </td>
+                <td class="transfert-comment-cell">${commentDisplay}</td>
                 <td class="transfert-user">${transfer.transferred_by}</td>
                 <td class="transfert-actions ${canDelete ? '' : 'hidden'}">
                     <button class="btn-delete-transfert" onclick="showDeleteTransfertModal(${transfer.id}, '${transfer.source_account}', '${transfer.destination_account}', ${transfer.montant}, '${transfer.created_at}', '${transfer.transferred_by}')" title="Supprimer ce transfert">

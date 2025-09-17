@@ -8042,7 +8042,7 @@ app.post('/api/accounts/:id/credit', requireAuth, async (req, res) => {
 
 // Route de transfert de solde entre comptes
 app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
-    const { source_id, destination_id, montant } = req.body;
+    const { source_id, destination_id, montant, comment } = req.body;
     if (!source_id || !destination_id || !montant || source_id === destination_id) {
         return res.status(400).json({ error: 'Champs invalides' });
     }
@@ -8094,10 +8094,18 @@ app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
             source_id INTEGER REFERENCES accounts(id),
             destination_id INTEGER REFERENCES accounts(id),
             montant INTEGER NOT NULL,
+            comment TEXT,
             transferred_by INTEGER REFERENCES users(id),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )`);
-        await pool.query('INSERT INTO transfer_history (source_id, destination_id, montant, transferred_by) VALUES ($1, $2, $3, $4)', [source_id, destination_id, montantInt, req.session.user.id]);
+        
+        // Ajouter la colonne comment si elle n'existe pas déjà
+        await pool.query(`
+            ALTER TABLE transfer_history 
+            ADD COLUMN IF NOT EXISTS comment TEXT
+        `);
+        
+        await pool.query('INSERT INTO transfer_history (source_id, destination_id, montant, comment, transferred_by) VALUES ($1, $2, $3, $4, $5)', [source_id, destination_id, montantInt, comment || null, req.session.user.id]);
         // Vérifier les soldes après
         const sourceAfter = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [source_id]);
         const destAfter = await pool.query('SELECT current_balance FROM accounts WHERE id = $1', [destination_id]);
@@ -8140,6 +8148,7 @@ app.get('/api/transfers', requireAuth, async (req, res) => {
                 SELECT 
                     th.id,
                     th.montant,
+                    th.comment,
                     th.created_at,
                     a_source.account_name as source_account,
                     a_dest.account_name as destination_account,
@@ -8158,6 +8167,7 @@ app.get('/api/transfers', requireAuth, async (req, res) => {
                 SELECT 
                     th.id,
                     th.montant,
+                    th.comment,
                     th.created_at,
                     a_source.account_name as source_account,
                     a_dest.account_name as destination_account,
@@ -8205,6 +8215,7 @@ app.get('/api/transfers/account/:accountId', requireAuth, async (req, res) => {
                 SELECT 
                     th.id,
                     th.montant,
+                    th.comment,
                     th.created_at,
                     a_source.account_name as source_account,
                     a_dest.account_name as destination_account,
@@ -8228,6 +8239,7 @@ app.get('/api/transfers/account/:accountId', requireAuth, async (req, res) => {
                 SELECT 
                     th.id,
                     th.montant,
+                    th.comment,
                     th.created_at,
                     a_source.account_name as source_account,
                     a_dest.account_name as destination_account,
