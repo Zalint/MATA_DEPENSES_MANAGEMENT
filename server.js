@@ -328,23 +328,78 @@ async function collecteSnapshotData(cutoffDate = null) {
             AND co.operation_date <= $1
         `, [snapshotDate]);
         
-        // Calculer le PL détaillé
+        // Récupérer les livraisons partenaires du mois
+        const livraisonsPartenairesPlResult = await pool.query(`
+            SELECT COALESCE(SUM(pd.amount), 0) as total_livraisons
+            FROM partner_deliveries pd
+            JOIN accounts a ON pd.account_id = a.id
+            WHERE pd.delivery_date >= $1 
+            AND pd.delivery_date <= $2
+            AND pd.validation_status = 'fully_validated'
+            AND pd.is_validated = true
+            AND a.account_type = 'partenaire'
+            AND a.is_active = true
+        `, [monthStart, snapshotDate]);
+        
+        // Calculer les charges prorata (même logique que le dashboard)
+        const chargesFixesEstimation = 2000000; // Configuration par défaut
+        const currentDate = new Date(snapshotDate);
+        const firstDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+        
+        // Calculer jours ouvrables écoulés (lundi-samedi)
+        let joursOuvrablesEcoules = 0;
+        for (let d = new Date(firstDayOfMonth); d <= currentDate; d.setDate(d.getDate() + 1)) {
+            const dayOfWeek = d.getDay();
+            if (dayOfWeek >= 1 && dayOfWeek <= 6) { // Lundi (1) à Samedi (6)
+                joursOuvrablesEcoules++;
+            }
+        }
+        
+        // Calculer total jours ouvrables du mois
+        const lastDayOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+        let totalJoursOuvrables = 0;
+        for (let d = new Date(firstDayOfMonth); d <= lastDayOfMonth; d.setDate(d.getDate() + 1)) {
+            const dayOfWeek = d.getDay();
+            if (dayOfWeek >= 1 && dayOfWeek <= 6) {
+                totalJoursOuvrables++;
+            }
+        }
+        
+        const chargesProrata = totalJoursOuvrables > 0 ? Math.round((chargesFixesEstimation * joursOuvrablesEcoules) / totalJoursOuvrables) : 0;
+        
+        // Calculer le PL détaillé (même formule que le dashboard)
         const plDetails = {
             cashBictorys: cashBictorysResult.rows.length > 0 ? parseFloat(cashBictorysResult.rows[0].valeur_cash) : 0,
             creancesMois: parseFloat(creancesMoisResult.rows[0].total),
             ecartStockMata: stockMataEcart,
             cashBurn: parseFloat(totalSpentResult.rows[0].total),
             ecartStockVivant: stockVivantEcart,
-            estimationCharges: 5320000, // Valeur par défaut, peut être récupérée de la config
+            livraisonsPartenaires: parseFloat(livraisonsPartenairesPlResult.rows[0].total_livraisons),
+            chargesFixesEstimation: chargesFixesEstimation,
+            chargesProrata: chargesProrata,
+            joursOuvrablesEcoules: joursOuvrablesEcoules,
+            totalJoursOuvrables: totalJoursOuvrables,
             plBase: 0,
             plBrut: 0,
             plFinal: 0
         };
         
-        // Calculer les PL
+        // Calculer les PL (formule exacte du dashboard)
         plDetails.plBase = plDetails.cashBictorys + plDetails.creancesMois + plDetails.ecartStockMata - plDetails.cashBurn;
-        plDetails.plBrut = plDetails.plBase + plDetails.ecartStockVivant;
-        plDetails.plFinal = plDetails.plBrut - plDetails.estimationCharges;
+        plDetails.plBrut = plDetails.plBase + plDetails.ecartStockVivant - plDetails.livraisonsPartenaires;
+        plDetails.plFinal = plDetails.plBrut - plDetails.chargesProrata;
+        
+        console.log(`📊 SNAPSHOT PL DEBUG:`);
+        console.log(`  Cash Bictorys: ${plDetails.cashBictorys.toLocaleString()} FCFA`);
+        console.log(`  Créances mois: ${plDetails.creancesMois.toLocaleString()} FCFA`);
+        console.log(`  Écart Stock Mata: ${plDetails.ecartStockMata.toLocaleString()} FCFA`);
+        console.log(`  Cash Burn: ${plDetails.cashBurn.toLocaleString()} FCFA`);
+        console.log(`  Écart Stock Vivant: ${plDetails.ecartStockVivant.toLocaleString()} FCFA`);
+        console.log(`  Livraisons partenaires: ${plDetails.livraisonsPartenaires.toLocaleString()} FCFA`);
+        console.log(`  Charges prorata: ${plDetails.chargesProrata.toLocaleString()} FCFA (${joursOuvrablesEcoules}/${totalJoursOuvrables} jours)`);
+        console.log(`  PL Base: ${Math.round(plDetails.plBase).toLocaleString()} FCFA`);
+        console.log(`  PL Brut: ${Math.round(plDetails.plBrut).toLocaleString()} FCFA`);
+        console.log(`  PL FINAL: ${Math.round(plDetails.plFinal).toLocaleString()} FCFA`);
         
         // 2. DÉTAILS PAR COMPTE
         console.log('📸 SNAPSHOT: Collecte détails comptes...');
