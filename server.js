@@ -413,10 +413,30 @@ async function collecteSnapshotData(cutoffDate = null) {
             const puppeteer = require('puppeteer');
             
             console.log('🚀 Lancement navigateur...');
-            const browser = await puppeteer.launch({
+            
+            // Configuration Puppeteer pour Render avec chemin Chrome explicite
+            const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+            const puppeteerConfig = {
                 headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-            });
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox', 
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--no-first-run',
+                    '--no-zygote',
+                    '--single-process'
+                ]
+            };
+            
+            // En production sur Render, utiliser le chemin Chrome explicite
+            if (isProduction) {
+                const chromePath = '/opt/render/.cache/puppeteer/chrome/linux-140.0.7339.82/chrome-linux64/chrome';
+                puppeteerConfig.executablePath = chromePath;
+                console.log(`🔍 Utilisation Chrome path: ${chromePath}`);
+            }
+            
+            const browser = await puppeteer.launch(puppeteerConfig);
             
             const page = await browser.newPage();
             
