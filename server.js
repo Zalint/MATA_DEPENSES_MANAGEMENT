@@ -236,13 +236,7 @@ async function collecteSnapshotData(cutoffDate = null) {
             'SELECT COALESCE(SUM(a.current_balance), 0) as total FROM accounts a WHERE a.is_active = true AND a.account_type = \'partenaire\''
         );
         
-        const dashboardStats = {
-            totalSpent: parseFloat(totalSpentResult.rows[0].total),
-            totalRemaining: parseFloat(totalRemainingResult.rows[0].total),
-            totalCreditedWithExpenses: parseFloat(totalCreditedWithExpensesResult.rows[0].total),
-            totalDepotBalance: parseFloat(totalDepotBalanceResult.rows[0].total),
-            totalPartnerBalance: parseFloat(totalPartnerBalanceResult.rows[0].total)
-        };
+        // dashboardStats sera mis à jour après le scraping HTML avec les vraies valeurs
         
         // 1.5. DONNÉES DÉTAILLÉES DU DASHBOARD (PL, Cash, etc.)
         console.log('📸 SNAPSHOT: Collecte données détaillées dashboard...');
@@ -306,18 +300,38 @@ async function collecteSnapshotData(cutoffDate = null) {
             stockVivantEcart = parseFloat(stockVivantResult.rows[0].stock_value) - parseFloat(stockVivantResult.rows[1].stock_value);
         }
         
-        // Récupérer les données Cash Bictorys du mois
-        const cashBictorysResult = await pool.query(`
-            SELECT 
-                amount as valeur_cash,
-                date as date_valeur,
-                created_at
-            FROM cash_bictorys 
-            WHERE extract(year from date) = extract(year from $1::date)
-            AND extract(month from date) = extract(month from $1::date)
-            ORDER BY date DESC
-            LIMIT 1
-        `, [snapshotDate]);
+        // Récupérer les données Cash Bictorys du mois (MÊME LOGIQUE QUE LE DASHBOARD)
+        const monthYear = snapshotDate.substring(0, 7); // Format YYYY-MM
+        let cashBictorysResult = await pool.query(`
+            SELECT amount as valeur_cash, date as date_valeur
+            FROM cash_bictorys
+            WHERE date = (
+                SELECT MAX(date)
+                FROM cash_bictorys
+                WHERE amount != 0 
+                AND month_year = $1
+                AND date <= $2
+            )
+            AND amount != 0
+            AND month_year = $1
+            AND date <= $2
+        `, [monthYear, snapshotDate]);
+        
+        // Fallback si aucune valeur non-nulle trouvée
+        if (cashBictorysResult.rows.length === 0) {
+            cashBictorysResult = await pool.query(`
+                SELECT amount as valeur_cash, date as date_valeur
+                FROM cash_bictorys
+                WHERE date = (
+                    SELECT MAX(date)
+                    FROM cash_bictorys
+                    WHERE month_year = $1
+                    AND date <= $2
+                )
+                AND month_year = $1
+                AND date <= $2
+            `, [monthYear, snapshotDate]);
+        }
         
         // Calculer les créances du mois
         const creancesMoisResult = await pool.query(`
@@ -367,39 +381,183 @@ async function collecteSnapshotData(cutoffDate = null) {
         
         const chargesProrata = totalJoursOuvrables > 0 ? Math.round((chargesFixesEstimation * joursOuvrablesEcoules) / totalJoursOuvrables) : 0;
         
-        // Calculer le PL détaillé (même formule que le dashboard)
-        const plDetails = {
-            cashBictorys: cashBictorysResult.rows.length > 0 ? parseFloat(cashBictorysResult.rows[0].valeur_cash) : 0,
-            creancesMois: parseFloat(creancesMoisResult.rows[0].total),
-            ecartStockMata: stockMataEcart,
-            cashBurn: parseFloat(totalSpentResult.rows[0].total),
-            ecartStockVivant: stockVivantEcart,
-            livraisonsPartenaires: parseFloat(livraisonsPartenairesPlResult.rows[0].total_livraisons),
-            chargesFixesEstimation: chargesFixesEstimation,
-            chargesProrata: chargesProrata,
-            joursOuvrablesEcoules: joursOuvrablesEcoules,
-            totalJoursOuvrables: totalJoursOuvrables,
-            plBase: 0,
-            plBrut: 0,
-            plFinal: 0
+        // SOLUTION PARFAITE : Lire les valeurs depuis le HTML du dashboard
+        console.log('🌐 SNAPSHOT: Lecture des valeurs depuis le HTML du dashboard...');
+        console.log('🔍 DEBUG: Tentative HTML scraping dans le contexte snapshot');
+        
+        // Déterminer l'URL base selon l'environnement
+        const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+        const baseUrl = isProduction 
+            ? 'https://mata-depenses-management.onrender.com'
+            : `http://localhost:${process.env.PORT || 3000}`;
+        
+        const dashboardUrl = `${baseUrl}?cutoff_date=${snapshotDate}`;
+        console.log(`🔍 URL dashboard: ${dashboardUrl}`);
+        
+        let plDetails = {};
+        
+        try {
+            // Fonction pour parser les nombres formatés
+            function parseFormattedNumber(text) {
+                if (!text) return 0;
+                const cleanText = text.toString()
+                    .replace(/[^\d,.-]/g, '') // Garder seulement chiffres, virgules, points, tirets
+                    .replace(/\s+/g, '')      // Supprimer espaces
+                    .replace(/,/g, '');       // Supprimer virgules de formatage
+                
+                const number = parseFloat(cleanText);
+                return isNaN(number) ? 0 : number;
+            }
+            
+            // Utiliser puppeteer pour scraper le HTML
+            const puppeteer = require('puppeteer');
+            
+            console.log('🚀 Lancement navigateur...');
+            const browser = await puppeteer.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+            });
+            
+            const page = await browser.newPage();
+            
+            // Configuration des credentials pour l'authentification
+            const SNAPSHOT_USERNAME = process.env.SNAPSHOT_USERNAME || 'Saliou';
+            const SNAPSHOT_PASSWORD = process.env.SNAPSHOT_PASSWORD || 'Murex2015';
+            
+            await page.setExtraHTTPHeaders({
+                'User-Agent': 'Snapshot-Service/1.0'
+            });
+            
+            console.log('🔑 Authentification en cours...');
+            
+            // Étape 1: Aller sur la page principale (SPA avec login intégré)
+            await page.goto(baseUrl, { 
+                waitUntil: 'networkidle0',
+                timeout: 30000 
+            });
+            
+            // Vérifier si on est sur la page de login
+            await page.waitForSelector('#login-page', { timeout: 10000 });
+            
+            // Étape 2: Remplir le formulaire de connexion
+            await page.waitForSelector('#username', { timeout: 10000 });
+            await page.type('#username', SNAPSHOT_USERNAME);
+            await page.type('#password', SNAPSHOT_PASSWORD);
+            
+            // Étape 3: Soumettre le formulaire
+            await page.click('button[type="submit"]');
+            
+            // Attendre que l'application principale se charge (SPA)
+            await page.waitForSelector('#app', { timeout: 10000 });
+            
+            console.log('✅ Authentification réussie');
+            
+            // Étape 4: Naviguer vers le dashboard avec cutoff_date
+            console.log('📄 Navigation vers dashboard...');
+            await page.goto(dashboardUrl, { 
+                waitUntil: 'networkidle0',
+                timeout: 30000 
+            });
+            
+            // Attendre que les éléments importants soient chargés
+            await page.waitForSelector('#pl-estim-charges', { timeout: 10000 });
+            
+            console.log('🔍 Extraction des valeurs HTML...');
+            
+            // Extraire toutes les valeurs directement depuis le DOM
+            const scrapedData = await page.evaluate(() => {
+                const getValue = (selector) => {
+                    const element = document.querySelector(selector);
+                    return element ? element.textContent.trim() : '0';
+                };
+                
+                return {
+                    plFinal: getValue('#pl-estim-charges'),
+                    cashBictorys: getValue('#cash-bictorys-latest'),
+                    creancesMois: getValue('#creances-mois'),
+                    totalSpent: getValue('#total-spent-amount'),
+                    stockVivantVariation: getValue('#stock-vivant-variation'),
+                    stockTotal: getValue('#stock-total'),
+                    weeklyBurn: getValue('#weekly-burn'),
+                    monthlyBurn: getValue('#monthly-burn'),
+                    totalRemaining: getValue('#total-remaining-amount'),
+                    totalCredits: getValue('#total-credited-amount'),
+                    depotBalance: getValue('#total-depot-balance'),
+                    partnerBalance: getValue('#total-partner-balance'),
+                    
+                    // Éléments du détail PL si disponibles
+                    plBase: getValue('#pl-base-amount'),
+                    plBrut: getValue('#pl-brut-amount'),
+                    chargesProrata: getValue('#charges-prorata-amount')
+                };
+            });
+            
+            await browser.close();
+            
+            // Convertir les valeurs extraites
+            plDetails = {
+                plFinal: parseFormattedNumber(scrapedData.plFinal),
+                cashBictorys: parseFormattedNumber(scrapedData.cashBictorys),
+                creancesMois: parseFormattedNumber(scrapedData.creancesMois),
+                cashBurn: parseFormattedNumber(scrapedData.totalSpent),
+                ecartStockVivant: parseFormattedNumber(scrapedData.stockVivantVariation),
+                ecartStockMata: parseFormattedNumber(scrapedData.stockTotal),
+                plBase: parseFormattedNumber(scrapedData.plBase),
+                plBrut: parseFormattedNumber(scrapedData.plBrut),
+                chargesProrata: parseFormattedNumber(scrapedData.chargesProrata),
+                
+                // Valeurs supplémentaires du dashboard
+                totalRemaining: parseFormattedNumber(scrapedData.totalRemaining),
+                totalCredits: parseFormattedNumber(scrapedData.totalCredits),
+                depotBalance: parseFormattedNumber(scrapedData.depotBalance),
+                partnerBalance: parseFormattedNumber(scrapedData.partnerBalance),
+                weeklyBurn: parseFormattedNumber(scrapedData.weeklyBurn),
+                monthlyBurn: parseFormattedNumber(scrapedData.monthlyBurn),
+                
+                source: 'html_scraping',
+                baseUrl: baseUrl
+            };
+            
+            console.log('✅ Valeurs extraites depuis HTML avec succès !');
+            
+        } catch (error) {
+            console.error('❌ ERREUR CRITIQUE HTML scraping:', error.message);
+            console.error('📝 Stack complet:', error.stack);
+            console.error('🚫 PAS DE FALLBACK - HTML scraping est OBLIGATOIRE');
+            
+            throw new Error(`HTML scraping obligatoire échoué: ${error.message}`);
+        }
+        
+        console.log(`📊 SNAPSHOT PL (source: ${plDetails.source}):`);
+        console.log(`  🎯 PL FINAL: ${Math.round(plDetails.plFinal).toLocaleString()} FCFA`);
+        console.log(`  💰 Cash Bictorys: ${plDetails.cashBictorys.toLocaleString()} FCFA`);
+        console.log(`  📊 PL Base: ${Math.round(plDetails.plBase || 0).toLocaleString()} FCFA`);
+        console.log(`  📊 PL Brut: ${Math.round(plDetails.plBrut || 0).toLocaleString()} FCFA`);
+        
+        console.log(`  🌐 Source: Dashboard HTML (${plDetails.baseUrl})`);
+        console.log(`  ✅ Garantie de cohérence avec l'interface utilisateur !`);
+        
+        // Créer dashboardStats avec les valeurs scrapées (au lieu des valeurs calculées)
+        const dashboardStats = {
+            totalSpent: plDetails.cashBurn || parseFloat(totalSpentResult.rows[0].total),
+            totalRemaining: plDetails.totalRemaining || parseFloat(totalRemainingResult.rows[0].total),
+            totalCreditedWithExpenses: plDetails.totalCredits || parseFloat(totalCreditedWithExpensesResult.rows[0].total),
+            totalDepotBalance: plDetails.depotBalance || parseFloat(totalDepotBalanceResult.rows[0].total),
+            totalPartnerBalance: plDetails.partnerBalance || parseFloat(totalPartnerBalanceResult.rows[0].total),
+            // Ajouter les valeurs PL scrapées - CLÉS PRINCIPALES
+            plFinal: plDetails.plFinal,
+            cashBictorys: plDetails.cashBictorys,
+            creancesMois: plDetails.creancesMois,
+            stockVivantVariation: plDetails.ecartStockVivant,
+            weeklyBurn: plDetails.weeklyBurn,
+            monthlyBurn: plDetails.monthlyBurn,
+            source: plDetails.source || 'calculation'
         };
         
-        // Calculer les PL (formule exacte du dashboard)
-        plDetails.plBase = plDetails.cashBictorys + plDetails.creancesMois + plDetails.ecartStockMata - plDetails.cashBurn;
-        plDetails.plBrut = plDetails.plBase + plDetails.ecartStockVivant - plDetails.livraisonsPartenaires;
-        plDetails.plFinal = plDetails.plBrut - plDetails.chargesProrata;
-        
-        console.log(`📊 SNAPSHOT PL DEBUG:`);
-        console.log(`  Cash Bictorys: ${plDetails.cashBictorys.toLocaleString()} FCFA`);
-        console.log(`  Créances mois: ${plDetails.creancesMois.toLocaleString()} FCFA`);
-        console.log(`  Écart Stock Mata: ${plDetails.ecartStockMata.toLocaleString()} FCFA`);
-        console.log(`  Cash Burn: ${plDetails.cashBurn.toLocaleString()} FCFA`);
-        console.log(`  Écart Stock Vivant: ${plDetails.ecartStockVivant.toLocaleString()} FCFA`);
-        console.log(`  Livraisons partenaires: ${plDetails.livraisonsPartenaires.toLocaleString()} FCFA`);
-        console.log(`  Charges prorata: ${plDetails.chargesProrata.toLocaleString()} FCFA (${joursOuvrablesEcoules}/${totalJoursOuvrables} jours)`);
-        console.log(`  PL Base: ${Math.round(plDetails.plBase).toLocaleString()} FCFA`);
-        console.log(`  PL Brut: ${Math.round(plDetails.plBrut).toLocaleString()} FCFA`);
-        console.log(`  PL FINAL: ${Math.round(plDetails.plFinal).toLocaleString()} FCFA`);
+        console.log(`📊 DASHBOARD STATS (source: ${dashboardStats.source}):`);
+        console.log(`  🎯 PL FINAL: ${Math.round(dashboardStats.plFinal).toLocaleString()} FCFA`);
+        console.log(`  💰 Cash Bictorys: ${dashboardStats.cashBictorys.toLocaleString()} FCFA`);
+        console.log(`  💸 Total Dépensé: ${dashboardStats.totalSpent.toLocaleString()} FCFA`);
         
         // 2. DÉTAILS PAR COMPTE
         console.log('📸 SNAPSHOT: Collecte détails comptes...');
