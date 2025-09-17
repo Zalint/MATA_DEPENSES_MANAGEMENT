@@ -273,13 +273,14 @@ async function collecteSnapshotData(cutoffDate = null) {
         // Récupérer les données de stock pour les cartes additionnelles
         const stockMataResult = await pool.query(`
             SELECT 
-                date_snapshot as stock_date,
-                montant_stock as stock_value,
-                created_at
-            FROM stock_soir 
-            WHERE extract(year from date_snapshot) = extract(year from $1::date)
-            AND extract(month from date_snapshot) = extract(month from $1::date)
-            ORDER BY date_snapshot DESC
+                date as stock_date,
+                SUM(stock_soir) as stock_value,
+                MAX(created_at) as created_at
+            FROM stock_mata 
+            WHERE extract(year from date) = extract(year from $1::date)
+            AND extract(month from date) = extract(month from $1::date)
+            GROUP BY date
+            ORDER BY date DESC
             LIMIT 2
         `, [snapshotDate]);
         
