@@ -414,7 +414,7 @@ async function collecteSnapshotData(cutoffDate = null) {
             
             console.log('🚀 Lancement navigateur...');
             
-            // Configuration Puppeteer pour Render avec chemin Chrome explicite
+            // Configuration Puppeteer pour Render
             const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
             const puppeteerConfig = {
                 headless: true,
@@ -429,11 +429,54 @@ async function collecteSnapshotData(cutoffDate = null) {
                 ]
             };
             
-            // En production sur Render, utiliser le chemin Chrome explicite
+            // En production, essayer différentes méthodes pour trouver Chrome
             if (isProduction) {
-                const chromePath = '/opt/render/.cache/puppeteer/chrome/linux-140.0.7339.82/chrome-linux64/chrome';
-                puppeteerConfig.executablePath = chromePath;
-                console.log(`🔍 Utilisation Chrome path: ${chromePath}`);
+                try {
+                    // Méthode 1: Laisser Puppeteer trouver Chrome automatiquement
+                    const fs = require('fs');
+                    const executablePath = puppeteer.executablePath();
+                    console.log(`🔍 Chrome path automatique: ${executablePath}`);
+                    
+                    if (fs.existsSync(executablePath)) {
+                        puppeteerConfig.executablePath = executablePath;
+                        console.log(`✅ Chrome trouvé via Puppeteer: ${executablePath}`);
+                    } else {
+                        // Méthode 2: Chemins possibles sur Render
+                        const possiblePaths = [
+                            '/opt/render/.cache/puppeteer/chrome/linux-140.0.7339.82/chrome-linux64/chrome',
+                            '/opt/render/.cache/puppeteer/chrome/*/chrome-linux64/chrome'
+                        ];
+                        
+                        let foundPath = null;
+                        for (const path of possiblePaths) {
+                            if (path.includes('*')) {
+                                // Recherche avec wildcard
+                                const { execSync } = require('child_process');
+                                try {
+                                    const result = execSync(`ls ${path} 2>/dev/null | head -1`, { encoding: 'utf8' }).trim();
+                                    if (result && fs.existsSync(result)) {
+                                        foundPath = result;
+                                        break;
+                                    }
+                                } catch (e) {
+                                    // Continuer avec le chemin suivant
+                                }
+                            } else if (fs.existsSync(path)) {
+                                foundPath = path;
+                                break;
+                            }
+                        }
+                        
+                        if (foundPath) {
+                            puppeteerConfig.executablePath = foundPath;
+                            console.log(`✅ Chrome trouvé via recherche: ${foundPath}`);
+                        } else {
+                            console.log('⚠️ Chrome non trouvé, utilisation configuration par défaut');
+                        }
+                    }
+                } catch (error) {
+                    console.log(`⚠️ Erreur détection Chrome: ${error.message}, utilisation par défaut`);
+                }
             }
             
             const browser = await puppeteer.launch(puppeteerConfig);
