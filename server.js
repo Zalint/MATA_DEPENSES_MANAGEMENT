@@ -11242,13 +11242,15 @@ app.get('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
         for (let day = 1; day <= daysInMonth; day++) {
             allDates.push({
                 date: `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`,
-                amount: 0 // Valeur par défaut pour l'affichage uniquement
+                amount: 0, // Valeur par défaut pour l'affichage uniquement
+                balance: 0, // Valeur par défaut pour l'affichage uniquement
+                fees: 0 // Valeur par défaut pour l'affichage uniquement
             });
         }
 
         // Récupérer TOUTES les données existantes (pas seulement > 0)
         const result = await pool.query(`
-            SELECT date, amount
+            SELECT date, amount, balance, fees
             FROM cash_bictorys 
             WHERE month_year = $1
             ORDER BY date
@@ -11259,14 +11261,19 @@ app.get('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
             // Utiliser toLocaleDateString pour éviter les problèmes de timezone
             const date = new Date(row.date);
             const dateStr = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
-            const amount = parseInt(row.amount) || 0;
-            acc[dateStr] = amount;
+            acc[dateStr] = {
+                amount: parseFloat(row.amount) || 0,
+                balance: parseFloat(row.balance) || 0,
+                fees: parseFloat(row.fees) || 0
+            };
             return acc;
         }, {});
 
         const finalData = allDates.map(dateObj => ({
             date: dateObj.date,
-            amount: existingData[dateObj.date] || 0
+            amount: existingData[dateObj.date]?.amount || 0,
+            balance: existingData[dateObj.date]?.balance || 0,
+            fees: existingData[dateObj.date]?.fees || 0
         }));
 
         res.json({
