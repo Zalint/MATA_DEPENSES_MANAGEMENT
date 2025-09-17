@@ -9,12 +9,13 @@ DB_USER=zalint
 DB_PASSWORD=bonea2024
 
 2. J'utilise Windows
-3. PROBLÈME TIMEZONE CRITIQUE: 
-   - new Date(year, month, 1) utilise le timezone local (GMT+4) et cause un décalage
-   - Exemple: new Date(2025, 8, 1) devient "2025-08-31T20:00:00.000Z" au lieu de "2025-09-01T00:00:00.000Z"
-   - SOLUTION: Utiliser des chaînes de dates explicites: new Date("2025-09-01T00:00:00")
-   - OU séparer la logique: dates UTC pour calculs SQL, chaînes fixes pour affichage frontend
-   - SYMPTÔME: Période affichée "31/08/2025 au 04/09/2025" au lieu de "01/09/2025 au 04/09/2025" 
+3. ⚠️  INTERDICTION ABSOLUE - PROBLÈME TIMEZONE: 
+   - INTERDIT: new Date(year, month, 1) - CAUSE UN DÉCALAGE DE TIMEZONE
+   - INTERDIT: new Date(2025, 8, 1) - DEVIENT "2025-08-31T20:00:00.000Z" AU LIEU DE "2025-09-01T00:00:00.000Z"
+   - OBLIGATOIRE: Utiliser UNIQUEMENT des chaînes de dates explicites: new Date("2025-09-01T00:00:00")
+   - OBLIGATOIRE: Toujours utiliser des chaînes de dates fixes pour éviter les décalages
+   - SYMPTÔME: Période affichée "31/08/2025 au 04/09/2025" au lieu de "01/09/2025 au 04/09/2025"
+   - RÈGLE: JAMAIS de new Date() avec paramètres numériques, TOUJOURS des chaînes de dates 
 4. Mettre a jour GUIDE_TESTS_NON_REGRESSION.md au fur et a mesure que l'application evolue.
 5. Toujours lire GUIDE_TESTS_NON_REGRESSION.md
 6. psql n'est pas disponible. il faut executer les scripts SQL via Node.js 

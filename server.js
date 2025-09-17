@@ -10337,6 +10337,169 @@ app.post('/api/cash-bictorys/upload', requireCashBictorysAuth, upload.single('fi
         res.status(500).json({ error: 'Erreur serveur lors de l\'importation' });
     }
 });
+
+// ===== API EXTERNE CASH BICTORYS =====
+
+// Route pour mise à jour des données Cash Bictorys via API externe (avec clé API)
+app.post('/api/external/cash-bictorys', requireCashBictorysAuth, async (req, res) => {
+    try {
+        console.log('🌐 EXTERNAL API: Requête Cash Bictorys reçue');
+        console.log('🌐 EXTERNAL API: Body:', JSON.stringify(req.body, null, 2));
+
+        // Valider que le body est un array
+        if (!Array.isArray(req.body)) {
+            return res.status(400).json({ 
+                error: 'Le body doit contenir un tableau d\'objets avec les champs DATE, VALEUR, BALANCE' 
+            });
+        }
+
+        const jsonData = req.body;
+
+        // Valider la structure de chaque objet
+        const requiredFields = ['DATE', 'VALEUR'];
+        for (let i = 0; i < jsonData.length; i++) {
+            const item = jsonData[i];
+            
+            // Vérifier les champs obligatoires
+            const missingFields = requiredFields.filter(field => !(field in item));
+            if (missingFields.length > 0) {
+                return res.status(400).json({
+                    error: `Champs manquants dans l'objet ${i + 1}: ${missingFields.join(', ')}`
+                });
+            }
+
+            // Valider le format de date (supporter plusieurs formats)
+            let dateStr = item.DATE;
+            let normalizedDate = null;
+
+            // Supporter les formats: YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, DD/MM/YY
+            if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                // Format YYYY-MM-DD (déjà correct)
+                normalizedDate = dateStr;
+            } else if (/^\d{2}-\d{2}-\d{4}$/.test(dateStr)) {
+                // Format DD-MM-YYYY
+                const [day, month, year] = dateStr.split('-');
+                normalizedDate = `${year}-${month}-${day}`;
+            } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
+                // Format DD/MM/YYYY
+                const [day, month, year] = dateStr.split('/');
+                normalizedDate = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            } else if (/^\d{2}\/\d{2}\/\d{2}$/.test(dateStr)) {
+                // Format DD/MM/YY (supposer 20XX)
+                const [day, month, year] = dateStr.split('/');
+                const fullYear = `20${year}`;
+                normalizedDate = `${fullYear}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            } else {
+                return res.status(400).json({
+                    error: `Format de date invalide dans l'objet ${i + 1}: "${dateStr}". Formats supportés: YYYY-MM-DD, DD-MM-YYYY, DD/MM/YYYY, DD/MM/YY`
+                });
+            }
+
+            // Valider que la date normalisée est valide
+            const dateObj = new Date(normalizedDate);
+            if (isNaN(dateObj.getTime())) {
+                return res.status(400).json({
+                    error: `Date invalide dans l'objet ${i + 1}: "${dateStr}"`
+                });
+            }
+
+            // Mettre à jour l'objet avec la date normalisée
+            item.DATE = normalizedDate;
+
+            // Valider VALEUR (nombre)
+            if (typeof item.VALEUR !== 'number' && !Number.isFinite(Number(item.VALEUR))) {
+                return res.status(400).json({
+                    error: `Le champ VALEUR doit être un nombre dans l'objet ${i + 1}`
+                });
+            }
+            
+            // Convertir VALEUR en nombre si c'est une string
+            item.VALEUR = Number(item.VALEUR);
+
+            // Valider BALANCE si présent (optionnel)
+            if ('BALANCE' in item) {
+                if (typeof item.BALANCE !== 'number' && !Number.isFinite(Number(item.BALANCE))) {
+                    return res.status(400).json({
+                        error: `Le champ BALANCE doit être un nombre dans l'objet ${i + 1}`
+                    });
+                }
+                item.BALANCE = Number(item.BALANCE);
+            } else {
+                item.BALANCE = 0; // Valeur par défaut
+            }
+        }
+
+        // Initialiser les compteurs
+        let importedCount = 0;
+        let errorCount = 0;
+        const errors = [];
+
+        // Traiter chaque entrée
+        for (const data of jsonData) {
+            try {
+                // Extraire le mois-année pour la colonne month_year
+                const monthYear = data.DATE.substring(0, 7);
+
+                console.log('🌐 EXTERNAL API: Insertion données:', {
+                    date: data.DATE,
+                    amount: data.VALEUR,
+                    balance: data.BALANCE,
+                    monthYear
+                });
+
+                // Utiliser l'ID de l'utilisateur admin ou NULL pour les API externes
+                let externalUserId = null;
+                try {
+                    const adminUser = await pool.query('SELECT id FROM users WHERE username = $1', ['admin']);
+                    if (adminUser.rows.length > 0) {
+                        externalUserId = adminUser.rows[0].id;
+                    }
+                } catch (error) {
+                    console.log('🔍 EXTERNAL API: Utilisateur admin non trouvé, utilisation de NULL');
+                }
+
+                await pool.query(`
+                    INSERT INTO cash_bictorys (date, amount, balance, fees, month_year, created_by, updated_by)
+                    VALUES ($1, $2, $3, $4, $5, $6, $6)
+                    ON CONFLICT (date) 
+                    DO UPDATE SET 
+                        amount = EXCLUDED.amount,
+                        balance = EXCLUDED.balance,
+                        fees = EXCLUDED.fees,
+                        updated_by = EXCLUDED.updated_by,
+                        updated_at = CURRENT_TIMESTAMP
+                `, [data.DATE, data.VALEUR, data.BALANCE, 0, monthYear, externalUserId]);
+
+                importedCount++;
+            } catch (error) {
+                console.error('🌐 EXTERNAL API: Erreur insertion pour la date', data.DATE, ':', error);
+                errors.push(`Erreur d'insertion pour la date ${data.DATE}: ${error.message}`);
+                errorCount++;
+            }
+        }
+
+        console.log(`🌐 EXTERNAL API: Traitement terminé - ${importedCount} importées, ${errorCount} erreurs`);
+
+        // Renvoyer le résultat
+        res.json({
+            success: true,
+            message: `Traitement terminé. ${importedCount} entrées traitées.`,
+            imported_count: importedCount,
+            error_count: errorCount,
+            errors: errors,
+            supported_date_formats: ['YYYY-MM-DD', 'DD-MM-YYYY', 'DD/MM/YYYY', 'DD/MM/YY']
+        });
+
+    } catch (error) {
+        console.error('🌐 EXTERNAL API: Erreur traitement Cash Bictorys:', error);
+        res.status(500).json({ 
+            success: false,
+            error: 'Erreur serveur lors du traitement',
+            details: error.message 
+        });
+    }
+});
+
 // ===== APIS DE GESTION MENSUELLE =====
 
 // Route pour obtenir toutes les données du dashboard pour un mois spécifique
