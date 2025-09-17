@@ -12,7 +12,7 @@
     "test:all": "npm run test && npm run test:regression",
     "dev": "nodemon server.js",
     "build": "echo 'No build step required'",
-    "postinstall": "echo 'Installation complete'"
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "keywords": [
     "expense-management",
