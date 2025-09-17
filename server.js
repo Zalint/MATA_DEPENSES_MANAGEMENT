@@ -128,6 +128,538 @@ async function triggerAutoSyncIfNeeded(accountId, operationType = 'modification'
     }
 }
 
+// ========================================
+// 📸 SYSTÈME DE SNAPSHOTS
+// ========================================
+
+// Fonction utilitaire pour formater les dates en français
+function formatDateFR(dateString, format = 'DD-MM-YYYY') {
+    const date = new Date(dateString);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    const yearShort = String(year).slice(-2);
+    
+    switch (format) {
+        case 'DD-MM-YYYY': return `${day}-${month}-${year}`;
+        case 'DD/MM/YYYY': return `${day}/${month}/${year}`;
+        case 'DD/MM/YY': return `${day}/${month}/${yearShort}`;
+        case 'YYYY-MM-DD': return `${year}-${month}-${day}`;
+        default: return `${day}-${month}-${year}`;
+    }
+}
+
+// Fonction principale pour collecter toutes les données du snapshot
+async function collecteSnapshotData(cutoffDate = null) {
+    console.log('📸 SNAPSHOT: Début collecte des données...');
+    
+    try {
+        const snapshotDate = cutoffDate || new Date().toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0];
+        
+        console.log(`📸 SNAPSHOT: Date de référence: ${snapshotDate}`);
+        
+        // 1. DONNÉES DASHBOARD PRINCIPAL
+        console.log('📸 SNAPSHOT: Collecte dashboard...');
+        
+        // Calculer le début du mois pour la période courante
+        const monthStart = snapshotDate.substring(0, 7) + '-01'; // Premier jour du mois
+        console.log(`📸 SNAPSHOT: Période d'analyse dynamique: ${monthStart} à ${snapshotDate}`);
+        
+        // Stats cards principales
+        const statsCardsQuery = `
+            -- 1. Total dépensé (période courante - du début du mois à la date snapshot)
+            SELECT COALESCE(SUM(amount), 0) as total_spent 
+            FROM expenses 
+            WHERE expense_date BETWEEN $2 AND $1;
+            
+            -- 2. Montant restant total (comptes actifs, hors depot/partenaire)
+            SELECT COALESCE(SUM(a.current_balance), 0) as total_remaining 
+            FROM accounts a 
+            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire';
+            
+            -- 3. Total crédité avec dépenses
+            SELECT COALESCE(SUM(a.total_credited), 0) as total_credited_with_expenses 
+            FROM accounts a 
+            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire';
+            
+            -- 4. Total crédité général
+            SELECT COALESCE(SUM(
+                COALESCE(ch.total_credited, 0) + 
+                COALESCE(sch.total_special_credited, 0)
+            ), 0) as total_credited_general
+            FROM accounts a
+            LEFT JOIN (
+                SELECT account_id, SUM(amount) as total_credited 
+                FROM credit_history 
+                WHERE created_at::date <= $1 
+                GROUP BY account_id
+            ) ch ON a.id = ch.account_id
+            LEFT JOIN (
+                SELECT account_id, SUM(amount) as total_special_credited 
+                FROM special_credit_history 
+                WHERE credit_date <= $1 
+                GROUP BY account_id
+            ) sch ON a.id = sch.account_id
+            WHERE a.is_active = true AND a.account_type != 'depot' AND a.account_type != 'partenaire';
+            
+            -- 5. Solde comptes dépôt
+            SELECT COALESCE(SUM(a.current_balance), 0) as total_depot_balance 
+            FROM accounts a 
+            WHERE a.is_active = true AND a.account_type = 'depot';
+            
+            -- 6. Solde comptes partenaire
+            SELECT COALESCE(SUM(a.current_balance), 0) as total_partner_balance 
+            FROM accounts a 
+            WHERE a.is_active = true AND a.account_type = 'partenaire';
+        `;
+        
+        // Exécuter chaque requête séparément pour plus de clarté
+        const totalSpentResult = await pool.query(
+            'SELECT COALESCE(SUM(amount), 0) as total FROM expenses WHERE expense_date BETWEEN $2 AND $1',
+            [snapshotDate, monthStart]
+        );
+        
+        const totalRemainingResult = await pool.query(
+            'SELECT COALESCE(SUM(a.current_balance), 0) as total FROM accounts a WHERE a.is_active = true AND a.account_type != \'depot\' AND a.account_type != \'partenaire\''
+        );
+        
+        const totalCreditedWithExpensesResult = await pool.query(
+            'SELECT COALESCE(SUM(a.total_credited), 0) as total FROM accounts a WHERE a.is_active = true AND a.account_type != \'depot\' AND a.account_type != \'partenaire\''
+        );
+        
+        const totalDepotBalanceResult = await pool.query(
+            'SELECT COALESCE(SUM(a.current_balance), 0) as total FROM accounts a WHERE a.is_active = true AND a.account_type = \'depot\''
+        );
+        
+        const totalPartnerBalanceResult = await pool.query(
+            'SELECT COALESCE(SUM(a.current_balance), 0) as total FROM accounts a WHERE a.is_active = true AND a.account_type = \'partenaire\''
+        );
+        
+        const dashboardStats = {
+            totalSpent: parseFloat(totalSpentResult.rows[0].total),
+            totalRemaining: parseFloat(totalRemainingResult.rows[0].total),
+            totalCreditedWithExpenses: parseFloat(totalCreditedWithExpensesResult.rows[0].total),
+            totalDepotBalance: parseFloat(totalDepotBalanceResult.rows[0].total),
+            totalPartnerBalance: parseFloat(totalPartnerBalanceResult.rows[0].total)
+        };
+        
+        // 1.5. DONNÉES DÉTAILLÉES DU DASHBOARD (PL, Cash, etc.)
+        console.log('📸 SNAPSHOT: Collecte données détaillées dashboard...');
+        
+        // Simuler l'appel à stats-cards pour récupérer les détails PL
+        const dashboardDetailsResult = await pool.query(`
+            SELECT 
+                COALESCE(SUM(a.current_balance), 0) as total_cash_disponible
+            FROM accounts a 
+            WHERE a.is_active = true 
+            AND a.account_type NOT IN ('depot', 'partenaire')
+        `);
+        
+        // Récupérer les détails du cash disponible (comptes individuels)
+        const cashDetailsResult = await pool.query(`
+            SELECT 
+                a.account_name,
+                a.account_type,
+                a.current_balance,
+                a.category_type
+            FROM accounts a 
+            WHERE a.is_active = true 
+            AND a.account_type NOT IN ('depot', 'partenaire')
+            AND a.current_balance > 0
+            ORDER BY a.current_balance DESC
+        `);
+        
+        // Récupérer les données de stock pour les cartes additionnelles
+        const stockMataResult = await pool.query(`
+            SELECT 
+                date_snapshot as stock_date,
+                montant_stock as stock_value,
+                created_at
+            FROM stock_soir 
+            WHERE extract(year from date_snapshot) = extract(year from $1::date)
+            AND extract(month from date_snapshot) = extract(month from $1::date)
+            ORDER BY date_snapshot DESC
+            LIMIT 2
+        `, [snapshotDate]);
+        
+        const stockVivantResult = await pool.query(`
+            SELECT 
+                date_stock as stock_date,
+                SUM(total) as stock_value,
+                MAX(created_at) as created_at
+            FROM stock_vivant 
+            WHERE extract(year from date_stock) = extract(year from $1::date)
+            AND extract(month from date_stock) = extract(month from $1::date)
+            GROUP BY date_stock
+            ORDER BY date_stock DESC
+            LIMIT 2
+        `, [snapshotDate]);
+        
+        // Calculer les écarts de stock
+        let stockMataEcart = 0, stockVivantEcart = 0;
+        if (stockMataResult.rows.length >= 2) {
+            stockMataEcart = parseFloat(stockMataResult.rows[0].stock_value) - parseFloat(stockMataResult.rows[1].stock_value);
+        }
+        if (stockVivantResult.rows.length >= 2) {
+            stockVivantEcart = parseFloat(stockVivantResult.rows[0].stock_value) - parseFloat(stockVivantResult.rows[1].stock_value);
+        }
+        
+        // Récupérer les données Cash Bictorys du mois
+        const cashBictorysResult = await pool.query(`
+            SELECT 
+                amount as valeur_cash,
+                date as date_valeur,
+                created_at
+            FROM cash_bictorys 
+            WHERE extract(year from date) = extract(year from $1::date)
+            AND extract(month from date) = extract(month from $1::date)
+            ORDER BY date DESC
+            LIMIT 1
+        `, [snapshotDate]);
+        
+        // Calculer les créances du mois
+        const creancesMoisResult = await pool.query(`
+            SELECT COALESCE(SUM(co.amount), 0) as total
+            FROM creance_operations co
+            WHERE extract(year from co.operation_date) = extract(year from $1::date)
+            AND extract(month from co.operation_date) = extract(month from $1::date)
+            AND co.operation_date <= $1
+        `, [snapshotDate]);
+        
+        // Calculer le PL détaillé
+        const plDetails = {
+            cashBictorys: cashBictorysResult.rows.length > 0 ? parseFloat(cashBictorysResult.rows[0].valeur_cash) : 0,
+            creancesMois: parseFloat(creancesMoisResult.rows[0].total),
+            ecartStockMata: stockMataEcart,
+            cashBurn: parseFloat(totalSpentResult.rows[0].total),
+            ecartStockVivant: stockVivantEcart,
+            estimationCharges: 5320000, // Valeur par défaut, peut être récupérée de la config
+            plBase: 0,
+            plBrut: 0,
+            plFinal: 0
+        };
+        
+        // Calculer les PL
+        plDetails.plBase = plDetails.cashBictorys + plDetails.creancesMois + plDetails.ecartStockMata - plDetails.cashBurn;
+        plDetails.plBrut = plDetails.plBase + plDetails.ecartStockVivant;
+        plDetails.plFinal = plDetails.plBrut - plDetails.estimationCharges;
+        
+        // 2. DÉTAILS PAR COMPTE
+        console.log('📸 SNAPSHOT: Collecte détails comptes...');
+        const accountsDetailsResult = await pool.query(`
+            SELECT 
+                a.id,
+                a.account_name,
+                a.account_type,
+                a.current_balance as montant_restant,
+                a.total_credited,
+                u.full_name as user_name,
+                a.category_type as category,
+                -- Montant dépensé dans la période
+                COALESCE(expenses_sum.montant_depense, 0) as montant_depense,
+                -- Crédit du mois (dépenses = crédits dans ce système)
+                COALESCE(expenses_sum.montant_depense, 0) as credit_du_mois,
+                -- Balance du mois = current_balance 
+                a.current_balance as balance_du_mois,
+                -- Transferts entrants et sortants
+                COALESCE(a.transfert_entrants, 0) as transfert_entrants,
+                COALESCE(a.transfert_sortants, 0) as transfert_sortants
+            FROM accounts a
+            LEFT JOIN users u ON a.user_id = u.id
+            LEFT JOIN (
+                SELECT 
+                    account_id, 
+                    SUM(total) as montant_depense
+                FROM expenses 
+                WHERE expense_date >= $2 AND expense_date <= $1 
+                GROUP BY account_id
+            ) expenses_sum ON a.id = expenses_sum.account_id
+            WHERE a.is_active = true
+            ORDER BY a.account_type, a.account_name
+        `, [snapshotDate, monthStart]);
+        
+        // 3. TRANSFERTS
+        console.log('📸 SNAPSHOT: Collecte transferts...');
+        const transfertsResult = await pool.query(`
+            SELECT 
+                th.id,
+                th.created_at::date as transfer_date,
+                th.montant as amount,
+                th.comment as description,
+                th.transferred_by as created_by,
+                a_from.account_name as from_account,
+                a_to.account_name as to_account,
+                u.username as created_by_username
+            FROM transfer_history th
+            LEFT JOIN accounts a_from ON th.source_id = a_from.id
+            LEFT JOIN accounts a_to ON th.destination_id = a_to.id
+            LEFT JOIN users u ON th.transferred_by = u.id
+            WHERE th.created_at::date <= $1
+            ORDER BY th.created_at DESC, th.id DESC
+            LIMIT 1000
+        `, [snapshotDate]);
+        
+        // 4. DÉPENSES PAR CATÉGORIE
+        console.log('📸 SNAPSHOT: Collecte dépenses par catégorie...');
+        const depensesCategoriesResult = await pool.query(`
+            SELECT 
+                category,
+                SUM(amount) as total_amount,
+                COUNT(*) as count,
+                ROUND((SUM(amount) * 100.0 / NULLIF((SELECT SUM(amount) FROM expenses WHERE expense_date BETWEEN $2 AND $1), 0)), 1) as percentage
+            FROM expenses 
+            WHERE expense_date BETWEEN $2 AND $1
+            GROUP BY category
+            ORDER BY total_amount DESC
+        `, [snapshotDate, monthStart]);
+        
+        // 5. TOUTES LES DÉPENSES (depuis inception)
+        console.log('📸 SNAPSHOT: Collecte toutes les dépenses...');
+        const toutesDepensesResult = await pool.query(`
+            SELECT 
+                e.id,
+                e.expense_date,
+                e.amount,
+                e.category,
+                e.designation,
+                e.supplier,
+                e.description,
+                e.expense_type,
+                e.quantity,
+                e.unit_price,
+                e.justification_filename,
+                e.predictable as is_predictable,
+                e.is_selected,
+                a.account_name,
+                u.username
+            FROM expenses e
+            LEFT JOIN accounts a ON e.account_id = a.id
+            LEFT JOIN users u ON e.user_id = u.id
+            WHERE e.expense_date <= $1
+            ORDER BY e.expense_date DESC, e.id DESC
+        `, [snapshotDate]);
+        
+        // 6. CRÉANCES - Récapitulatif par client
+        console.log('📸 SNAPSHOT: Collecte créances...');
+        const creancesClientsResult = await pool.query(`
+            SELECT 
+                cc.client_name,
+                cc.client_phone as phone,
+                COALESCE(SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE 0 END), 0) as credit_initial,
+                COALESCE(SUM(CASE WHEN co.operation_type = 'debit' THEN co.amount ELSE 0 END), 0) as total_avances,
+                COALESCE(SUM(CASE WHEN co.operation_type = 'remboursement' THEN co.amount ELSE 0 END), 0) as total_remboursements,
+                COALESCE(
+                    SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE 0 END) - 
+                    SUM(CASE WHEN co.operation_type = 'debit' THEN co.amount ELSE 0 END) + 
+                    SUM(CASE WHEN co.operation_type = 'remboursement' THEN co.amount ELSE 0 END), 
+                    0
+                ) as solde_final
+            FROM creance_clients cc
+            LEFT JOIN creance_operations co ON cc.id = co.client_id AND co.operation_date <= $1
+            WHERE cc.is_active = true
+            GROUP BY cc.client_name, cc.client_phone, cc.id
+            HAVING COALESCE(
+                SUM(CASE WHEN co.operation_type = 'credit' THEN co.amount ELSE 0 END) - 
+                SUM(CASE WHEN co.operation_type = 'debit' THEN co.amount ELSE 0 END) + 
+                SUM(CASE WHEN co.operation_type = 'remboursement' THEN co.amount ELSE 0 END), 
+                0
+            ) != 0
+            ORDER BY solde_final DESC
+        `, [snapshotDate]);
+        
+        // 7. CRÉANCES - Historique des opérations
+        const creancesOperationsResult = await pool.query(`
+            SELECT 
+                co.id,
+                co.operation_date,
+                cc.client_name,
+                co.operation_type,
+                co.amount,
+                co.description,
+                co.created_by,
+                u.username as created_by_username
+            FROM creance_operations co
+            LEFT JOIN creance_clients cc ON co.client_id = cc.id
+            LEFT JOIN users u ON co.created_by = u.id
+            WHERE co.operation_date <= $1
+            ORDER BY co.operation_date DESC, co.id DESC
+            LIMIT 1000
+        `, [snapshotDate]);
+        
+        // 8. COMPTES PARTENAIRES DÉTAILS
+        console.log('📸 SNAPSHOT: Collecte comptes partenaires...');
+        const comptesPartenairesResult = await pool.query(`
+            SELECT 
+                a.id,
+                a.account_name,
+                a.current_balance as montant_total,
+                COALESCE(deliveries.total_delivered, 0) as livre,
+                a.current_balance - COALESCE(deliveries.total_delivered, 0) as restant,
+                COALESCE(deliveries.article_count, 0) as articles,
+                CASE 
+                    WHEN a.current_balance > 0 THEN 
+                        ROUND((COALESCE(deliveries.total_delivered, 0) * 100.0 / a.current_balance), 1)
+                    ELSE 0 
+                END as progression
+            FROM accounts a
+            LEFT JOIN (
+                SELECT 
+                    account_id,
+                    SUM(CASE WHEN validation_status = 'fully_validated' THEN amount ELSE 0 END) as total_delivered,
+                    SUM(CASE WHEN validation_status = 'fully_validated' THEN article_count ELSE 0 END) as article_count
+                FROM partner_deliveries 
+                WHERE delivery_date <= $1
+                GROUP BY account_id
+            ) deliveries ON a.id = deliveries.account_id
+            WHERE a.account_type = 'partenaire' AND a.is_active = true
+            ORDER BY a.account_name
+        `, [snapshotDate]);
+        
+        // 9. LIVRAISONS PARTENAIRES DÉTAILS
+        const livraisonsPartenairesResult = await pool.query(`
+            SELECT 
+                pd.id,
+                pd.delivery_date,
+                pd.article_count as articles,
+                pd.unit_price,
+                pd.amount as montant,
+                pd.description,
+                pd.validation_status,
+                pd.created_by,
+                a.account_name,
+                u.username as created_by_username
+            FROM partner_deliveries pd
+            LEFT JOIN accounts a ON pd.account_id = a.id
+            LEFT JOIN users u ON pd.created_by = u.id
+            WHERE pd.delivery_date <= $1
+            ORDER BY pd.delivery_date DESC, pd.id DESC
+            LIMIT 1000
+        `, [snapshotDate]);
+        
+        // 10. GESTION DE STOCK - Stocks du soir non-zéros pour la date la plus récente
+        console.log('📸 SNAPSHOT: Collecte gestion de stock...');
+        const gestionStockResult = await pool.query(`
+            SELECT 
+                sm.date,
+                sm.point_de_vente,
+                sm.produit,
+                sm.stock_matin,
+                sm.stock_soir,
+                sm.transfert
+            FROM stock_mata sm
+            WHERE sm.date = (
+                SELECT MAX(date) 
+                FROM stock_mata 
+                WHERE stock_soir != 0 AND stock_soir IS NOT NULL
+            )
+            AND sm.stock_soir != 0 
+            AND sm.stock_soir IS NOT NULL
+            ORDER BY sm.point_de_vente, sm.produit
+        `);
+        
+        // Construire l'objet snapshot final
+        const snapshot = {
+            metadata: {
+                snapshot_date: snapshotDate,
+                creation_timestamp: new Date().toISOString(),
+                snapshot_date_fr: formatDateFR(snapshotDate, 'DD/MM/YYYY'),
+                period_label: `Du 01/09/2025 au ${formatDateFR(snapshotDate, 'DD/MM/YYYY')}`,
+                version: '1.1'
+            },
+            dashboard: {
+                stats_cards: dashboardStats,
+                accounts_details: accountsDetailsResult.rows,
+                transferts: transfertsResult.rows,
+                depenses_categories: depensesCategoriesResult.rows,
+                // Nouvelles données détaillées
+                pl_details: plDetails,
+                cash_details: {
+                    total_cash_disponible: parseFloat(dashboardDetailsResult.rows[0].total_cash_disponible),
+                    comptes_inclus: cashDetailsResult.rows.map(row => ({
+                        account_name: row.account_name,
+                        account_type: row.account_type,
+                        current_balance: parseFloat(row.current_balance),
+                        category_type: row.category_type
+                    })),
+                    nombre_comptes: cashDetailsResult.rows.length
+                },
+                cartes_additionnelles: {
+                    stock_mata: {
+                        historique: stockMataResult.rows.map(row => ({
+                            stock_date: row.stock_date,
+                            stock_value: parseFloat(row.stock_value),
+                            created_at: row.created_at
+                        })),
+                        ecart_mensuel: stockMataEcart,
+                        stock_actuel: stockMataResult.rows.length > 0 ? parseFloat(stockMataResult.rows[0].stock_value) : 0,
+                        stock_precedent: stockMataResult.rows.length > 1 ? parseFloat(stockMataResult.rows[1].stock_value) : 0
+                    },
+                    stock_vivant: {
+                        historique: stockVivantResult.rows.map(row => ({
+                            stock_date: row.stock_date,
+                            stock_value: parseFloat(row.stock_value),
+                            created_at: row.created_at
+                        })),
+                        ecart_mensuel: stockVivantEcart,
+                        stock_actuel: stockVivantResult.rows.length > 0 ? parseFloat(stockVivantResult.rows[0].stock_value) : 0,
+                        stock_precedent: stockVivantResult.rows.length > 1 ? parseFloat(stockVivantResult.rows[1].stock_value) : 0
+                    },
+                    cash_bictorys: {
+                        valeur_actuelle: cashBictorysResult.rows.length > 0 ? parseFloat(cashBictorysResult.rows[0].valeur_cash) : 0,
+                        date_valeur: cashBictorysResult.rows.length > 0 ? cashBictorysResult.rows[0].date_valeur : null,
+                        created_at: cashBictorysResult.rows.length > 0 ? cashBictorysResult.rows[0].created_at : null
+                    },
+                    totaux_depot_partenaire: {
+                        solde_depot: dashboardStats.totalDepotBalance,
+                        solde_partenaire: dashboardStats.totalPartnerBalance
+                    }
+                }
+            },
+            depenses: {
+                toutes_depenses: toutesDepensesResult.rows,
+                summary: {
+                    total_amount: dashboardStats.totalSpent,
+                    total_count: toutesDepensesResult.rows.length,
+                    period: `${monthStart} à ${snapshotDate}`
+                }
+            },
+            creances: {
+                recapitulatif_clients: creancesClientsResult.rows,
+                historique_operations: creancesOperationsResult.rows,
+                summary: {
+                    total_clients: creancesClientsResult.rows.length,
+                    total_operations: creancesOperationsResult.rows.length
+                }
+            },
+            comptes_partenaires: {
+                comptes: comptesPartenairesResult.rows,
+                livraisons: livraisonsPartenairesResult.rows,
+                summary: {
+                    total_comptes: comptesPartenairesResult.rows.length,
+                    total_livraisons: livraisonsPartenairesResult.rows.length
+                }
+            },
+            gestion_stock: {
+                stocks_actifs: gestionStockResult.rows,
+                summary: {
+                    total_lignes: gestionStockResult.rows.length,
+                    date_reference: gestionStockResult.rows.length > 0 ? gestionStockResult.rows[0].date : null,
+                    points_de_vente: [...new Set(gestionStockResult.rows.map(row => row.point_de_vente))].length,
+                    produits_uniques: [...new Set(gestionStockResult.rows.map(row => row.produit))].length
+                }
+            }
+        };
+        
+        console.log('📸 SNAPSHOT: Collecte terminée avec succès');
+        return snapshot;
+        
+    } catch (error) {
+        console.error('❌ SNAPSHOT: Erreur lors de la collecte:', error);
+        throw error;
+    }
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -6857,7 +7389,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     a.account_type,
                     COALESCE(SUM(e.total), 0) as monthly_credits,
                     COALESCE(SUM(exp.total), 0) as spent,
-                    COALESCE(SUM(CASE WHEN t.transfer_type = 'in' THEN t.amount ELSE -t.amount END), 0) as net_transfers,
+                    COALESCE(SUM(CASE WHEN a.id = t.destination_id THEN t.montant ELSE -t.montant END), 0) as net_transfers,
                     COALESCE(mdm.montant, 0) as montant_debut_mois
                 FROM accounts a
                 LEFT JOIN expenses e ON a.id = e.account_id 
@@ -6866,9 +7398,9 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 LEFT JOIN expenses exp ON a.id = exp.account_id 
                     AND exp.expense_date >= $1 
                     AND exp.expense_date <= $2
-                LEFT JOIN transfers t ON (a.id = t.from_account_id OR a.id = t.to_account_id)
-                    AND t.transfer_date >= $1 
-                    AND t.transfer_date <= $2
+                LEFT JOIN transfer_history t ON (a.id = t.source_id OR a.id = t.destination_id)
+                    AND t.created_at::date >= $1 
+                    AND t.created_at::date <= $2
                 LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id 
                     AND mdm.month_year = $3
                 WHERE a.is_active = true
@@ -7247,6 +7779,432 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             error: 'Erreur serveur lors de la génération des données status',
             code: 'STATUS_API_ERROR',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// ========================================
+// 📸 ENDPOINTS SYSTÈME DE SNAPSHOTS
+// ========================================
+
+// =====================================================
+// EXTERNAL API FOR SNAPSHOTS
+// =====================================================
+
+// Endpoint externe pour créer des snapshots avec clé API
+app.post('/external/api/snapshots/create', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API création snapshot avec params:', req.body);
+    
+    try {
+        const { cutoff_date } = req.body; // Date optionnelle au format YYYY-MM-DD
+        const targetDate = cutoff_date || new Date().toISOString().split('T')[0];
+        
+        console.log(`🌐 EXTERNAL: Date cible pour le snapshot: ${targetDate}`);
+        
+        // Créer le répertoire de snapshots si nécessaire
+        const snapshotsDir = path.join(__dirname, 'uploads', 'snapshots');
+        if (!fs.existsSync(snapshotsDir)) {
+            fs.mkdirSync(snapshotsDir, { recursive: true });
+        }
+        
+        // Créer le répertoire pour cette date
+        const dateDir = path.join(snapshotsDir, targetDate);
+        if (!fs.existsSync(dateDir)) {
+            fs.mkdirSync(dateDir, { recursive: true });
+        }
+        
+        // Collecter toutes les données
+        const snapshotData = await collecteSnapshotData(targetDate);
+        
+        // Ajouter les informations de création pour l'API externe
+        snapshotData.metadata.created_by = 'api_external';
+        snapshotData.metadata.created_by_username = 'External API';
+        snapshotData.metadata.api_call = true;
+        snapshotData.metadata.api_timestamp = new Date().toISOString();
+        
+        // Sauvegarder le snapshot
+        const snapshotFilePath = path.join(dateDir, 'snapshot.json');
+        fs.writeFileSync(snapshotFilePath, JSON.stringify(snapshotData, null, 2), 'utf8');
+        
+        // Créer aussi un fichier de métadonnées pour l'indexation
+        const metadataFile = path.join(dateDir, 'metadata.json');
+        const metadata = {
+            snapshot_date: targetDate,
+            snapshot_date_fr: formatDateFR(targetDate, 'DD/MM/YYYY'),
+            creation_timestamp: new Date().toISOString(),
+            created_by: 'api_external',
+            created_by_username: 'External API',
+            version: '1.2',
+            file_size_mb: (Buffer.byteLength(JSON.stringify(snapshotData), 'utf8') / (1024 * 1024)).toFixed(2),
+            api_call: true
+        };
+        fs.writeFileSync(metadataFile, JSON.stringify(metadata, null, 2), 'utf8');
+        
+        console.log(`🌐 EXTERNAL: Snapshot externe créé avec succès pour ${targetDate}`);
+        
+        // Réponse API externe optimisée
+        res.json({
+            success: true,
+            message: 'Snapshot créé avec succès',
+            data: {
+                snapshot_date: targetDate,
+                snapshot_date_fr: formatDateFR(targetDate, 'DD/MM/YYYY'),
+                creation_timestamp: new Date().toISOString(),
+                file_path: `snapshots/${targetDate}/snapshot.json`,
+                file_size_mb: metadata.file_size_mb,
+                created_via: 'external_api',
+                summary: {
+                    total_accounts: snapshotData.dashboard.accounts_details.length,
+                    total_expenses: snapshotData.depenses.toutes_depenses.length,
+                    total_clients: snapshotData.creances.summary.total_clients,
+                    total_partner_accounts: snapshotData.comptes_partenaires.summary.total_comptes,
+                    stocks_actifs: snapshotData.gestion_stock.summary.total_lignes,
+                    period: snapshotData.depenses.summary.period
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('🌐 EXTERNAL: Erreur création snapshot:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Erreur lors de la création du snapshot',
+            message: error.message,
+            code: 'SNAPSHOT_CREATION_ERROR'
+        });
+    }
+});
+
+// Endpoint externe pour lister les snapshots disponibles
+app.get('/external/api/snapshots', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API liste snapshots');
+    
+    try {
+        const snapshotsDir = path.join(__dirname, 'uploads', 'snapshots');
+        
+        if (!fs.existsSync(snapshotsDir)) {
+            return res.json({
+                success: true,
+                snapshots: [],
+                message: 'Aucun snapshot disponible'
+            });
+        }
+        
+        const snapshots = [];
+        const directories = fs.readdirSync(snapshotsDir, { withFileTypes: true })
+            .filter(dirent => dirent.isDirectory())
+            .map(dirent => dirent.name)
+            .sort((a, b) => b.localeCompare(a)); // Plus récent en premier
+        
+        for (const dir of directories) {
+            const metadataPath = path.join(snapshotsDir, dir, 'metadata.json');
+            if (fs.existsSync(metadataPath)) {
+                try {
+                    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+                    snapshots.push({
+                        snapshot_date: metadata.snapshot_date,
+                        snapshot_date_fr: metadata.snapshot_date_fr,
+                        creation_timestamp: metadata.creation_timestamp,
+                        created_by_username: metadata.created_by_username,
+                        version: metadata.version,
+                        file_size_mb: metadata.file_size_mb,
+                        api_call: metadata.api_call || false
+                    });
+                } catch (parseError) {
+                    console.error(`🌐 EXTERNAL: Erreur lecture metadata ${dir}:`, parseError);
+                }
+            }
+        }
+        
+        res.json({
+            success: true,
+            total_snapshots: snapshots.length,
+            snapshots: snapshots
+        });
+        
+    } catch (error) {
+        console.error('🌐 EXTERNAL: Erreur liste snapshots:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Erreur lors de la récupération des snapshots',
+            message: error.message
+        });
+    }
+});
+
+// Endpoint externe pour récupérer un snapshot spécifique
+app.get('/external/api/snapshots/:date', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API snapshot spécifique:', req.params.date);
+    
+    try {
+        const { date } = req.params;
+        const snapshotFile = path.join(__dirname, 'uploads', 'snapshots', date, 'snapshot.json');
+        const metadataFile = path.join(__dirname, 'uploads', 'snapshots', date, 'metadata.json');
+        
+        if (!fs.existsSync(snapshotFile)) {
+            return res.status(404).json({
+                success: false,
+                error: 'Snapshot non trouvé',
+                snapshot_date: date
+            });
+        }
+        
+        const snapshotData = JSON.parse(fs.readFileSync(snapshotFile, 'utf8'));
+        const metadata = fs.existsSync(metadataFile) 
+            ? JSON.parse(fs.readFileSync(metadataFile, 'utf8'))
+            : null;
+        
+        res.json({
+            success: true,
+            snapshot_date: date,
+            snapshot_date_fr: formatDateFR(date, 'DD/MM/YYYY'),
+            metadata: metadata,
+            data: snapshotData
+        });
+        
+    } catch (error) {
+        console.error('🌐 EXTERNAL: Erreur lecture snapshot:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Erreur lors de la lecture du snapshot',
+            message: error.message
+        });
+    }
+});
+
+// =====================================================
+// INTERNAL API FOR SNAPSHOTS (Interface Web)
+// =====================================================
+
+// Créer un nouveau snapshot (interface web)
+app.post('/api/snapshots/create', requireAdminAuth, async (req, res) => {
+    try {
+        console.log('📸 SNAPSHOT: Début création snapshot');
+        
+        const { cutoff_date } = req.body; // Date optionnelle au format YYYY-MM-DD
+        const targetDate = cutoff_date || new Date().toISOString().split('T')[0];
+        const userId = req.session.user.id;
+        
+        console.log(`📸 SNAPSHOT: Date cible: ${targetDate}`);
+        
+        // Créer le répertoire de snapshots si nécessaire
+        const snapshotsDir = path.join(__dirname, 'uploads', 'snapshots');
+        if (!fs.existsSync(snapshotsDir)) {
+            fs.mkdirSync(snapshotsDir, { recursive: true });
+        }
+        
+        // Créer le répertoire pour cette date
+        const dateDir = path.join(snapshotsDir, targetDate);
+        if (!fs.existsSync(dateDir)) {
+            fs.mkdirSync(dateDir, { recursive: true });
+        }
+        
+        // Collecter toutes les données
+        const snapshotData = await collecteSnapshotData(targetDate);
+        
+        // Ajouter les informations de création
+        snapshotData.metadata.created_by = userId;
+        snapshotData.metadata.created_by_username = req.session.user.username;
+        
+        // Sauvegarder le snapshot
+        const snapshotFilePath = path.join(dateDir, 'snapshot.json');
+        fs.writeFileSync(snapshotFilePath, JSON.stringify(snapshotData, null, 2), 'utf8');
+        
+        // Créer aussi un fichier de métadonnées pour l'indexation
+        const metadataFile = path.join(dateDir, 'metadata.json');
+        const fileSizeBytes = fs.statSync(snapshotFilePath).size;
+        const metadata = {
+            snapshot_date: targetDate,
+            creation_timestamp: new Date().toISOString(),
+            created_by: userId,
+            created_by_username: req.session.user.username,
+            file_size: fileSizeBytes,
+            file_size_mb: (fileSizeBytes / (1024 * 1024)).toFixed(2),
+            snapshot_date_fr: formatDateFR(targetDate, 'DD/MM/YYYY'),
+            version: '1.1',
+            api_call: false
+        };
+        fs.writeFileSync(metadataFile, JSON.stringify(metadata, null, 2), 'utf8');
+        
+        console.log(`📸 SNAPSHOT: Snapshot créé avec succès pour ${targetDate}`);
+        console.log(`📸 SNAPSHOT: Taille du fichier: ${metadata.file_size_mb} MB`);
+        
+        res.json({
+            success: true,
+            message: `Snapshot créé avec succès pour le ${formatDateFR(targetDate, 'DD/MM/YYYY')}`,
+            snapshot_date: targetDate,
+            snapshot_date_fr: formatDateFR(targetDate, 'DD/MM/YYYY'),
+            file_size: metadata.file_size,
+            file_path: snapshotFilePath
+        });
+        
+    } catch (error) {
+        console.error('❌ SNAPSHOT: Erreur lors de la création:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la création du snapshot',
+            error: error.message
+        });
+    }
+});
+
+// Lister tous les snapshots existants
+app.get('/api/snapshots', requireAuth, async (req, res) => {
+    try {
+        console.log('📸 SNAPSHOT: Liste des snapshots demandée');
+        
+        const snapshotsDir = path.join(__dirname, 'uploads', 'snapshots');
+        
+        if (!fs.existsSync(snapshotsDir)) {
+            return res.json({
+                success: true,
+                snapshots: [],
+                message: 'Aucun snapshot trouvé'
+            });
+        }
+        
+        // Lire tous les répertoires de dates
+        const dateDirs = fs.readdirSync(snapshotsDir)
+            .filter(item => {
+                const fullPath = path.join(snapshotsDir, item);
+                return fs.statSync(fullPath).isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(item);
+            })
+            .sort((a, b) => b.localeCompare(a)); // Tri décroissant (plus récent d'abord)
+        
+        const snapshots = [];
+        
+        for (const dateDir of dateDirs) {
+            const metadataPath = path.join(snapshotsDir, dateDir, 'metadata.json');
+            const snapshotPath = path.join(snapshotsDir, dateDir, 'snapshot.json');
+            
+            if (fs.existsSync(metadataPath) && fs.existsSync(snapshotPath)) {
+                try {
+                    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+                    snapshots.push({
+                        snapshot_date: metadata.snapshot_date,
+                        snapshot_date_fr: metadata.snapshot_date_fr || formatDateFR(metadata.snapshot_date, 'DD/MM/YYYY'),
+                        creation_timestamp: metadata.creation_timestamp,
+                        created_by_username: metadata.created_by_username,
+                        file_size: metadata.file_size,
+                        file_size_mb: (metadata.file_size / (1024 * 1024)).toFixed(2),
+                        version: metadata.version || '1.0'
+                    });
+                } catch (parseError) {
+                    console.error(`❌ SNAPSHOT: Erreur lecture métadonnées ${dateDir}:`, parseError);
+                }
+            }
+        }
+        
+        console.log(`📸 SNAPSHOT: ${snapshots.length} snapshots trouvés`);
+        
+        res.json({
+            success: true,
+            snapshots: snapshots,
+            total_count: snapshots.length
+        });
+        
+    } catch (error) {
+        console.error('❌ SNAPSHOT: Erreur lors de la liste:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la récupération des snapshots',
+            error: error.message
+        });
+    }
+});
+
+// Lire un snapshot spécifique
+app.get('/api/snapshots/:date', requireAuth, async (req, res) => {
+    try {
+        const { date } = req.params;
+        console.log(`📸 SNAPSHOT: Lecture snapshot ${date}`);
+        
+        // Valider le format de date
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Format de date invalide. Utilisez YYYY-MM-DD'
+            });
+        }
+        
+        const snapshotPath = path.join(__dirname, 'uploads', 'snapshots', date, 'snapshot.json');
+        const metadataPath = path.join(__dirname, 'uploads', 'snapshots', date, 'metadata.json');
+        
+        if (!fs.existsSync(snapshotPath)) {
+            return res.status(404).json({
+                success: false,
+                message: `Aucun snapshot trouvé pour la date ${formatDateFR(date, 'DD/MM/YYYY')}`
+            });
+        }
+        
+        // Lire le snapshot
+        const snapshotData = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+        
+        // Lire les métadonnées si disponibles
+        let metadata = null;
+        if (fs.existsSync(metadataPath)) {
+            metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        }
+        
+        console.log(`📸 SNAPSHOT: Snapshot ${date} lu avec succès`);
+        
+        res.json({
+            success: true,
+            snapshot_date: date,
+            snapshot_date_fr: formatDateFR(date, 'DD/MM/YYYY'),
+            metadata: metadata,
+            data: snapshotData
+        });
+        
+    } catch (error) {
+        console.error(`❌ SNAPSHOT: Erreur lecture snapshot ${req.params.date}:`, error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la lecture du snapshot',
+            error: error.message
+        });
+    }
+});
+
+// Supprimer un snapshot spécifique (admin uniquement)
+app.delete('/api/snapshots/:date', requireAdminAuth, async (req, res) => {
+    try {
+        const { date } = req.params;
+        console.log(`📸 SNAPSHOT: Suppression snapshot ${date}`);
+        
+        // Valider le format de date
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Format de date invalide. Utilisez YYYY-MM-DD'
+            });
+        }
+        
+        const snapshotDir = path.join(__dirname, 'uploads', 'snapshots', date);
+        
+        if (!fs.existsSync(snapshotDir)) {
+            return res.status(404).json({
+                success: false,
+                message: `Aucun snapshot trouvé pour la date ${formatDateFR(date, 'DD/MM/YYYY')}`
+            });
+        }
+        
+        // Supprimer le répertoire complet
+        fs.rmSync(snapshotDir, { recursive: true, force: true });
+        
+        console.log(`📸 SNAPSHOT: Snapshot ${date} supprimé avec succès`);
+        
+        res.json({
+            success: true,
+            message: `Snapshot du ${formatDateFR(date, 'DD/MM/YYYY')} supprimé avec succès`
+        });
+        
+    } catch (error) {
+        console.error(`❌ SNAPSHOT: Erreur suppression snapshot ${req.params.date}:`, error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la suppression du snapshot',
+            error: error.message
         });
     }
 });
