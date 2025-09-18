@@ -1438,8 +1438,10 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
                 }
                 
                 // Vérification supplémentaire : le total des dépenses ne doit pas dépasser le total crédité
-                if (account.total_credited > 0) {
-                    console.log('💳 Vérification du budget total crédité');
+                // Cette validation s'applique SEULEMENT aux comptes statut, pas aux comptes classiques
+                // qui peuvent recevoir des transferts (ce qui créerait une incohérence)
+                if (account.total_credited > 0 && account.account_type === 'statut') {
+                    console.log('💳 Vérification du budget total crédité (compte statut)');
                     const totalSpentAfter = await pool.query(
                         'SELECT COALESCE(SUM(total), 0) as total_spent FROM expenses WHERE account_id = $1',
                         [account_id]
@@ -1458,6 +1460,8 @@ app.post('/api/expenses', requireAuth, upload.single('justification'), async (re
                             error: `Cette dépense dépasserait le budget total. Budget total: ${account.total_credited.toLocaleString()} FCFA, Déjà dépensé: ${currentTotalSpent.toLocaleString()} FCFA, Nouveau montant: ${finalAmount.toLocaleString()} FCFA` 
                         });
                     }
+                } else if (account.account_type === 'classique') {
+                    console.log('⚡ Validation du budget total ignorée pour compte classique (peut recevoir des transferts)');
                 }
                 
                 console.log('✅ Validation des soldes passée avec succès');
