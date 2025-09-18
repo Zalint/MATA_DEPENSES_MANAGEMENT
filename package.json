@@ -12,7 +12,7 @@
     "test:all": "npm run test && npm run test:regression",
     "dev": "nodemon server.js",
     "build": "echo 'No build step required'",
-    "postinstall": "npx puppeteer browsers install chrome"
+    "postinstall": "echo '🔧 DÉBUT Installation Chrome...' && npx puppeteer browsers install chrome && echo '✅ Chrome installé avec succès' && ls -la /opt/render/.cache/puppeteer/chrome/ 2>/dev/null || echo '📁 Répertoire cache non trouvé' && echo '🔍 Vérification installation...' && find /opt/render -name '*chrome*' -type f 2>/dev/null | head -5 || echo '❌ Chrome non trouvé après installation'"
   },
   "keywords": [
     "expense-management",

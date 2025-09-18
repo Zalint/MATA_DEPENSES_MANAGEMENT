@@ -429,53 +429,136 @@ async function collecteSnapshotData(cutoffDate = null) {
                 ]
             };
             
-            // En production, essayer différentes méthodes pour trouver Chrome
+            // DÉTECTION CHROME ULTRA-ROBUSTE
             if (isProduction) {
+                console.log('🔍 === DÉTECTION CHROME ULTRA-ROBUSTE ===');
+                const fs = require('fs');
+                const { execSync } = require('child_process');
+                let foundChrome = false;
+                
+                // Méthode 1: Puppeteer automatique
+                console.log('🔍 [1/5] Détection automatique Puppeteer...');
                 try {
-                    // Méthode 1: Laisser Puppeteer trouver Chrome automatiquement
-                    const fs = require('fs');
                     const executablePath = puppeteer.executablePath();
-                    console.log(`🔍 Chrome path automatique: ${executablePath}`);
+                    console.log(`🔍 Puppeteer détecte: ${executablePath}`);
                     
                     if (fs.existsSync(executablePath)) {
                         puppeteerConfig.executablePath = executablePath;
-                        console.log(`✅ Chrome trouvé via Puppeteer: ${executablePath}`);
+                        console.log(`✅ [1/5] Chrome trouvé via Puppeteer: ${executablePath}`);
+                        foundChrome = true;
                     } else {
-                        // Méthode 2: Chemins possibles sur Render
-                        const possiblePaths = [
-                            '/opt/render/.cache/puppeteer/chrome/linux-140.0.7339.82/chrome-linux64/chrome',
-                            '/opt/render/.cache/puppeteer/chrome/*/chrome-linux64/chrome'
-                        ];
-                        
-                        let foundPath = null;
-                        for (const path of possiblePaths) {
-                            if (path.includes('*')) {
-                                // Recherche avec wildcard
-                                const { execSync } = require('child_process');
-                                try {
-                                    const result = execSync(`ls ${path} 2>/dev/null | head -1`, { encoding: 'utf8' }).trim();
-                                    if (result && fs.existsSync(result)) {
-                                        foundPath = result;
-                                        break;
-                                    }
-                                } catch (e) {
-                                    // Continuer avec le chemin suivant
-                                }
-                            } else if (fs.existsSync(path)) {
-                                foundPath = path;
-                                break;
-                            }
-                        }
-                        
-                        if (foundPath) {
-                            puppeteerConfig.executablePath = foundPath;
-                            console.log(`✅ Chrome trouvé via recherche: ${foundPath}`);
-                        } else {
-                            console.log('⚠️ Chrome non trouvé, utilisation configuration par défaut');
-                        }
+                        console.log(`❌ [1/5] Fichier non trouvé: ${executablePath}`);
                     }
                 } catch (error) {
-                    console.log(`⚠️ Erreur détection Chrome: ${error.message}, utilisation par défaut`);
+                    console.log(`❌ [1/5] Erreur Puppeteer: ${error.message}`);
+                }
+                
+                // Méthode 2: Recherche globale
+                if (!foundChrome) {
+                    console.log('🔍 [2/5] Recherche globale Chrome...');
+                    try {
+                        const searchResult = execSync('find /opt/render -name "chrome" -type f -executable 2>/dev/null | head -1', { encoding: 'utf8' }).trim();
+                        if (searchResult && fs.existsSync(searchResult)) {
+                            puppeteerConfig.executablePath = searchResult;
+                            console.log(`✅ [2/5] Chrome trouvé via recherche: ${searchResult}`);
+                            foundChrome = true;
+                        } else {
+                            console.log(`❌ [2/5] Recherche globale échouée`);
+                        }
+                    } catch (error) {
+                        console.log(`❌ [2/5] Erreur recherche: ${error.message}`);
+                    }
+                }
+                
+                // Méthode 3: Installation à la volée
+                if (!foundChrome) {
+                    console.log('🔍 [3/5] Installation Chrome à la volée...');
+                    try {
+                        console.log('📦 Installation en cours...');
+                        execSync('npx puppeteer browsers install chrome', { 
+                            stdio: 'pipe',
+                            timeout: 120000 // 2 minutes max
+                        });
+                        
+                        // Nouvelle tentative après installation
+                        const executablePath = puppeteer.executablePath();
+                        if (fs.existsSync(executablePath)) {
+                            puppeteerConfig.executablePath = executablePath;
+                            console.log(`✅ [3/5] Chrome installé et détecté: ${executablePath}`);
+                            foundChrome = true;
+                        } else {
+                            console.log(`❌ [3/5] Installation réussie mais Chrome non détecté`);
+                        }
+                    } catch (error) {
+                        console.log(`❌ [3/5] Erreur installation: ${error.message}`);
+                    }
+                }
+                
+                // Méthode 4: Chemins hardcodés multiples versions
+                if (!foundChrome) {
+                    console.log('🔍 [4/5] Chemins hardcodés...');
+                    const hardcodedPaths = [
+                        '/opt/render/.cache/puppeteer/chrome/linux-140.0.7339.82/chrome-linux64/chrome',
+                        '/opt/render/.cache/puppeteer/chrome/linux-140.0.7336.61/chrome-linux64/chrome',
+                        '/opt/render/.cache/puppeteer/chrome/linux-131.0.6778.108/chrome-linux64/chrome',
+                        '/usr/bin/google-chrome',
+                        '/usr/bin/chromium-browser'
+                    ];
+                    
+                    for (const path of hardcodedPaths) {
+                        if (fs.existsSync(path)) {
+                            puppeteerConfig.executablePath = path;
+                            console.log(`✅ [4/5] Chrome trouvé hardcodé: ${path}`);
+                            foundChrome = true;
+                            break;
+                        }
+                    }
+                    if (!foundChrome) {
+                        console.log(`❌ [4/5] Aucun chemin hardcodé trouvé`);
+                    }
+                }
+                
+                // Méthode 5: Recherche avec wildcards dans cache
+                if (!foundChrome) {
+                    console.log('🔍 [5/5] Recherche avec wildcards...');
+                    try {
+                        const wildcardResult = execSync('ls /opt/render/.cache/puppeteer/chrome/*/chrome-linux64/chrome 2>/dev/null | head -1', { encoding: 'utf8' }).trim();
+                        if (wildcardResult && fs.existsSync(wildcardResult)) {
+                            puppeteerConfig.executablePath = wildcardResult;
+                            console.log(`✅ [5/5] Chrome trouvé via wildcard: ${wildcardResult}`);
+                            foundChrome = true;
+                        } else {
+                            console.log(`❌ [5/5] Wildcard échoué`);
+                        }
+                    } catch (error) {
+                        console.log(`❌ [5/5] Erreur wildcard: ${error.message}`);
+                    }
+                }
+                
+                // Diagnostic complet si échec
+                if (!foundChrome) {
+                    console.log('');
+                    console.log('❌ === TOUTES LES MÉTHODES ONT ÉCHOUÉ ===');
+                    console.log('📋 Diagnostic complet:');
+                    try {
+                        console.log('📁 Contenu /opt/render/.cache/puppeteer/:');
+                        const cacheContent = execSync('ls -la /opt/render/.cache/puppeteer/ 2>/dev/null || echo "Répertoire non trouvé"', { encoding: 'utf8' });
+                        console.log(cacheContent);
+                        
+                        console.log('🔍 Recherche fichiers *chrome* dans /opt/render:');
+                        const chromeFiles = execSync('find /opt/render -name "*chrome*" -type f 2>/dev/null | head -10 || echo "Aucun fichier trouvé"', { encoding: 'utf8' });
+                        console.log(chromeFiles);
+                        
+                        console.log('📊 Espace disque:');
+                        const diskSpace = execSync('df -h /opt/render 2>/dev/null || echo "Impossible de vérifier l\'espace"', { encoding: 'utf8' });
+                        console.log(diskSpace);
+                    } catch (e) {
+                        console.log('❌ Erreur diagnostic:', e.message);
+                    }
+                    console.log('=== FIN DIAGNOSTIC ===');
+                    console.log('');
+                } else {
+                    console.log(`🎉 Chrome configuré avec succès: ${puppeteerConfig.executablePath}`);
                 }
             }
             
