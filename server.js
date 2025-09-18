@@ -429,66 +429,69 @@ async function collecteSnapshotData(cutoffDate = null) {
                 ]
             };
             
-            // DÉTECTION CHROME SIMPLIFIÉE POUR ÉVITER TIMEOUT
+            // DÉTECTION CHROME AVEC RÉPERTOIRE PERSISTANT
             if (isProduction) {
-                console.log('🔍 === DÉTECTION CHROME SIMPLIFIÉE ===');
+                console.log('🔍 === DÉTECTION CHROME DANS UPLOADS (PERSISTANT) ===');
                 const fs = require('fs');
                 const { execSync } = require('child_process');
                 let foundChrome = false;
                 
-                // Méthode 1: Puppeteer automatique (rapide)
+                // Configurer le cache Puppeteer vers uploads (persistant)
+                process.env.PUPPETEER_CACHE_DIR = '/opt/render/project/src/uploads/.puppeteer-cache';
+                
+                // Méthode 1: Répertoire uploads persistant
                 try {
-                    const executablePath = puppeteer.executablePath();
-                    console.log(`🔍 Puppeteer détecte: ${executablePath}`);
+                    console.log('🔍 Recherche dans uploads/.puppeteer-cache...');
+                    const uploadsChromeResult = execSync('find /opt/render/project/src/uploads/.puppeteer-cache -name "chrome" -type f -executable 2>/dev/null | head -1', { 
+                        encoding: 'utf8',
+                        timeout: 5000
+                    }).trim();
                     
-                    if (fs.existsSync(executablePath)) {
-                        puppeteerConfig.executablePath = executablePath;
-                        console.log(`✅ Chrome trouvé via Puppeteer: ${executablePath}`);
+                    if (uploadsChromeResult && fs.existsSync(uploadsChromeResult)) {
+                        puppeteerConfig.executablePath = uploadsChromeResult;
+                        console.log(`✅ Chrome trouvé dans uploads: ${uploadsChromeResult}`);
                         foundChrome = true;
                     }
                 } catch (error) {
-                    console.log(`❌ Erreur Puppeteer: ${error.message}`);
+                    console.log(`❌ Recherche uploads échouée: ${error.message}`);
                 }
                 
-                // Méthode 2: Chemins hardcodés (rapide)
+                // Méthode 2: Puppeteer automatique (rapide)
                 if (!foundChrome) {
-                    console.log('🔍 Chemins hardcodés...');
-                    const hardcodedPaths = [
+                    try {
+                        const executablePath = puppeteer.executablePath();
+                        console.log(`🔍 Puppeteer détecte: ${executablePath}`);
+                        
+                        if (fs.existsSync(executablePath)) {
+                            puppeteerConfig.executablePath = executablePath;
+                            console.log(`✅ Chrome trouvé via Puppeteer: ${executablePath}`);
+                            foundChrome = true;
+                        }
+                    } catch (error) {
+                        console.log(`❌ Erreur Puppeteer: ${error.message}`);
+                    }
+                }
+                
+                // Méthode 3: Chemins legacy (ancien cache)
+                if (!foundChrome) {
+                    console.log('🔍 Chemins legacy...');
+                    const legacyPaths = [
                         '/opt/render/.cache/puppeteer/chrome/linux-140.0.7339.82/chrome-linux64/chrome',
-                        '/opt/render/.cache/puppeteer/chrome/linux-140.0.7336.61/chrome-linux64/chrome',
-                        '/opt/render/.cache/puppeteer/chrome/linux-131.0.6778.108/chrome-linux64/chrome'
+                        '/opt/render/.cache/puppeteer/chrome/linux-140.0.7336.61/chrome-linux64/chrome'
                     ];
                     
-                    for (const path of hardcodedPaths) {
+                    for (const path of legacyPaths) {
                         if (fs.existsSync(path)) {
                             puppeteerConfig.executablePath = path;
-                            console.log(`✅ Chrome trouvé hardcodé: ${path}`);
+                            console.log(`✅ Chrome trouvé legacy: ${path}`);
                             foundChrome = true;
                             break;
                         }
                     }
                 }
                 
-                // Méthode 3: Wildcard simple (rapide)
-                if (!foundChrome) {
-                    try {
-                        const wildcardResult = execSync('ls /opt/render/.cache/puppeteer/chrome/*/chrome-linux64/chrome 2>/dev/null | head -1', { 
-                            encoding: 'utf8',
-                            timeout: 5000 // 5 secondes max
-                        }).trim();
-                        if (wildcardResult && fs.existsSync(wildcardResult)) {
-                            puppeteerConfig.executablePath = wildcardResult;
-                            console.log(`✅ Chrome trouvé via wildcard: ${wildcardResult}`);
-                            foundChrome = true;
-                        }
-                    } catch (error) {
-                        console.log(`❌ Wildcard échoué: ${error.message}`);
-                    }
-                }
-                
                 if (!foundChrome) {
                     console.log('❌ Chrome non trouvé, utilisation configuration par défaut');
-                    // Laisser Puppeteer essayer sans executablePath
                 } else {
                     console.log(`🎉 Chrome configuré: ${puppeteerConfig.executablePath}`);
                 }
