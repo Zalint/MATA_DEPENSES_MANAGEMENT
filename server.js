@@ -5965,12 +5965,12 @@ app.put('/api/accounts/:accountId/activate', requireAdminAuth, async (req, res) 
 app.get('/api/users/directors-for-accounts', requireAdminAuth, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT DISTINCT u.id, u.username, u.full_name, 
+            SELECT DISTINCT u.id, u.username, u.full_name, u.role,
                    CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE user_id = u.id AND is_active = true) 
                         THEN true ELSE false END as has_account
             FROM users u 
-            WHERE u.role = 'directeur'
-            ORDER BY u.username
+            WHERE u.role IN ('directeur', 'directeur_general', 'pca')
+            ORDER BY u.role, u.username
         `);
         res.json(result.rows);
     } catch (error) {

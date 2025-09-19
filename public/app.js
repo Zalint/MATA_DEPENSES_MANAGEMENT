@@ -4510,14 +4510,17 @@ async function loadDirectorsForPartnerAssignment() {
         
         // Ajouter les directeurs aux deux listes
         directors.forEach(director => {
+            // Formater le nom avec le rôle
+            const displayName = `${director.full_name || director.username} (${director.role})`;
+            
             const option1 = document.createElement('option');
             option1.value = director.id;
-            option1.textContent = director.full_name || director.username;
+            option1.textContent = displayName;
             select1.appendChild(option1);
             
             const option2 = document.createElement('option');
             option2.value = director.id;
-            option2.textContent = director.full_name || director.username;
+            option2.textContent = displayName;
             select2.appendChild(option2);
         });
         
@@ -4541,14 +4544,17 @@ async function loadDirectorsForCreance() {
         createDirectorSelect.innerHTML = '<option value="">Sélectionner un utilisateur directeur</option>';
         
         directors.forEach(director => {
+            // Formater le nom avec le rôle
+            const displayName = `${director.full_name || director.username} (${director.role})`;
+            
             const option1 = document.createElement('option');
             option1.value = director.id;
-            option1.textContent = director.username;
+            option1.textContent = displayName;
             creanceDirectorSelect.appendChild(option1);
             
             const option2 = document.createElement('option');
             option2.value = director.id;
-            option2.textContent = director.username;
+            option2.textContent = displayName;
             createDirectorSelect.appendChild(option2);
         });
     } catch (error) {
