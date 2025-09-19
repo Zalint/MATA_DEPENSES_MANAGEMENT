@@ -949,6 +949,32 @@
                             <small class="form-help">Permet à un directeur de créditer ce compte en plus du DG/PCA.</small>
                         </div>
 
+                        <!-- Section pour l'assignation des directeurs partenaires -->
+                        <div class="form-group" id="partnerDirectorsGroup" style="display: none;">
+                            <label>Directeurs Assignés (Optionnel)</label>
+                            <div class="directors-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                                <div class="director-field">
+                                    <label class="field-label">
+                                        <i class="fas fa-user-tie me-2"></i>
+                                        Directeur Principal
+                                    </label>
+                                    <select id="partnerDirector1" class="form-select">
+                                        <option value="">Sélectionner un directeur</option>
+                                    </select>
+                                </div>
+                                <div class="director-field">
+                                    <label class="field-label">
+                                        <i class="fas fa-user-friends me-2"></i>
+                                        Directeur Secondaire
+                                    </label>
+                                    <select id="partnerDirector2" class="form-select">
+                                        <option value="">Sélectionner un directeur</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <small class="form-help">Assignez jusqu'à 2 directeurs pour la gestion et validation des livraisons.</small>
+                        </div>
+
                         <!-- Section pour afficher/gérer les permissions (pour la modification) -->
                         <div id="permissionsSection" style="display: none;">
                             <div id="creditPermissionsContainer"></div>
@@ -1087,6 +1113,7 @@
                                         <th>Montant Total</th>
                                         <th>Livré</th>
                                         <th>Restant</th>
+                                        <th>Livraisons</th>
                                         <th>Articles</th>
                                         <th>Progression</th>
                                         <th>Actions</th>

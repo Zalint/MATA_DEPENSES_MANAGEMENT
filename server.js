@@ -414,18 +414,13 @@ async function collecteSnapshotData(cutoffDate = null) {
             
             console.log('🚀 Lancement navigateur...');
             
-            // Configuration Puppeteer pour Render
+            // Configuration Puppeteer corrigée (basée sur le test qui fonctionne)
             const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
             const puppeteerConfig = {
-                headless: true,
+                headless: true, // Toujours en mode headless pour éviter l'ouverture du navigateur
                 args: [
                     '--no-sandbox', 
-                    '--disable-setuid-sandbox', 
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--no-first-run',
-                    '--no-zygote',
-                    '--single-process'
+                    '--disable-setuid-sandbox'
                 ]
             };
             
@@ -502,20 +497,45 @@ async function collecteSnapshotData(cutoffDate = null) {
             const page = await browser.newPage();
             
             // Configuration des credentials pour l'authentification
-            const SNAPSHOT_USERNAME = process.env.SNAPSHOT_USERNAME || 'Saliou';
-            const SNAPSHOT_PASSWORD = process.env.SNAPSHOT_PASSWORD || 'Murex2015';
+            const SNAPSHOT_USERNAME = process.env.SNAPSHOT_USERNAME;
+            const SNAPSHOT_PASSWORD = process.env.SNAPSHOT_PASSWORD;
             
             await page.setExtraHTTPHeaders({
                 'User-Agent': 'Snapshot-Service/1.0'
             });
             
+            // Configuration pour éviter les problèmes de frame
+            await page.setDefaultNavigationTimeout(60000);
+            await page.setDefaultTimeout(30000);
+            
+            // Gestionnaire d'erreurs pour les frames détachées
+            page.on('error', (error) => {
+                console.log(`⚠️ Erreur page: ${error.message}`);
+            });
+            
+            page.on('pageerror', (error) => {
+                console.log(`⚠️ Erreur JavaScript: ${error.message}`);
+            });
+            
             console.log('🔑 Authentification en cours...');
             
             // Étape 1: Aller sur la page principale (SPA avec login intégré)
-            await page.goto(baseUrl, { 
-                waitUntil: 'networkidle0',
-                timeout: 30000 
-            });
+            try {
+                await page.goto(baseUrl, { 
+                    waitUntil: 'networkidle0',
+                    timeout: 60000 
+                });
+            } catch (navError) {
+                console.error('❌ Erreur navigation:', navError.message);
+                console.log('🔄 Tentative avec waitUntil: load...');
+                await page.goto(baseUrl, { 
+                    waitUntil: 'load',
+                    timeout: 60000
+                });
+            }
+            
+            // Attendre un peu pour que la page se stabilise
+            await new Promise(resolve => setTimeout(resolve, 2000));
             
             // Vérifier si on est sur la page de login
             await page.waitForSelector('#login-page', { timeout: 10000 });
@@ -535,45 +555,113 @@ async function collecteSnapshotData(cutoffDate = null) {
             
             // Étape 4: Naviguer vers le dashboard avec cutoff_date
             console.log('📄 Navigation vers dashboard...');
-            await page.goto(dashboardUrl, { 
-                waitUntil: 'networkidle0',
-                timeout: 30000 
-            });
             
-            // Attendre que les éléments importants soient chargés
-            await page.waitForSelector('#pl-estim-charges', { timeout: 10000 });
+            try {
+                await page.goto(dashboardUrl, { 
+                    waitUntil: 'networkidle0',
+                    timeout: 60000 
+                });
+            } catch (navError) {
+                console.error('❌ Erreur navigation dashboard:', navError.message);
+                console.log('🔄 Tentative avec waitUntil: load...');
+                await page.goto(dashboardUrl, { 
+                    waitUntil: 'load',
+                    timeout: 60000
+                });
+            }
+            
+            // Attendre que la page se stabilise
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            // Attendre que les éléments importants soient chargés avec retry
+            let elementFound = false;
+            for (let i = 0; i < 3; i++) {
+                try {
+                    await page.waitForSelector('#pl-estim-charges', { timeout: 15000 });
+                    elementFound = true;
+                    break;
+                } catch (error) {
+                    console.log(`⚠️ Tentative ${i + 1}/3 pour trouver #pl-estim-charges: ${error.message}`);
+                    if (i < 2) {
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        // Essayer de rafraîchir la page si nécessaire
+                        if (error.message.includes('detached') || error.message.includes('timeout')) {
+                            console.log('🔄 Rafraîchissement de la page...');
+                            await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+                        }
+                    }
+                }
+            }
+            
+            if (!elementFound) {
+                throw new Error('Impossible de trouver l\'élément #pl-estim-charges après 3 tentatives');
+            }
             
             console.log('🔍 Extraction des valeurs HTML...');
             
-            // Extraire toutes les valeurs directement depuis le DOM
-            const scrapedData = await page.evaluate(() => {
-                const getValue = (selector) => {
-                    const element = document.querySelector(selector);
-                    return element ? element.textContent.trim() : '0';
-                };
+            // Extraire toutes les valeurs directement depuis le DOM avec vérification de frame
+            let scrapedData;
+            try {
+                // Vérifier que la page est toujours accessible
+                await page.evaluate(() => {
+                    if (!document.body) {
+                        throw new Error('Document body not available');
+                    }
+                });
                 
-                return {
-                    plFinal: getValue('#pl-estim-charges'),
-                    cashBictorys: getValue('#cash-bictorys-latest'),
-                    creancesMois: getValue('#creances-mois'),
-                    totalSpent: getValue('#total-spent-amount'),
-                    stockVivantVariation: getValue('#stock-vivant-variation'),
-                    stockTotal: getValue('#stock-total'),
-                    weeklyBurn: getValue('#weekly-burn'),
-                    monthlyBurn: getValue('#monthly-burn'),
-                    totalRemaining: getValue('#total-remaining-amount'),
-                    totalCredits: getValue('#total-credited-amount'),
-                    depotBalance: getValue('#total-depot-balance'),
-                    partnerBalance: getValue('#total-partner-balance'),
+                scrapedData = await page.evaluate(() => {
+                    const getValue = (selector) => {
+                        const element = document.querySelector(selector);
+                        return element ? element.textContent.trim() : '0';
+                    };
                     
-                    // Éléments du détail PL si disponibles
-                    plBase: getValue('#pl-base-amount'),
-                    plBrut: getValue('#pl-brut-amount'),
-                    chargesProrata: getValue('#charges-prorata-amount')
-                };
-            });
-            
-            await browser.close();
+                    return {
+                        // PL avec écart stock mensuel et estimation charges (valeur principale)
+                        plFinal: getValue('#pl-estim-charges'), // PL (avec ecart stock mensuel et une estim. charges)
+                        plBrut: getValue('#pl-brut'), // PL brut avec écart stock mensuel
+                        plSansStockCharges: getValue('#pl-sans-stock-charges'), // PL sans stock
+                        
+                        cashBictorys: getValue('#cash-bictorys-latest'),
+                        creancesMois: getValue('#creances-mois'),
+                        totalSpent: getValue('#total-spent-amount'),
+                        stockVivantVariation: getValue('#stock-vivant-variation'),
+                        stockTotal: getValue('#stock-total'),
+                        weeklyBurn: getValue('#weekly-burn'),
+                        monthlyBurn: getValue('#monthly-burn'),
+                        totalRemaining: getValue('#total-remaining-amount'),
+                        totalCredits: getValue('#total-credited-amount'),
+                        depotBalance: getValue('#total-depot-balance'),
+                        partnerBalance: getValue('#total-partner-balance'),
+                        
+                        // Éléments du détail PL si disponibles
+                        plBase: getValue('#pl-base-amount'),
+                        plBrut: getValue('#pl-brut-amount'),
+                        chargesProrata: getValue('#charges-prorata-amount')
+                    };
+                });
+                
+                console.log('✅ Extraction HTML réussie');
+                
+                // Debug: Afficher les valeurs brutes scrapées
+                console.log('🔍 === VALEURS SCRAPÉES (BRUTES) ===');
+                console.log(`📊 PL Final (#pl-estim-charges): "${scrapedData.plFinal}"`);
+                console.log(`📊 PL Brut (#pl-brut): "${scrapedData.plBrut}"`);
+                console.log(`📊 PL Sans Stock (#pl-sans-stock-charges): "${scrapedData.plSansStockCharges}"`);
+                console.log(`💰 Cash Bictorys (#cash-bictorys-latest): "${scrapedData.cashBictorys}"`);
+                console.log(`💳 Créances (#creances-mois): "${scrapedData.creancesMois}"`);
+                console.log(`💸 Total Dépensé (#total-spent-amount): "${scrapedData.totalSpent}"`);
+                
+            } catch (error) {
+                console.log(`⚠️ Erreur lors de l'extraction HTML: ${error.message}`);
+                throw new Error(`Erreur extraction HTML: ${error.message}`);
+            } finally {
+                // Fermer le navigateur de manière sécurisée
+                try {
+                    await browser.close();
+                } catch (closeError) {
+                    console.log(`⚠️ Erreur fermeture navigateur: ${closeError.message}`);
+                }
+            }
             
             // Convertir les valeurs extraites
             plDetails = {
@@ -602,11 +690,12 @@ async function collecteSnapshotData(cutoffDate = null) {
             console.log('✅ Valeurs extraites depuis HTML avec succès !');
             
         } catch (error) {
-            console.error('❌ ERREUR CRITIQUE HTML scraping:', error.message);
+            console.error('❌ ERREUR HTML scraping:', error.message);
             console.error('📝 Stack complet:', error.stack);
-            console.error('🚫 PAS DE FALLBACK - HTML scraping est OBLIGATOIRE');
+            console.error('🚨 FALLBACK SUPPRIMÉ - L\'erreur va être propagée');
             
-            throw new Error(`HTML scraping obligatoire échoué: ${error.message}`);
+            // PROPAGER L'ERREUR AU LIEU DU FALLBACK
+            throw new Error(`HTML scraping failed: ${error.message}`);
         }
         
         console.log(`📊 SNAPSHOT PL (source: ${plDetails.source}):`);
@@ -615,8 +704,16 @@ async function collecteSnapshotData(cutoffDate = null) {
         console.log(`  📊 PL Base: ${Math.round(plDetails.plBase || 0).toLocaleString()} FCFA`);
         console.log(`  📊 PL Brut: ${Math.round(plDetails.plBrut || 0).toLocaleString()} FCFA`);
         
-        console.log(`  🌐 Source: Dashboard HTML (${plDetails.baseUrl})`);
-        console.log(`  ✅ Garantie de cohérence avec l'interface utilisateur !`);
+        if (plDetails.source === 'html_scraping') {
+            console.log(`  🌐 Source: Dashboard HTML (${plDetails.baseUrl})`);
+            console.log(`  ✅ Garantie de cohérence avec l'interface utilisateur !`);
+        } else {
+            console.log(`  🔄 Source: Base de données (fallback) - ${plDetails.baseUrl}`);
+            console.log(`  ⚠️ Valeurs estimées (HTML scraping a échoué)`);
+            if (plDetails.error) {
+                console.log(`  📝 Erreur: ${plDetails.error}`);
+            }
+        }
         
         // Créer dashboardStats avec les valeurs scrapées (au lieu des valeurs calculées)
         const dashboardStats = {
@@ -792,6 +889,7 @@ async function collecteSnapshotData(cutoffDate = null) {
                 COALESCE(deliveries.total_delivered, 0) as livre,
                 a.current_balance - COALESCE(deliveries.total_delivered, 0) as restant,
                 COALESCE(deliveries.article_count, 0) as articles,
+                COALESCE(deliveries.delivery_count, 0) as delivery_count,
                 CASE 
                     WHEN a.current_balance > 0 THEN 
                         ROUND((COALESCE(deliveries.total_delivered, 0) * 100.0 / a.current_balance), 1)
@@ -802,7 +900,8 @@ async function collecteSnapshotData(cutoffDate = null) {
                 SELECT 
                     account_id,
                     SUM(CASE WHEN validation_status = 'fully_validated' THEN amount ELSE 0 END) as total_delivered,
-                    SUM(CASE WHEN validation_status = 'fully_validated' THEN article_count ELSE 0 END) as article_count
+                    SUM(CASE WHEN validation_status = 'fully_validated' THEN article_count ELSE 0 END) as article_count,
+                    COUNT(CASE WHEN validation_status = 'fully_validated' THEN 1 ELSE NULL END) as delivery_count
                 FROM partner_deliveries 
                 WHERE delivery_date <= $1
                 GROUP BY account_id
@@ -5549,7 +5648,7 @@ app.get('/', (req, res) => {
 // Route pour créer/assigner un compte à un directeur
 app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
     try {
-        const { user_id, account_name, initial_amount, description, account_type, creditors, category_type, credit_permission_user_id } = req.body;
+        const { user_id, account_name, initial_amount, description, account_type, creditors, category_type, credit_permission_user_id, partner_directors } = req.body;
         const created_by = req.session.user.id;
         
         // Validation du type de compte
@@ -5619,6 +5718,17 @@ app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
                 await pool.query(
                     'INSERT INTO account_creditors (account_id, user_id, creditor_type) VALUES ($1, $2, $3)',
                     [accountResult.rows[0].id, creditor.user_id, creditor.type]
+                );
+            }
+        }
+        
+        // Pour les comptes partenaires, ajouter les directeurs assignés
+        if (finalAccountType === 'partenaire' && partner_directors && partner_directors.length > 0) {
+            console.log(`[API] Assigning ${partner_directors.length} directors to partner account ${newAccount.id}`);
+            for (const directorId of partner_directors) {
+                await pool.query(
+                    'INSERT INTO partner_account_directors (account_id, user_id) VALUES ($1, $2)',
+                    [newAccount.id, directorId]
                 );
             }
         }

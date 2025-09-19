@@ -918,6 +918,7 @@ function renderSnapshotPartners(partnersData) {
                         <th>Montant Total</th>
                         <th>Livré</th>
                         <th>Restant</th>
+                        <th>Livraisons</th>
                         <th>Articles</th>
                         <th>Progression</th>
                     </tr>
@@ -929,6 +930,7 @@ function renderSnapshotPartners(partnersData) {
                             <td>${formatCurrency(compte.montant_total)}</td>
                             <td class="text-success">${formatCurrency(compte.livre)}</td>
                             <td class="text-warning">${formatCurrency(compte.restant)}</td>
+                            <td>${compte.delivery_count || 0}</td>
                             <td>${compte.articles}</td>
                             <td>
                                 <div class="progress" style="height: 20px; position: relative;">

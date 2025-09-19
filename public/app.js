@@ -3856,6 +3856,7 @@ function resetAccountForm() {
     // Masquer les sections spécifiques
     document.getElementById('categoryTypeGroup').style.display = 'none';
     document.getElementById('permissionsSection').style.display = 'none';
+    document.getElementById('partnerDirectorsGroup').style.display = 'none';
     document.getElementById('userSelectGroup').style.display = 'block';
     
     // Rétablir le champ montant initial en mode création
@@ -4099,6 +4100,18 @@ document.addEventListener('DOMContentLoaded', function() {
             const categoryType = document.getElementById('categoryTypeSelect').value;
             // Le type de catégorie est optionnel, on l'ajoute même s'il est vide
             formData.category_type = categoryType || null;
+        }
+        
+        // Pour les comptes partenaires, ajouter les directeurs assignés (optionnel)
+        if (accountType === 'partenaire') {
+            const director1 = document.getElementById('partnerDirector1').value;
+            const director2 = document.getElementById('partnerDirector2').value;
+            const partnerDirectors = [];
+            
+            if (director1) partnerDirectors.push(parseInt(director1));
+            if (director2) partnerDirectors.push(parseInt(director2));
+            
+            formData.partner_directors = partnerDirectors;
         }
         
         if (isEditing) {
@@ -4373,6 +4386,7 @@ function handleAccountTypeChange() {
     const categoryTypeGroup = document.getElementById('categoryTypeGroup');
     const permissionsSection = document.getElementById('permissionsSection');
     const creditPermissionGroup = document.getElementById('creditPermissionGroup');
+    const partnerDirectorsGroup = document.getElementById('partnerDirectorsGroup');
     
     // Gérer l'affichage du champ montant initial
     const initialAmountGroup = document.getElementById('initialAmount')?.closest('.form-group');
@@ -4382,6 +4396,7 @@ function handleAccountTypeChange() {
     categoryTypeGroup.style.display = 'none';
     permissionsSection.style.display = 'none';
     creditPermissionGroup.style.display = 'none';
+    partnerDirectorsGroup.style.display = 'none';
     
     // Rétablir la visibilité du sélecteur d'utilisateur par défaut
     userSelectGroup.style.display = 'block';
@@ -4431,6 +4446,16 @@ function handleAccountTypeChange() {
             break;
             
         case 'partenaire':
+            console.log(`[handleAccountTypeChange] Type is "${accountType}". Showing partner directors section.`);
+            userSelectGroup.style.display = 'none';
+            createDirectorSelect.required = false;
+            partnerDirectorsGroup.style.display = 'block';
+            // Charger les directeurs pour l'assignation
+            loadDirectorsForPartnerAssignment();
+            // Afficher le champ montant initial
+            if (initialAmountGroup) initialAmountGroup.style.display = 'block';
+            break;
+            
         case 'statut':
         case 'Ajustement':
         case 'depot':
@@ -4467,6 +4492,38 @@ async function loadDirectorsForCreditPermission() {
 
     } catch (error) {
         console.error('Erreur chargement directeurs pour permission:', error);
+    }
+}
+
+async function loadDirectorsForPartnerAssignment() {
+    try {
+        const response = await fetch('/api/users/directors-for-accounts');
+        if (!response.ok) throw new Error('Failed to fetch directors');
+        const directors = await response.json();
+        
+        const select1 = document.getElementById('partnerDirector1');
+        const select2 = document.getElementById('partnerDirector2');
+        
+        // Réinitialiser les listes
+        select1.innerHTML = '<option value="">Sélectionner un directeur</option>';
+        select2.innerHTML = '<option value="">Sélectionner un directeur</option>';
+        
+        // Ajouter les directeurs aux deux listes
+        directors.forEach(director => {
+            const option1 = document.createElement('option');
+            option1.value = director.id;
+            option1.textContent = director.full_name || director.username;
+            select1.appendChild(option1);
+            
+            const option2 = document.createElement('option');
+            option2.value = director.id;
+            option2.textContent = director.full_name || director.username;
+            select2.appendChild(option2);
+        });
+        
+        console.log('[loadDirectorsForPartnerAssignment] Successfully populated directors for partner assignment.');
+    } catch (error) {
+        console.error('Erreur chargement directeurs pour assignation partenaire:', error);
     }
 }
 
@@ -6508,7 +6565,7 @@ function displayPartnerSummary(partnerSummary) {
     tbody.innerHTML = '';
     
     if (partnerSummary.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">Aucun compte partenaire trouvé</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">Aucun compte partenaire trouvé</td></tr>';
         return;
     }
     
@@ -6522,6 +6579,7 @@ function displayPartnerSummary(partnerSummary) {
             <td>${formatCurrency(account.total_credited)}</td>
             <td>${formatCurrency(account.total_delivered)}</td>
             <td>${formatCurrency(remaining)}</td>
+            <td>${account.delivery_count || 0}</td>
             <td>${account.total_articles}</td>
             <td>
                 <div class="partner-progress">
