@@ -11,6 +11,11 @@ $env:DB_NAME="depenses_management_preprod"
 $env:DB_USER="zalint"
 $env:DB_PASSWORD="bonea2024"
 
+# Variables d'environnement pour les snapshots Puppeteer
+$env:SNAPSHOT_USERNAME="Saliou"
+$env:SNAPSHOT_PASSWORD="Murex2015"
+
+
 # Démarrage du serveur
 Write-Host "Démarrage de l'application Mata Dépenses Management en mode préprod..." -ForegroundColor Green
 Write-Host "Base de données: $env:DB_NAME sur $env:DB_HOST:$env:DB_PORT" -ForegroundColor Cyan
