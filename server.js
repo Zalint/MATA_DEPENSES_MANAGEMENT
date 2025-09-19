@@ -6237,7 +6237,7 @@ app.post('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => 
             INSERT INTO partner_deliveries (account_id, delivery_date, article_count, unit_price, amount, description, created_by)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING *
-        `, [accountId, delivery_date, parseInt(article_count), parseInt(unit_price), parseInt(amount), description, created_by]);
+        `, [accountId, delivery_date, parseFloat(article_count), parseFloat(unit_price), parseFloat(amount), description, created_by]);
         
         res.json({ 
             message: 'Livraison ajoutée avec succès (en attente de validation)', 

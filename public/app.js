@@ -6510,7 +6510,7 @@ function calculateDeliveryAmount() {
     const amountField = document.getElementById('delivery-amount');
     
     if (articleCount && unitPrice) {
-        const calculatedAmount = parseInt(articleCount) * parseInt(unitPrice);
+        const calculatedAmount = parseFloat(articleCount) * parseFloat(unitPrice);
         amountField.value = calculatedAmount;
         amountField.placeholder = `${calculatedAmount} FCFA (calculé)`;
     } else {
@@ -6527,9 +6527,9 @@ function setupPartnerEventListeners() {
             const accountId = document.getElementById('delivery-account-id').value;
             const formData = {
                 delivery_date: document.getElementById('delivery-date').value,
-                article_count: parseInt(document.getElementById('delivery-article-count').value),
-                unit_price: parseInt(document.getElementById('delivery-unit-price').value),
-                amount: parseInt(document.getElementById('delivery-amount').value),
+                article_count: parseFloat(document.getElementById('delivery-article-count').value),
+                unit_price: parseFloat(document.getElementById('delivery-unit-price').value),
+                amount: parseFloat(document.getElementById('delivery-amount').value),
                 description: document.getElementById('delivery-description').value
             };
             addPartnerDelivery(accountId, formData);
@@ -16303,8 +16303,8 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Function to calculate and update the total amount
     function calculateTotalAmount() {
-        const articleCount = parseInt(articleCountInput.value) || 0;
-        const unitPrice = parseInt(unitPriceInput.value) || 0;
+        const articleCount = parseFloat(articleCountInput.value) || 0;
+        const unitPrice = parseFloat(unitPriceInput.value) || 0;
         
         // Only auto-calculate if amount hasn't been manually edited
         if (!isAmountManuallyEdited && articleCount > 0 && unitPrice > 0) {
