@@ -3763,7 +3763,16 @@ async function loadAccountBalance() {
 // Fonction pour charger tous les directeurs pour la création de comptes
 async function loadUsersWithoutAccount() {
     try {
-        const response = await fetch('/api/users');
+        // Détecter le type de compte sélectionné
+        const accountType = document.getElementById('accountType').value;
+        
+        // Choisir la bonne API selon le type de compte
+        let apiEndpoint = '/api/users/directors-only'; // Par défaut : seulement les directeurs
+        if (accountType === 'partenaire') {
+            apiEndpoint = '/api/users/directors-for-accounts'; // Partenaire : tous les directeurs
+        }
+        
+        const response = await fetch(apiEndpoint);
         const users = await response.json();
         
         const userSelect = document.getElementById('createDirectorSelect');
@@ -3772,9 +3781,13 @@ async function loadUsersWithoutAccount() {
         users.forEach(user => {
             const option = document.createElement('option');
             option.value = user.id;
-            option.textContent = user.username;
+            // Afficher le nom complet avec le rôle
+            const displayName = `${user.full_name || user.username} (${user.role})`;
+            option.textContent = displayName;
             userSelect.appendChild(option);
         });
+        
+        console.log(`[loadUsersWithoutAccount] Loaded ${users.length} users for account type: ${accountType}`);
     } catch (error) {
         console.error('Erreur chargement utilisateurs directeurs:', error);
     }
@@ -4435,6 +4448,8 @@ function handleAccountTypeChange() {
             // permissionsSection.style.display = 'block';
             loadCategoryTypes(); // Charger les types de catégories
             loadDirectorsForCreditPermission(); // Charger les directeurs pour la permission
+            // Recharger les utilisateurs selon le type de compte (directeurs seulement)
+            loadUsersWithoutAccount();
             break;
             
         case 'creance':
@@ -4443,6 +4458,8 @@ function handleAccountTypeChange() {
             // Mais sans les options de catégorie et permission de crédit
             // Masquer le champ montant initial car le crédit est géré par client
             if (initialAmountGroup) initialAmountGroup.style.display = 'none';
+            // Recharger les utilisateurs selon le type de compte (directeurs seulement)
+            loadUsersWithoutAccount();
             break;
             
         case 'partenaire':
@@ -4469,6 +4486,8 @@ function handleAccountTypeChange() {
         default:
             // Pour les types non reconnus, afficher le montant initial par défaut
             if (initialAmountGroup) initialAmountGroup.style.display = 'block';
+            // Recharger les utilisateurs selon le type de compte (directeurs seulement)
+            loadUsersWithoutAccount();
             break;
     }
 }
@@ -4575,8 +4594,8 @@ async function handleCreditAccountChange() {
     historyBody.innerHTML = '';
     
     if (!accountId) {
-        // Remettre la restriction par défaut
-        amountInput.setAttribute('min', '1');
+        // Autoriser les montants négatifs par défaut
+        amountInput.removeAttribute('min');
         amountHelp.style.display = 'none';
         return;
     }
@@ -4587,13 +4606,13 @@ async function handleCreditAccountChange() {
         const accountType = selectedOption.dataset?.accountType;
         
         // Adapter le formulaire selon le type de compte
+        // Autoriser les montants négatifs pour tous les types de comptes
+        amountInput.removeAttribute('min');
+        
         if (accountType === 'statut') {
-            // Autoriser les montants négatifs pour les comptes statut
-            amountInput.removeAttribute('min');
+            // Afficher l'aide spécifique pour les comptes statut
             amountHelp.style.display = 'block';
         } else {
-            // Remettre la restriction pour les autres types
-            amountInput.setAttribute('min', '1');
             amountHelp.style.display = 'none';
         }
 
@@ -8235,51 +8254,80 @@ async function loadTransfertAccounts() {
     const sourceSelect = document.getElementById('transfert-source');
     const destSelect = document.getElementById('transfert-destination');
     if (!sourceSelect || !destSelect) return;
-    sourceSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
-    destSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
+    
+    // Protection contre les appels multiples
+    if (sourceSelect.dataset.loading === 'true') {
+        console.log('[Transfert] Chargement déjà en cours, ignoré');
+        return;
+    }
+    sourceSelect.dataset.loading = 'true';
+    
+    // Vider complètement les selects pour éviter les doublons
+    sourceSelect.innerHTML = '';
+    destSelect.innerHTML = '';
+    
+    // Ajouter l'option par défaut
+    const defaultOption1 = new Option('Sélectionner un compte', '');
+    const defaultOption2 = new Option('Sélectionner un compte', '');
+    sourceSelect.appendChild(defaultOption1);
+    destSelect.appendChild(defaultOption2);
+    
     try {
         const resp = await fetch('/api/accounts');
         const accounts = await resp.json();
-        console.log('[Transfert] Comptes reçus:', accounts);
+        console.log('[Transfert] Comptes reçus:', accounts.length, 'comptes');
+        
         // Filtrer les comptes autorisés
         const allowedTypes = ['classique', 'statut', 'Ajustement'];
         const filtered = accounts.filter(acc => allowedTypes.includes(acc.account_type) && acc.is_active);
+        console.log('[Transfert] Comptes filtrés:', filtered.length, 'comptes autorisés');
+        
         filtered.forEach(acc => {
-            const opt1 = document.createElement('option');
-            opt1.value = acc.id;
-            opt1.textContent = acc.account_name + ' (' + parseInt(acc.current_balance).toLocaleString() + ' FCFA)';
+            const optionText = acc.account_name + ' (' + parseInt(acc.current_balance).toLocaleString() + ' FCFA)';
+            
+            // Option pour le select source
+            const opt1 = new Option(optionText, acc.id);
             opt1.dataset.solde = acc.current_balance;
             sourceSelect.appendChild(opt1);
-            const opt2 = document.createElement('option');
-            opt2.value = acc.id;
-            opt2.textContent = acc.account_name + ' (' + parseInt(acc.current_balance).toLocaleString() + ' FCFA)';
+            
+            // Option pour le select destination
+            const opt2 = new Option(optionText, acc.id);
             destSelect.appendChild(opt2);
-            console.log('[Transfert] Option ajoutée:', acc.account_name, acc.current_balance);
         });
-        // Empêcher de choisir le même compte
-        sourceSelect.addEventListener('change', function() {
-            const val = this.value;
-            Array.from(destSelect.options).forEach(opt => {
-                opt.disabled = (opt.value === val && val !== '');
-            });
-            // Afficher le solde du compte source
-            const soldeInfo = document.getElementById('solde-source-info');
-            if (soldeInfo) {
-                const opt = this.options[this.selectedIndex];
-                if (opt && opt.dataset.solde) {
-                    soldeInfo.textContent = 'Solde disponible : ' + parseInt(opt.dataset.solde).toLocaleString() + ' FCFA';
-                    soldeInfo.style.display = 'block';
-                    console.log('[Transfert] Solde affiché pour', opt.textContent, ':', opt.dataset.solde);
-                } else {
-                    soldeInfo.style.display = 'none';
+        
+        console.log('[Transfert] Options ajoutées:', filtered.length, 'comptes dans chaque select');
+        
+        // Attacher les événements UNE SEULE FOIS avec protection
+        if (!sourceSelect.dataset.eventsAttached) {
+            // Empêcher de choisir le même compte
+            sourceSelect.addEventListener('change', function() {
+                const val = this.value;
+                Array.from(destSelect.options).forEach(opt => {
+                    opt.disabled = (opt.value === val && val !== '');
+                });
+                // Afficher le solde du compte source
+                const soldeInfo = document.getElementById('solde-source-info');
+                if (soldeInfo) {
+                    const opt = this.options[this.selectedIndex];
+                    if (opt && opt.dataset.solde) {
+                        soldeInfo.textContent = 'Solde disponible : ' + parseInt(opt.dataset.solde).toLocaleString() + ' FCFA';
+                        soldeInfo.style.display = 'block';
+                        console.log('[Transfert] Solde affiché pour', opt.textContent, ':', opt.dataset.solde);
+                    } else {
+                        soldeInfo.style.display = 'none';
+                    }
                 }
-            }
-        });
-        // Réinitialiser le solde info si on change de compte destination
-        destSelect.addEventListener('change', function() {
-            const soldeInfo = document.getElementById('solde-source-info');
-            if (soldeInfo) soldeInfo.style.display = 'block';
-        });
+            });
+            
+            // Réinitialiser le solde info si on change de compte destination
+            destSelect.addEventListener('change', function() {
+                const soldeInfo = document.getElementById('solde-source-info');
+                if (soldeInfo) soldeInfo.style.display = 'block';
+            });
+            
+            sourceSelect.dataset.eventsAttached = 'true';
+            console.log('[Transfert] Event listeners attachés');
+        }
         
         // Charger les comptes pour l'historique
         await loadTransfertHistoryAccounts();
@@ -8289,6 +8337,11 @@ async function loadTransfertAccounts() {
         
     } catch (e) {
         console.error('[Transfert] Erreur chargement comptes transfert:', e);
+    } finally {
+        // Libérer le flag de chargement avec un petit délai pour éviter les appels rapides
+        setTimeout(() => {
+            sourceSelect.dataset.loading = 'false';
+        }, 100);
     }
 }
 
@@ -9285,8 +9338,8 @@ async function loadDirectorCreditableAccounts() {
                     amountInput.removeAttribute('min');
                     amountHelp.style.display = 'block';
                 } else {
-                    // Remettre la restriction pour les autres types
-                    amountInput.setAttribute('min', '1');
+                    // Autoriser les montants négatifs pour tous les types de comptes
+                    amountInput.removeAttribute('min');
                     amountHelp.style.display = 'none';
                 }
                 
@@ -9295,8 +9348,8 @@ async function loadDirectorCreditableAccounts() {
             } else {
                 helpText.style.display = 'none';
                 amountHelp.style.display = 'none';
-                // Remettre la restriction par défaut
-                amountInput.setAttribute('min', '1');
+                // Autoriser les montants négatifs par défaut
+                amountInput.removeAttribute('min');
             }
         });
         

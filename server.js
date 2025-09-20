@@ -5979,6 +5979,24 @@ app.get('/api/users/directors-for-accounts', requireAdminAuth, async (req, res) 
     }
 });
 
+// Route pour obtenir seulement les directeurs (pas directeur_general ni pca)
+app.get('/api/users/directors-only', requireAdminAuth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT DISTINCT u.id, u.username, u.full_name, u.role,
+                   CASE WHEN EXISTS(SELECT 1 FROM accounts WHERE user_id = u.id AND is_active = true) 
+                        THEN true ELSE false END as has_account
+            FROM users u 
+            WHERE u.role = 'directeur'
+            ORDER BY u.username
+        `);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur récupération directeurs seulement:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
 // Route pour obtenir les directeurs sans compte
 app.get('/api/users/without-account', requireAdminAuth, async (req, res) => {
     try {
