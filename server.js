@@ -1068,10 +1068,10 @@ app.use((req, res, next) => {
 });
 
 // Configuration de la base de données PostgreSQL
-// Priorité à la variable URL (Render.com), sinon paramètres séparés
-const dbConfig = process.env.URL ? {
-    // Configuration via URL complète (Render.com)
-    connectionString: process.env.URL,
+// Priorité à DATABASE_URL (URL complète), sinon paramètres séparés
+const dbConfig = process.env.DATABASE_URL ? {
+    // Configuration via URL complète (Render.com/Production)
+    connectionString: process.env.DATABASE_URL,
     ssl: { rejectUnauthorized: false },
     // Configuration optimisée pour Render.com
     max: 5, // Maximum 5 connexions dans le pool
@@ -1084,7 +1084,7 @@ const dbConfig = process.env.URL ? {
     statement_timeout: 60000, // 1 minute pour les requêtes
     query_timeout: 60000 // 1 minute pour les requêtes
 } : {
-    // Configuration via paramètres séparés (fallback)
+    // Configuration via paramètres séparés (développement/fallback)
     user: process.env.DB_USER || 'zalint',
     host: process.env.DB_HOST || 'localhost',
     database: process.env.DB_NAME || 'depenses_management',
@@ -1098,7 +1098,7 @@ const dbConfig = process.env.URL ? {
     idleTimeoutMillis: 30000
 };
 
-console.log('🔗 Configuration DB:', process.env.URL ? 'URL complète (Render.com)' : 'Paramètres séparés');
+console.log('🔗 Configuration DB:', process.env.DATABASE_URL ? 'DATABASE_URL (Production)' : 'Paramètres séparés (Dev)');
 const pool = new Pool(dbConfig);
 
 // Gestionnaires d'événements pour le pool de connexions
