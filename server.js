@@ -1073,10 +1073,16 @@ const dbConfig = process.env.URL ? {
     // Configuration via URL complète (Render.com)
     connectionString: process.env.URL,
     ssl: { rejectUnauthorized: false },
-    statement_timeout: 300000, // 5 minutes pour les requêtes longues
-    query_timeout: 300000, // 5 minutes pour les requêtes longues
-    connectionTimeoutMillis: 60000, // 1 minute pour la connexion
-    idleTimeoutMillis: 30000 // 30 secondes pour les connexions inactives
+    // Configuration optimisée pour Render.com
+    max: 5, // Maximum 5 connexions dans le pool
+    min: 1, // Minimum 1 connexion
+    acquireTimeoutMillis: 30000, // 30 secondes pour acquérir une connexion
+    createTimeoutMillis: 30000, // 30 secondes pour créer une connexion
+    destroyTimeoutMillis: 5000, // 5 secondes pour détruire une connexion
+    idleTimeoutMillis: 10000, // 10 secondes pour les connexions inactives
+    createRetryIntervalMillis: 500, // 0.5 seconde entre les tentatives
+    statement_timeout: 60000, // 1 minute pour les requêtes
+    query_timeout: 60000 // 1 minute pour les requêtes
 } : {
     // Configuration via paramètres séparés (fallback)
     user: process.env.DB_USER || 'zalint',
@@ -1085,46 +1091,32 @@ const dbConfig = process.env.URL ? {
     password: process.env.DB_PASSWORD || 'bonea2024',
     port: process.env.DB_PORT || 5432,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    statement_timeout: 300000, // 5 minutes pour les requêtes longues
-    query_timeout: 300000, // 5 minutes pour les requêtes longues
-    connectionTimeoutMillis: 60000, // 1 minute pour la connexion
-    idleTimeoutMillis: 30000 // 30 secondes pour les connexions inactives
+    max: 10, // Plus de connexions en local
+    statement_timeout: 300000,
+    query_timeout: 300000,
+    connectionTimeoutMillis: 60000,
+    idleTimeoutMillis: 30000
 };
 
 console.log('🔗 Configuration DB:', process.env.URL ? 'URL complète (Render.com)' : 'Paramètres séparés');
 const pool = new Pool(dbConfig);
 
-// Fonction utilitaire pour vérifier l'existence des tables critiques
-async function verifyTablesExist() {
-    try {
-        const criticalTables = [
-            'users', 'accounts', 'expenses', 'transfer_history', 
-            'dashboard_snapshots', 'creance_clients', 'cash_bictorys_mensuel'
-        ];
-        
-        for (const tableName of criticalTables) {
-            const result = await pool.query(
-                `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)`,
-                [tableName]
-            );
-            
-            if (result.rows[0].exists) {
-                console.log(`✅ Table ${tableName} exists`);
-            } else {
-                console.warn(`⚠️ Table ${tableName} NOT FOUND!`);
-            }
-        }
-        
-        console.log('🏁 Table verification completed');
-    } catch (error) {
-        console.error('❌ Error checking tables:', error.message);
-    }
-}
+// Gestionnaires d'événements pour le pool de connexions
+pool.on('connect', (client) => {
+    console.log('🔗 Database client connected');
+});
 
-// Vérifier les tables au démarrage (en arrière-plan)
-setTimeout(() => {
-    verifyTablesExist().catch(console.error);
-}, 5000); // Délai de 5 secondes pour laisser l'app se stabiliser
+pool.on('error', (err, client) => {
+    console.error('❌ Database pool error:', err);
+});
+
+pool.on('remove', (client) => {
+    console.log('🔌 Database client removed from pool');
+});
+
+// DÉSACTIVÉ: Fonction de vérification des tables (causait des timeouts en production)
+// La vérification sera faite uniquement si nécessaire via des requêtes normales
+console.log('ℹ️ Table verification disabled to prevent connection timeouts');
 
 // Fonction utilitaire pour déterminer l'URL de l'application
 function getAppBaseUrl(req = null) {
@@ -10600,48 +10592,9 @@ app.get('/api/montant-debut-mois/stats/:year/:month', requireAdminAuth, async (r
 
 // Créer les tables pour les créances si elles n'existent pas
 async function createCreanceTablesIfNotExists() {
-    try {
-        // Table pour les clients des comptes créance
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS creance_clients (
-                id SERIAL PRIMARY KEY,
-                account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
-                client_name VARCHAR(255) NOT NULL,
-                client_phone VARCHAR(50),
-                client_address TEXT,
-                initial_credit INTEGER DEFAULT 0,
-                created_by INTEGER REFERENCES users(id),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                is_active BOOLEAN DEFAULT true
-            )
-        `);
-
-        // Créer un index unique partiel pour les clients actifs seulement
-        await pool.query(`
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_creance_clients_unique_active
-            ON creance_clients (account_id, client_name) 
-            WHERE is_active = true
-        `);
-
-        // Table pour les opérations créance (avances/remboursements)
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS creance_operations (
-                id SERIAL PRIMARY KEY,
-                account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
-                client_id INTEGER REFERENCES creance_clients(id) ON DELETE CASCADE,
-                operation_type VARCHAR(10) NOT NULL CHECK (operation_type IN ('credit', 'debit')),
-                amount INTEGER NOT NULL,
-                operation_date DATE NOT NULL,
-                description TEXT,
-                created_by INTEGER REFERENCES users(id),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        `);
-
-        console.log('Tables créance créées avec succès');
-    } catch (error) {
-        console.error('Erreur création tables créance:', error);
-    }
+    // FONCTION DÉSACTIVÉE: Tables créées par render_volaille_database_schema.sql
+    console.log('ℹ️ Creance tables creation SKIPPED - tables already exist from SQL script');
+    return; // Pas de création de tables
 }
 
 // DÉSACTIVÉ: Les tables sont créées par render_volaille_database_schema.sql
@@ -11379,28 +11332,9 @@ app.delete('/api/creance/:accountId/clients/:clientId', requireStrictAdminAuth, 
 
 // Créer la table Cash Bictorys si elle n'existe pas
 async function createCashBictorysTableIfNotExists() {
-    try {
-        // Créer la table uniquement si elle n'existe pas (PRÉSERVE LES DONNÉES)
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS cash_bictorys (
-                id SERIAL PRIMARY KEY,
-                date DATE NOT NULL,
-                amount INTEGER DEFAULT 0,
-                balance INTEGER DEFAULT 0,
-                fees INTEGER DEFAULT 0,
-                month_year VARCHAR(7) NOT NULL, -- Format YYYY-MM
-                created_by INTEGER REFERENCES users(id),
-                updated_by INTEGER REFERENCES users(id),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(date)
-            )
-        `);
-
-        console.log('Table cash_bictorys vérifiée/créée avec succès (données préservées)');
-    } catch (error) {
-        console.error('Erreur création table cash_bictorys:', error);
-    }
+    // FONCTION DÉSACTIVÉE: Tables créées par render_volaille_database_schema.sql
+    console.log('ℹ️ Cash Bictorys table creation SKIPPED - table already exists from SQL script');
+    return; // Pas de création de tables
 }
 
 // DÉSACTIVÉ: Les tables sont créées par render_volaille_database_schema.sql
@@ -12596,82 +12530,9 @@ app.get('/api/dashboard/stock-vivant-variation', requireAuth, async (req, res) =
 
 // Créer la table dashboard_snapshots au démarrage
 async function createDashboardSnapshotsTable() {
-    try {
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS dashboard_snapshots (
-                id SERIAL PRIMARY KEY,
-                snapshot_date DATE NOT NULL,
-                
-                -- Données financières
-                total_spent_amount DECIMAL(15,2) DEFAULT 0,
-                total_remaining_amount DECIMAL(15,2) DEFAULT 0,
-                total_credited_with_expenses DECIMAL(15,2) DEFAULT 0,
-                total_credited_general DECIMAL(15,2) DEFAULT 0,
-                
-                -- Cash et créances
-                cash_bictorys_amount DECIMAL(15,2) DEFAULT 0,
-                creances_total DECIMAL(15,2) DEFAULT 0,
-                creances_mois DECIMAL(15,2) DEFAULT 0,
-                
-                -- Livraisons partenaires
-                livraisons_partenaires DECIMAL(15,2) DEFAULT 0,
-                
-                -- Stock
-                stock_point_vente DECIMAL(15,2) DEFAULT 0,
-                stock_vivant_total DECIMAL(15,2) DEFAULT 0,
-                stock_vivant_variation DECIMAL(15,2) DEFAULT 0,
-                
-                -- Cash Burn
-                daily_burn DECIMAL(15,2) DEFAULT 0,
-                weekly_burn DECIMAL(15,2) DEFAULT 0,
-                monthly_burn DECIMAL(15,2) DEFAULT 0,
-                
-                -- PL et soldes
-                solde_depot DECIMAL(15,2) DEFAULT 0,
-                solde_partner DECIMAL(15,2) DEFAULT 0,
-                solde_general DECIMAL(15,2) DEFAULT 0,
-                
-                -- Métadonnées
-                created_by VARCHAR(100),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                notes TEXT,
-                
-                -- Index sur la date pour les requêtes de visualisation
-                UNIQUE(snapshot_date)
-            )
-        `);
-        
-        await pool.query(`
-            CREATE INDEX IF NOT EXISTS idx_dashboard_snapshots_date ON dashboard_snapshots(snapshot_date)
-        `);
-        
-        // Ajouter la colonne livraisons_partenaires si elle n'existe pas
-        try {
-            await pool.query(`
-                ALTER TABLE dashboard_snapshots 
-                ADD COLUMN IF NOT EXISTS livraisons_partenaires DECIMAL(15,2) DEFAULT 0
-            `);
-            console.log('✅ Colonne livraisons_partenaires ajoutée/vérifiée');
-        } catch (error) {
-            console.log('ℹ️ Colonne livraisons_partenaires déjà présente ou erreur:', error.message);
-        }
-        
-        // Ajouter la colonne pl_final si elle n'existe pas
-        try {
-            await pool.query(`
-                ALTER TABLE dashboard_snapshots 
-                ADD COLUMN IF NOT EXISTS pl_final DECIMAL(15,2) DEFAULT 0
-            `);
-            console.log('✅ Colonne pl_final ajoutée/vérifiée');
-        } catch (error) {
-            console.log('ℹ️ Colonne pl_final déjà présente ou erreur:', error.message);
-        }
-        
-        console.log('✅ Table dashboard_snapshots créée/vérifiée');
-        
-    } catch (error) {
-        console.error('❌ Erreur création table dashboard_snapshots:', error);
-    }
+    // FONCTION DÉSACTIVÉE: Tables créées par render_volaille_database_schema.sql
+    console.log('ℹ️ Dashboard snapshots table creation SKIPPED - table already exists from SQL script');
+    return; // Pas de création de tables
 }
 // Route pour sauvegarder un snapshot du tableau de bord
 app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
