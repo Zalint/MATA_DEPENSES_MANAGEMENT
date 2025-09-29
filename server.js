@@ -1094,6 +1094,38 @@ const dbConfig = process.env.URL ? {
 console.log('🔗 Configuration DB:', process.env.URL ? 'URL complète (Render.com)' : 'Paramètres séparés');
 const pool = new Pool(dbConfig);
 
+// Fonction utilitaire pour vérifier l'existence des tables critiques
+async function verifyTablesExist() {
+    try {
+        const criticalTables = [
+            'users', 'accounts', 'expenses', 'transfer_history', 
+            'dashboard_snapshots', 'creance_clients', 'cash_bictorys_mensuel'
+        ];
+        
+        for (const tableName of criticalTables) {
+            const result = await pool.query(
+                `SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = $1)`,
+                [tableName]
+            );
+            
+            if (result.rows[0].exists) {
+                console.log(`✅ Table ${tableName} exists`);
+            } else {
+                console.warn(`⚠️ Table ${tableName} NOT FOUND!`);
+            }
+        }
+        
+        console.log('🏁 Table verification completed');
+    } catch (error) {
+        console.error('❌ Error checking tables:', error.message);
+    }
+}
+
+// Vérifier les tables au démarrage (en arrière-plan)
+setTimeout(() => {
+    verifyTablesExist().catch(console.error);
+}, 5000); // Délai de 5 secondes pour laisser l'app se stabiliser
+
 // Fonction utilitaire pour déterminer l'URL de l'application
 function getAppBaseUrl(req = null) {
     // 1. Priorité: Variable d'environnement explicite
@@ -9512,22 +9544,11 @@ app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
         await pool.query('UPDATE accounts SET current_balance = current_balance - $1, total_spent = total_spent + $1 WHERE id = $2', [montantInt, source_id]);
         // Créditer le compte destination
         await pool.query('UPDATE accounts SET current_balance = current_balance + $1, total_credited = total_credited + $1 WHERE id = $2', [montantInt, destination_id]);
-        // Journaliser le transfert (créer la table si besoin)
-        await pool.query(`CREATE TABLE IF NOT EXISTS transfer_history (
-            id SERIAL PRIMARY KEY,
-            source_id INTEGER REFERENCES accounts(id),
-            destination_id INTEGER REFERENCES accounts(id),
-            montant INTEGER NOT NULL,
-            comment TEXT,
-            transferred_by INTEGER REFERENCES users(id),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )`);
+        // Journaliser le transfert - Table créée par render_volaille_database_schema.sql
+        // DÉSACTIVÉ: CREATE TABLE transfer_history (évite les timeouts en production)
         
-        // Ajouter la colonne comment si elle n'existe pas déjà
-        await pool.query(`
-            ALTER TABLE transfer_history 
-            ADD COLUMN IF NOT EXISTS comment TEXT
-        `);
+        // DÉSACTIVÉ: Colonne comment déjà présente dans le script SQL
+        // await pool.query(`ALTER TABLE transfer_history ADD COLUMN IF NOT EXISTS comment TEXT`);
         
         await pool.query('INSERT INTO transfer_history (source_id, destination_id, montant, comment, transferred_by) VALUES ($1, $2, $3, $4, $5)', [source_id, destination_id, montantInt, comment || null, req.session.user.id]);
         // Vérifier les soldes après
@@ -10623,11 +10644,13 @@ async function createCreanceTablesIfNotExists() {
     }
 }
 
-// Initialiser les tables créance au démarrage
-createCreanceTablesIfNotExists();
+// DÉSACTIVÉ: Les tables sont créées par render_volaille_database_schema.sql
+// createCreanceTablesIfNotExists();
+console.log('ℹ️ Automatic table creation disabled: creance tables managed by SQL script');
 
-// Initialiser la table dashboard_snapshots au démarrage
-createDashboardSnapshotsTable();
+// DÉSACTIVÉ: Les tables sont créées par render_volaille_database_schema.sql  
+// createDashboardSnapshotsTable();
+console.log('ℹ️ Automatic table creation disabled: dashboard_snapshots managed by SQL script');
 
 // Route pour obtenir les comptes créance accessibles à l'utilisateur
 app.get('/api/creance/accounts', requireAuth, async (req, res) => {
@@ -11380,8 +11403,9 @@ async function createCashBictorysTableIfNotExists() {
     }
 }
 
-// Initialiser la table au démarrage
-createCashBictorysTableIfNotExists();
+// DÉSACTIVÉ: Les tables sont créées par render_volaille_database_schema.sql
+// createCashBictorysTableIfNotExists();
+console.log('ℹ️ Automatic table creation disabled: cash_bictorys managed by SQL script');
 
 // Middleware pour vérifier les permissions Cash Bictorys (Tous les utilisateurs connectés)
 const requireCashBictorysAuth = (req, res, next) => {
