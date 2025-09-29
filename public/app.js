@@ -62,8 +62,8 @@ if (isDevelopment) {
         // Environnement de production
         return {
             environment: 'production', 
-            baseUrl: 'https://mata-depenses-management.onrender.com',
-            apiUrl: 'https://mata-depenses-management.onrender.com/api'
+            baseUrl: window.location.origin,
+            apiUrl: window.location.origin + '/api'
         };
     }
 }

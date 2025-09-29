@@ -386,10 +386,7 @@ async function collecteSnapshotData(cutoffDate = null) {
         console.log('🔍 DEBUG: Tentative HTML scraping dans le contexte snapshot');
         
         // Déterminer l'URL base selon l'environnement
-        const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
-        const baseUrl = isProduction 
-            ? 'https://mata-depenses-management.onrender.com'
-            : `http://localhost:${process.env.PORT || 3000}`;
+        const baseUrl = getAppBaseUrl();
         
         const dashboardUrl = `${baseUrl}?cutoff_date=${snapshotDate}`;
         console.log(`🔍 URL dashboard: ${dashboardUrl}`);
@@ -1071,7 +1068,17 @@ app.use((req, res, next) => {
 });
 
 // Configuration de la base de données PostgreSQL
-const pool = new Pool({
+// Priorité à la variable URL (Render.com), sinon paramètres séparés
+const dbConfig = process.env.URL ? {
+    // Configuration via URL complète (Render.com)
+    connectionString: process.env.URL,
+    ssl: { rejectUnauthorized: false },
+    statement_timeout: 300000, // 5 minutes pour les requêtes longues
+    query_timeout: 300000, // 5 minutes pour les requêtes longues
+    connectionTimeoutMillis: 60000, // 1 minute pour la connexion
+    idleTimeoutMillis: 30000 // 30 secondes pour les connexions inactives
+} : {
+    // Configuration via paramètres séparés (fallback)
     user: process.env.DB_USER || 'zalint',
     host: process.env.DB_HOST || 'localhost',
     database: process.env.DB_NAME || 'depenses_management',
@@ -1082,7 +1089,41 @@ const pool = new Pool({
     query_timeout: 300000, // 5 minutes pour les requêtes longues
     connectionTimeoutMillis: 60000, // 1 minute pour la connexion
     idleTimeoutMillis: 30000 // 30 secondes pour les connexions inactives
-});
+};
+
+console.log('🔗 Configuration DB:', process.env.URL ? 'URL complète (Render.com)' : 'Paramètres séparés');
+const pool = new Pool(dbConfig);
+
+// Fonction utilitaire pour déterminer l'URL de l'application
+function getAppBaseUrl(req = null) {
+    // 1. Priorité: Variable d'environnement explicite
+    if (process.env.APP_URL) {
+        return process.env.APP_URL;
+    }
+    
+    // 2. Variable Render automatique
+    if (process.env.RENDER_EXTERNAL_URL) {
+        return process.env.RENDER_EXTERNAL_URL;
+    }
+    
+    // 3. Si on a une requête HTTP, construire l'URL dynamiquement
+    if (req && req.get) {
+        const protocol = req.get('x-forwarded-proto') || req.protocol || 'https';
+        const host = req.get('host');
+        if (host) {
+            return `${protocol}://${host}`;
+        }
+    }
+    
+    // 4. Environnement de production sans variables définies
+    if (process.env.NODE_ENV === 'production' || process.env.RENDER) {
+        console.warn('⚠️ WARNING: No APP_URL defined and no request context available!');
+        return `https://${process.env.RENDER_SERVICE_NAME || 'your-app'}.onrender.com`;
+    }
+    
+    // 5. Développement local
+    return `http://localhost:${process.env.PORT || 3000}`;
+}
 
 // Configuration de multer pour l'upload de fichiers
 const storage = multer.diskStorage({
@@ -8640,12 +8681,10 @@ app.delete('/api/snapshots/:date', requireAdminAuth, async (req, res) => {
 app.listen(PORT, () => {
     console.log(`Serveur démarré sur le port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
-    if (process.env.NODE_ENV !== 'production') {
-    const appUrl = process.env.NODE_ENV === 'production' 
-    ? 'https://mata-depenses-management.onrender.com'
-    : `http://localhost:${PORT}`;
-console.log(`Accédez à l'application sur ${appUrl}`);
-    }
+    
+    // Déterminer l'URL de l'application
+    const appUrl = getAppBaseUrl();
+    console.log(`Accédez à l'application sur ${appUrl}`);
 });
 
 // Route pour ajouter une opération de remboursement/dette

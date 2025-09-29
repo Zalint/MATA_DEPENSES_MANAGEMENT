@@ -14,6 +14,15 @@ services:
         value: 10000
       - key: SESSION_SECRET
         generateValue: true
+      # Variable URL complète pour la connexion PostgreSQL (priorité)
+      - key: URL
+        fromDatabase:
+          name: depenses-db
+          property: connectionString
+      # URL de l'application (pour éviter le hardcoding)
+      - key: APP_URL
+        value: https://mata-depenses-management.onrender.com
+      # Variables séparées (fallback pour développement local)
       - key: DB_HOST
         fromDatabase:
           name: depenses-db
