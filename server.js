@@ -1411,6 +1411,26 @@ app.post('/api/logout', (req, res) => {
     });
 });
 
+// Route pour vérifier la session (utilisée au chargement de la page)
+app.get('/api/check-session', (req, res) => {
+    if (req.session?.user) {
+        res.json({ 
+            success: true,
+            user: {
+                id: req.session.user.id,
+                username: req.session.user.username,
+                full_name: req.session.user.full_name,
+                role: req.session.user.role
+            }
+        });
+    } else {
+        res.status(401).json({ 
+            success: false,
+            message: 'No active session' 
+        });
+    }
+});
+
 app.get('/api/user', requireAuth, (req, res) => {
     res.json(req.session.user);
 });
