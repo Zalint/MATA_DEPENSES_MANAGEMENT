@@ -8,13 +8,24 @@ async function testHtmlScraping() {
         const cutoffDate = '2025-09-17';
         
         // Déterminer l'URL base (même logique que dans server.js)
-        const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
-        const baseUrl = isProduction 
-            ? 'https://mata-depenses-management.onrender.com'
-            : `http://localhost:${process.env.PORT || 3000}`;
+        function getAppBaseUrl() {
+            if (process.env.APP_URL) return process.env.APP_URL;
+            if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
+            
+            const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+            if (isProduction) {
+                console.warn('⚠️ WARNING: No APP_URL or RENDER_EXTERNAL_URL defined in production!');
+                return `https://${process.env.RENDER_SERVICE_NAME || 'localhost'}`;
+            }
+            return `http://localhost:${process.env.PORT || 3000}`;
+        }
+        
+        const baseUrl = getAppBaseUrl();
         
         const dashboardUrl = `${baseUrl}?cutoff_date=${cutoffDate}`;
         console.log(`🔍 URL test: ${dashboardUrl}`);
+        
+        const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
         console.log(`🌐 Environnement: ${isProduction ? 'PRODUCTION' : 'LOCAL'}`);
         
         // Fonction pour parser les nombres formatés

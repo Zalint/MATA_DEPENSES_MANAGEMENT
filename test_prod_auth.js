@@ -1,12 +1,25 @@
 const puppeteer = require('puppeteer');
 
+// Fonction utilitaire pour déterminer l'URL de l'application (même logique que server.js)
+function getAppBaseUrl() {
+    if (process.env.APP_URL) return process.env.APP_URL;
+    if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
+    
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+    if (isProduction) {
+        console.warn('⚠️ WARNING: No APP_URL or RENDER_EXTERNAL_URL defined in production!');
+        return `https://${process.env.RENDER_SERVICE_NAME || 'localhost'}`;
+    }
+    return `http://localhost:${process.env.PORT || 3000}`;
+}
+
 async function testProductionAuth() {
     console.log('🧪 TEST AUTHENTIFICATION PRODUCTION');
     console.log('=====================================');
     
     const username = process.env.SNAPSHOT_USERNAME || 'Saliou';
     const password = process.env.SNAPSHOT_PASSWORD || 'Murex2015';
-    const baseUrl = 'https://mata-depenses-management.onrender.com';
+    const baseUrl = getAppBaseUrl();
     
     console.log(`📡 URL: ${baseUrl}`);
     console.log(`👤 Username: ${username}`);

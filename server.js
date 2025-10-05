@@ -8728,7 +8728,7 @@ app.listen(PORT, () => {
     
     // Déterminer l'URL de l'application
     const appUrl = getAppBaseUrl();
-    console.log(`Accédez à l'application sur ${appUrl}`);
+console.log(`Accédez à l'application sur ${appUrl}`);
 });
 
 // Route pour ajouter une opération de remboursement/dette

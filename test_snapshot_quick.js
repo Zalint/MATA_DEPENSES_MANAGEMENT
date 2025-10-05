@@ -1,12 +1,25 @@
 // Test rapide de l'authentification snapshot
 const axios = require('axios');
 
+// Fonction utilitaire pour déterminer l'URL de l'application (même logique que server.js)
+function getAppBaseUrl() {
+    if (process.env.APP_URL) return process.env.APP_URL;
+    if (process.env.RENDER_EXTERNAL_URL) return process.env.RENDER_EXTERNAL_URL;
+    
+    const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER;
+    if (isProduction) {
+        console.warn('⚠️ WARNING: No APP_URL or RENDER_EXTERNAL_URL defined in production!');
+        return `https://${process.env.RENDER_SERVICE_NAME || 'localhost'}`;
+    }
+    return `http://localhost:${process.env.PORT || 3000}`;
+}
+
 async function testSnapshot() {
     console.log('🧪 Test snapshot avec variables d\'environnement...');
     
     try {
         const response = await axios.post(
-            'https://mata-depenses-management.onrender.com/external/api/snapshots/create',
+            getAppBaseUrl() + '/external/api/snapshots/create',
             { cutoff_date: '2025-09-17' },
             {
                 headers: {
