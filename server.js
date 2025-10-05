@@ -11464,7 +11464,7 @@ app.put('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
         console.log('🔧 SERVER: user =', req.session.user);
         
         const { monthYear } = req.params;
-        const { data } = req.body; // Array d'objets {date, amount}
+        const { data } = req.body; // Array d'objets {date, amount, balance, fees}
         const userId = req.session.user.id;
         const userRole = req.session.user.role;
 
@@ -11493,7 +11493,7 @@ app.put('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
         try {
             // Mettre à jour chaque entrée
             for (const entry of data) {
-                const { date, amount } = entry;
+                const { date, amount, balance, fees } = entry;
                 
                 if (!date || amount === undefined) {
                     continue; // Ignorer les entrées invalides
@@ -11505,25 +11505,33 @@ app.put('/api/cash-bictorys/:monthYear', requireCashBictorysAuth, async (req, re
                 }
 
                 const amountValue = parseInt(amount) || 0;
+                const balanceValue = balance !== undefined ? parseInt(balance) || 0 : 0;
+                const feesValue = fees !== undefined ? parseInt(fees) || 0 : 0;
 
-                // Ne créer une entrée que si le montant est > 0
-                if (amountValue > 0) {
-                    // Insérer ou mettre à jour
+                // Ne créer une entrée que si le montant, balance ou fees est > 0
+                if (amountValue > 0 || balanceValue > 0 || feesValue > 0) {
+                    // Insérer ou mettre à jour (avec balance et fees)
                     await pool.query(`
-                        INSERT INTO cash_bictorys (date, amount, month_year, created_by, updated_by)
-                        VALUES ($1, $2, $3, $4, $4)
+                        INSERT INTO cash_bictorys (date, amount, balance, fees, month_year, created_by, updated_by)
+                        VALUES ($1, $2, $3, $4, $5, $6, $6)
                         ON CONFLICT (date) 
                         DO UPDATE SET 
-                            amount = $2,
-                            updated_by = $4,
+                            amount = EXCLUDED.amount,
+                            balance = EXCLUDED.balance,
+                            fees = EXCLUDED.fees,
+                            updated_by = EXCLUDED.updated_by,
                             updated_at = CURRENT_TIMESTAMP
-                    `, [date, amountValue, monthYear, userId]);
+                    `, [date, amountValue, balanceValue, feesValue, monthYear, userId]);
+                    
+                    console.log(`✅ Cash Bictorys: ${date} → Amount: ${amountValue}, Balance: ${balanceValue}, Fees: ${feesValue}`);
                 } else {
-                    // Si le montant est 0, supprimer l'entrée existante (si elle existe)
+                    // Si tout est 0, supprimer l'entrée existante (si elle existe)
                     await pool.query(`
                         DELETE FROM cash_bictorys 
                         WHERE date = $1
                     `, [date]);
+                    
+                    console.log(`🗑️ Cash Bictorys: ${date} supprimé (toutes les valeurs = 0)`);
                 }
             }
 

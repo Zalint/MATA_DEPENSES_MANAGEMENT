@@ -228,13 +228,15 @@
 
    ### **📁 Fichiers Principaux**
    ```
-   test_regression_new.js         # Tests de non-régression (28 tests)
-   copy_preprod_to_test.ps1       # Script copie base préprod → test
-   package.json                   # Scripts npm configurés
-   .github/workflows/             # Automatisation CI/CD
-   .git/hooks/pre-push           # Hook Git automatique
-   start_preprod.bat             # Script Windows test local
-   financial_settings.json       # Configuration validation budget
+   test_regression_new.js                    # Tests de non-régression (28 tests)
+   copy_preprod_to_test.ps1                  # Script copie base préprod → test
+   package.json                              # Scripts npm configurés
+   .github/workflows/                        # Automatisation CI/CD
+   .git/hooks/pre-push                      # Hook Git automatique
+   start_preprod.bat                        # Script Windows test local
+   financial_settings.json                  # Configuration validation budget
+   create_sync_balance_trigger.sql          # Trigger sync Balance → SOLDE BICTORYS AFFICHE
+   GUIDE_SYNC_BALANCE_SOLDE_COURANT.md     # Documentation trigger synchronisation
    ```
 
    ### **🔧 Fonctions de Synchronisation (Production Pure)**
@@ -1614,6 +1616,133 @@
 
    ---
 
+   ## 🔄 **Triggers PostgreSQL & Automatisations**
+
+   ### **⚡ Synchronisation automatique Balance → SOLDE BICTORYS AFFICHE**
+
+   #### **📋 Vue d'ensemble**
+   
+   Système de synchronisation automatique qui copie la dernière valeur de la colonne `balance` de la table `cash_bictorys` vers le compte **"SOLDE BICTORYS AFFICHE"** en temps réel.
+
+   #### **🎯 Objectif**
+
+   **Avant** : Mise à jour manuelle quotidienne du solde  
+   **Après** : Synchronisation automatique dès qu'une nouvelle valeur arrive via l'API externe
+
+   #### **🔧 Implémentation technique**
+
+   ```sql
+   -- Trigger PostgreSQL
+   Nom: trigger_sync_balance_to_solde_bictorys
+   Fonction: sync_balance_to_solde_bictorys_affiche()
+   Déclenchement: AFTER INSERT OR UPDATE ON cash_bictorys
+   Fichier: create_sync_balance_trigger.sql
+   ```
+
+   #### **📊 Flux de données**
+
+   ```
+   Workflow externe (Make.com, n8n)
+            ↓
+   POST API → /api/cash-bictorys
+            ↓
+   Table cash_bictorys (balance mis à jour)
+            ↓
+   Trigger PostgreSQL (automatique)
+            ↓
+   Compte SOLDE BICTORYS AFFICHE (current_balance synchronisé)
+   ```
+
+   #### **✅ Règles de gestion**
+
+   - **Date valide** : Seules les dates ≤ date du jour sont prises en compte
+   - **Lignes valides** : Une ligne est ignorée seulement si `amount = 0 ET balance = 0`
+   - **Balance zéro légitime** : Une `balance = 0` avec `amount > 0` est VALIDE (vraie valeur)
+   - **Dernière valeur** : En cas de plusieurs lignes même date, la plus récemment modifiée (`updated_at DESC`)
+   - **Sécurité** : Si le compte n'existe pas, log NOTICE uniquement (pas d'erreur)
+   - **Traçabilité** : Logs PostgreSQL pour chaque synchronisation
+
+   #### **🧪 Vérification manuelle**
+
+   ```sql
+   -- Vérifier l'état actuel
+   SELECT date, balance, amount, fees
+   FROM cash_bictorys
+   WHERE date <= CURRENT_DATE
+   ORDER BY date DESC
+   LIMIT 5;
+
+   SELECT account_name, current_balance, updated_at
+   FROM accounts
+   WHERE account_name = 'SOLDE BICTORYS AFFICHE';
+
+   -- Tester le trigger
+   UPDATE cash_bictorys
+   SET updated_at = CURRENT_TIMESTAMP
+   WHERE date = (SELECT MAX(date) FROM cash_bictorys WHERE date <= CURRENT_DATE);
+   ```
+
+   #### **🛠️ Maintenance**
+
+   ```sql
+   -- Désactiver temporairement
+   DROP TRIGGER IF EXISTS trigger_sync_balance_to_solde_bictorys ON cash_bictorys;
+
+   -- Voir l'état du trigger
+   SELECT trigger_name, event_manipulation, action_timing
+   FROM information_schema.triggers
+   WHERE event_object_table = 'cash_bictorys';
+   ```
+
+   #### **📈 Avantages**
+
+   - ✅ **Zéro intervention manuelle** : Plus besoin de mise à jour quotidienne
+   - ✅ **Temps réel** : Synchronisation immédiate après chaque POST API
+   - ✅ **Fiable** : Logique au niveau base de données (indépendant du serveur Node.js)
+   - ✅ **Traçable** : Logs PostgreSQL pour chaque synchronisation
+   - ✅ **Sécurisé** : Protection automatique contre les dates futures
+
+   #### **🚨 Points d'attention**
+
+   1. **Nom du compte** : Doit s'appeler exactement `"SOLDE BICTORYS AFFICHE"` (sensible à la casse)
+   2. **Type de compte** : Doit être de type `'statut'`
+   3. **Compte actif** : Le compte doit avoir `is_active = true`
+   4. **Dates futures** : Les dates > CURRENT_DATE sont automatiquement ignorées
+
+   #### **📝 Test de validation**
+
+   ```javascript
+   // Test initial réussi
+   ✅ Dernière balance cash_bictorys:  1,000,000 FCFA (date: 2025-10-03)
+   ✅ Solde SOLDE BICTORYS AFFICHE:    1,000,000 FCFA
+   ✅ LES VALEURS CORRESPONDENT - Trigger fonctionnel !
+   
+   // Logique appliquée
+   ✓ Ignore seulement si amount = 0 ET balance = 0
+   ✓ Une balance = 0 avec amount > 0 est VALIDE
+   ✓ Prend la dernière ligne où (amount > 0 OU balance > 0)
+   ```
+
+   #### **🔗 Fichiers associés**
+
+   - `create_sync_balance_trigger.sql` - Script d'installation du trigger
+   - `GUIDE_SYNC_BALANCE_SOLDE_COURANT.md` - Documentation complète
+
+   #### **📅 Historique**
+
+   - **Date de création** : 05/10/2025
+   - **Version** : 1.2
+   - **Statut** : ✅ Actif en production
+   - **Compte cible** : SOLDE BICTORYS AFFICHE (modifié le 05/10/2025)
+   - **Modifications** :
+     - v1.1 : Changement cible vers SOLDE BICTORYS AFFICHE
+     - v1.2 : Correction API PUT + logique trigger (ignore si amount ET balance = 0)
+   - **Test validation** : ✅ Réussi (1,000,000 FCFA synchronisé - 2025-10-03)
+
+   **Note** : Ce système est actif en production et fonctionne automatiquement sans intervention manuelle.
+
+   ---
+
    ## 🚀 **Exécution des Tests**
 
    ### **📝 Commandes NPM**
@@ -1899,6 +2028,7 @@
    - **Avancé** : Factures, Validation Budget, Cash Bictorys
    - **Cohérence** : Soldes, Audit Flux, Transactions
    - **Synchronisation** : Mécanisme production 100% fidèle
+   - **Triggers PostgreSQL** : Sync automatique Balance → SOLDE BICTORYS AFFICHE
 
    **🎊 Le système garantit une fiabilité ABSOLUE avec les vraies fonctions PostgreSQL de production - ZÉRO différence !**
 
@@ -1906,8 +2036,10 @@
 
    **🚀 SYNCHRONISATION AUTOMATIQUE TOTALE - Dépenses & Transferts inclus dans la synchronisation automatique !**
 
+   **⚡ TRIGGER POSTGRESQL ACTIF - Synchronisation automatique Balance (cash_bictorys) → SOLDE BICTORYS AFFICHE en temps réel !**
+
    ---
 
-   *Dernière mise à jour : 16 janvier 2025*  
-   *Version : 3.2 - Synchronisation Automatique Complète (Dépenses + Transferts)*  
+   *Dernière mise à jour : 05 octobre 2025*  
+   *Version : 3.3.1 - Trigger Synchronisation Balance → SOLDE BICTORYS AFFICHE (API PUT + logique corrigée)*  
    *Auteur : Système de Gestion des Dépenses MATA*
