@@ -273,6 +273,8 @@ async function showSection(sectionName) {
             console.log('🔄 CLIENT: showSection - partner-tracking appelé');
             try {
                 await loadPartnerSummary();
+                // Initialiser la génération de factures partenaires
+                initPartnerInvoiceGenerator();
                 console.log('✅ CLIENT: showSection - partner-tracking terminé avec succès');
             } catch (error) {
                 console.error('❌ CLIENT: Erreur dans showSection - partner-tracking:', error);
@@ -7173,6 +7175,409 @@ async function loadPartnerConfiguration() {
         console.error('Erreur chargement configuration partenaires:', error);
     }
 }
+
+// === GÉNÉRATION DE FACTURES PARTENAIRES ===
+
+// Initialiser l'interface de génération de factures partenaires
+function initPartnerInvoiceGenerator() {
+    // Gestionnaires d'événements pour les contrôles de période
+    const periodRadios = document.querySelectorAll('input[name="invoice-period"]');
+    const customDateRange = document.getElementById('custom-date-range');
+    const startDateInput = document.getElementById('partner-invoice-start-date');
+    const endDateInput = document.getElementById('partner-invoice-end-date');
+    
+    periodRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            console.log('📅 Radio button changé vers:', this.value);
+            
+            if (this.value === 'custom') {
+                customDateRange.style.display = 'block';
+                // Vider les champs pour permettre la saisie personnalisée
+                startDateInput.value = '';
+                endDateInput.value = '';
+                console.log('📅 Mode personnalisé activé - champs vidés');
+            } else {
+                // Mode "mois en cours"
+                customDateRange.style.display = 'none';
+                
+                // Remettre les dates du mois en cours dans les champs cachés
+                const now = new Date();
+                const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+                const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                
+                startDateInput.value = firstDay.toISOString().split('T')[0];
+                endDateInput.value = lastDay.toISOString().split('T')[0];
+                
+                console.log('📅 Dates mois en cours restaurées:', {
+                    startDate: startDateInput.value,
+                    endDate: endDateInput.value
+                });
+            }
+            updateDeliveriesPreview();
+        });
+    });
+    
+    // Gestionnaires pour les changements dans les champs
+    const accountSelect = document.getElementById('partner-invoice-account');
+    const partnerNameInput = document.getElementById('partner-invoice-name');
+    const previewBtn = document.getElementById('preview-deliveries-btn');
+    const generateBtn = document.getElementById('generate-partner-invoice-btn');
+    
+    if (accountSelect) {
+        accountSelect.addEventListener('change', updateDeliveriesPreview);
+    }
+    
+    if (startDateInput) {
+        startDateInput.addEventListener('change', updateDeliveriesPreview);
+    }
+    
+    if (endDateInput) {
+        endDateInput.addEventListener('change', updateDeliveriesPreview);
+    }
+    
+    if (partnerNameInput) {
+        partnerNameInput.addEventListener('input', function() {
+            updateGenerateButtonState();
+        });
+    }
+    
+    if (previewBtn) {
+        previewBtn.addEventListener('click', previewPartnerDeliveries);
+    }
+    
+    if (generateBtn) {
+        generateBtn.addEventListener('click', generatePartnerInvoicePDF);
+    }
+    
+    // Charger les comptes partenaires au démarrage
+    loadPartnerAccountsForInvoice();
+    
+    // Définir les dates par défaut pour le mois en cours
+    const now = new Date();
+    const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+    const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    
+    // Définir les dates par défaut dans les champs (même si cachés)
+    if (startDateInput) {
+        startDateInput.value = firstDay.toISOString().split('T')[0];
+    }
+    if (endDateInput) {
+        endDateInput.value = lastDay.toISOString().split('T')[0];
+    }
+    
+    // S'assurer que l'état initial est correct
+    const currentMonthRadio = document.querySelector('input[name="invoice-period"][value="current-month"]');
+    if (currentMonthRadio && currentMonthRadio.checked) {
+        customDateRange.style.display = 'none';
+    }
+    
+    console.log('📅 Partner Invoice: Dates par défaut définies:', {
+        startDate: firstDay.toISOString().split('T')[0],
+        endDate: lastDay.toISOString().split('T')[0]
+    });
+    
+    // Déclencher un aperçu initial après un petit délai pour s'assurer que tout est initialisé
+    setTimeout(() => {
+        if (accountSelect && accountSelect.value) {
+            updateDeliveriesPreview();
+        }
+    }, 500);
+}
+
+// Charger les comptes partenaires pour la génération de factures
+async function loadPartnerAccountsForInvoice() {
+    try {
+        const response = await fetch('/api/partner/accounts');
+        const accounts = await response.json();
+        
+        const accountSelect = document.getElementById('partner-invoice-account');
+        if (accountSelect) {
+            accountSelect.innerHTML = '<option value="">Sélectionner un compte...</option>';
+            accounts.forEach(account => {
+                const option = document.createElement('option');
+                option.value = account.id;
+                option.textContent = account.account_name;
+                accountSelect.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Erreur chargement comptes partenaires pour facture:', error);
+        showNotification('Erreur lors du chargement des comptes partenaires', 'error');
+    }
+}
+
+// Mettre à jour l'aperçu des livraisons
+async function updateDeliveriesPreview() {
+    const accountId = document.getElementById('partner-invoice-account').value;
+    const periodType = document.querySelector('input[name="invoice-period"]:checked')?.value;
+    const countSpan = document.getElementById('deliveries-count');
+    const previewBtn = document.getElementById('preview-deliveries-btn');
+    
+    console.log('🔄 updateDeliveriesPreview appelé:', {
+        accountId: accountId,
+        periodType: periodType
+    });
+    
+    if (!accountId) {
+        countSpan.textContent = 'Sélectionnez un compte et une période';
+        previewBtn.disabled = true;
+        updateGenerateButtonState();
+        return;
+    }
+    
+    if (!periodType) {
+        console.error('❌ Aucun type de période sélectionné');
+        countSpan.textContent = 'Erreur: aucun type de période sélectionné';
+        previewBtn.disabled = true;
+        updateGenerateButtonState();
+        return;
+    }
+    
+    try {
+        const dateRange = getInvoiceDateRange(periodType);
+        
+        // Vérifier que les dates sont valides
+        if (!dateRange.startDate || !dateRange.endDate) {
+            if (periodType === 'custom') {
+                countSpan.textContent = 'Veuillez sélectionner une date de début et une date de fin';
+            } else {
+                countSpan.textContent = 'Erreur: dates non définies';
+            }
+            previewBtn.disabled = true;
+            updateGenerateButtonState();
+            return;
+        }
+        
+        const params = new URLSearchParams({
+            account_id: accountId,
+            start_date: dateRange.startDate,
+            end_date: dateRange.endDate
+        });
+        
+        const response = await fetch(`/api/partner/deliveries/preview?${params}`);
+        const data = await response.json();
+        
+        if (response.ok) {
+            const count = data.deliveries.length;
+            const totalAmount = data.deliveries.reduce((sum, d) => sum + parseFloat(d.amount), 0);
+            
+            if (count > 0) {
+                countSpan.innerHTML = `<strong>${count}</strong> livraisons validées trouvées (${formatCurrency(totalAmount)})`;
+                previewBtn.disabled = false;
+            } else {
+                countSpan.textContent = 'Aucune livraison validée trouvée pour cette période';
+                previewBtn.disabled = true;
+            }
+        } else {
+            countSpan.textContent = 'Erreur lors de la vérification';
+            previewBtn.disabled = true;
+        }
+    } catch (error) {
+        console.error('Erreur aperçu livraisons:', error);
+        countSpan.textContent = 'Erreur lors de la vérification';
+        previewBtn.disabled = true;
+    }
+    
+    updateGenerateButtonState();
+}
+
+// Obtenir la plage de dates pour la facture
+function getInvoiceDateRange(periodType) {
+    console.log('📅 getInvoiceDateRange appelé avec periodType:', periodType);
+    
+    if (periodType === 'current-month') {
+        const now = new Date();
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+        
+        const dateRange = {
+            startDate: firstDay.toISOString().split('T')[0],
+            endDate: lastDay.toISOString().split('T')[0]
+        };
+        
+        console.log('📅 Dates mois en cours calculées:', dateRange);
+        return dateRange;
+    } else {
+        const startDate = document.getElementById('partner-invoice-start-date').value;
+        const endDate = document.getElementById('partner-invoice-end-date').value;
+        
+        const dateRange = {
+            startDate: startDate,
+            endDate: endDate
+        };
+        
+        console.log('📅 Dates personnalisées récupérées:', dateRange);
+        return dateRange;
+    }
+}
+
+// Mettre à jour l'état du bouton de génération
+function updateGenerateButtonState() {
+    const partnerName = document.getElementById('partner-invoice-name').value.trim();
+    const accountId = document.getElementById('partner-invoice-account').value;
+    const countSpan = document.getElementById('deliveries-count');
+    const generateBtn = document.getElementById('generate-partner-invoice-btn');
+    
+    const hasValidData = partnerName && accountId && countSpan.textContent.includes('livraisons validées trouvées');
+    generateBtn.disabled = !hasValidData;
+}
+
+// Prévisualiser les livraisons
+async function previewPartnerDeliveries() {
+    const accountId = document.getElementById('partner-invoice-account').value;
+    const periodType = document.querySelector('input[name="invoice-period"]:checked').value;
+    
+    try {
+        const dateRange = getInvoiceDateRange(periodType);
+        const params = new URLSearchParams({
+            account_id: accountId,
+            start_date: dateRange.startDate,
+            end_date: dateRange.endDate
+        });
+        
+        const response = await fetch(`/api/partner/deliveries/preview?${params}`);
+        const data = await response.json();
+        
+        if (response.ok) {
+            showDeliveriesPreviewModal(data.deliveries, dateRange);
+        } else {
+            showNotification(data.error || 'Erreur lors de la prévisualisation', 'error');
+        }
+    } catch (error) {
+        console.error('Erreur prévisualisation:', error);
+        showNotification('Erreur lors de la prévisualisation', 'error');
+    }
+}
+
+// Afficher la modal de prévisualisation
+function showDeliveriesPreviewModal(deliveries, dateRange) {
+    const totalAmount = deliveries.reduce((sum, d) => sum + parseFloat(d.amount), 0);
+    const periodText = dateRange.startDate === dateRange.endDate 
+        ? `le ${formatDate(dateRange.startDate)}`
+        : `du ${formatDate(dateRange.startDate)} au ${formatDate(dateRange.endDate)}`;
+    
+    let tableRows = '';
+    deliveries.forEach(delivery => {
+        tableRows += `
+            <tr>
+                <td>${formatDate(delivery.delivery_date)}</td>
+                <td>${delivery.article_count}</td>
+                <td>${formatCurrency(delivery.unit_price || 0)}</td>
+                <td>${formatCurrency(delivery.amount)}</td>
+                <td>${delivery.description || '-'}</td>
+            </tr>
+        `;
+    });
+    
+    const modalHTML = `
+        <div class="modal-overlay" onclick="closePreviewModal()">
+            <div class="modal-content preview-modal" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <h3><i class="fas fa-eye"></i> Aperçu des Livraisons</h3>
+                    <button class="modal-close" onclick="closePreviewModal()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p><strong>Période:</strong> ${periodText}</p>
+                    <p><strong>Nombre de livraisons:</strong> ${deliveries.length}</p>
+                    <p><strong>Montant total:</strong> ${formatCurrency(totalAmount)}</p>
+                    
+                    <div class="table-container">
+                        <table class="preview-table">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Articles</th>
+                                    <th>Prix Unit.</th>
+                                    <th>Montant</th>
+                                    <th>Description</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${tableRows}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" onclick="closePreviewModal()">Fermer</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+// Fermer la modal de prévisualisation
+function closePreviewModal() {
+    const modal = document.querySelector('.modal-overlay');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// Générer la facture PDF
+async function generatePartnerInvoicePDF() {
+    const partnerName = document.getElementById('partner-invoice-name').value.trim();
+    const accountId = document.getElementById('partner-invoice-account').value;
+    const periodType = document.querySelector('input[name="invoice-period"]:checked').value;
+    const generateBtn = document.getElementById('generate-partner-invoice-btn');
+    
+    if (!partnerName || !accountId) {
+        showNotification('Veuillez remplir tous les champs requis', 'error');
+        return;
+    }
+    
+    try {
+        // Désactiver le bouton et afficher le chargement
+        generateBtn.disabled = true;
+        generateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Génération...';
+        
+        showNotification('Génération de la facture PDF en cours...', 'info');
+        
+        const dateRange = getInvoiceDateRange(periodType);
+        
+        // Vérifier que les dates sont valides
+        if (!dateRange.startDate || !dateRange.endDate) {
+            if (periodType === 'custom') {
+                showNotification('Veuillez sélectionner une date de début et une date de fin', 'error');
+            } else {
+                showNotification('Erreur: dates non définies', 'error');
+            }
+            
+            // Réactiver le bouton en cas d'erreur
+            generateBtn.disabled = false;
+            generateBtn.innerHTML = '<i class="fas fa-file-pdf"></i> Générer Facture PDF';
+            updateGenerateButtonState();
+            return;
+        }
+        
+        // Créer les paramètres pour l'URL
+        const params = new URLSearchParams({
+            partner_name: partnerName,
+            account_id: accountId,
+            start_date: dateRange.startDate,
+            end_date: dateRange.endDate,
+            filename: `facture_${partnerName.replace(/[^a-zA-Z0-9]/g, '_')}_${dateRange.startDate.replace(/-/g, '')}_${dateRange.endDate.replace(/-/g, '')}.pdf`
+        });
+        
+        // Ouvrir directement l'URL du PDF dans un nouvel onglet
+        const pdfUrl = `/api/partner/generate-invoice-pdf-direct?${params}`;
+        window.open(pdfUrl, '_blank');
+        
+        showNotification('Facture PDF générée avec succès !', 'success');
+        
+    } catch (error) {
+        console.error('Erreur génération facture:', error);
+        showNotification('Erreur lors de la génération de la facture', 'error');
+    } finally {
+        // Réactiver le bouton
+        generateBtn.disabled = false;
+        generateBtn.innerHTML = '<i class="fas fa-file-pdf"></i> Générer Facture PDF';
+        updateGenerateButtonState(); // Réévaluer l'état du bouton
+    }
+}
+
 // Afficher la configuration des comptes partenaires
 function displayPartnerConfiguration(partnerAccounts, directors) {
     const configDiv = document.getElementById('partner-accounts-config');

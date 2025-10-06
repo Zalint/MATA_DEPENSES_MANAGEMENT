@@ -1126,6 +1126,85 @@
                         </div>
                     </div>
                     
+                    <!-- Génération de factures partenaires -->
+                    <div class="partner-invoice-generator">
+                        <div class="card-header">
+                            <h3><i class="fas fa-file-pdf"></i> Génération de Factures Partenaires</h3>
+                            <p class="card-description">Générer des factures PDF pour les livraisons validées</p>
+                        </div>
+                        
+                        <div class="invoice-form">
+                            <div class="form-row">
+                                <div class="form-group full-width">
+                                    <label for="partner-invoice-name">
+                                        <i class="fas fa-building"></i> Nom du partenaire (sur la facture) *
+                                    </label>
+                                    <input type="text" id="partner-invoice-name" placeholder="Ex: DIARRA DISTRIBUTION" required>
+                                    <small class="form-help">Ce nom apparaîtra sur la facture PDF</small>
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="partner-invoice-account">
+                                        <i class="fas fa-handshake"></i> Compte partenaire
+                                    </label>
+                                    <select id="partner-invoice-account">
+                                        <option value="">Sélectionner un compte...</option>
+                                        <!-- Options chargées dynamiquement -->
+                                    </select>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label>
+                                        <i class="fas fa-calendar-alt"></i> Période
+                                    </label>
+                                    <div class="radio-group">
+                                        <label class="radio-option">
+                                            <input type="radio" name="invoice-period" value="current-month" checked>
+                                            <span>Mois en cours</span>
+                                        </label>
+                                        <label class="radio-option">
+                                            <input type="radio" name="invoice-period" value="custom">
+                                            <span>Plage personnalisée</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-row" id="custom-date-range" style="display: none;">
+                                <div class="form-group">
+                                    <label for="partner-invoice-start-date">
+                                        <i class="fas fa-calendar"></i> Date de début
+                                    </label>
+                                    <input type="date" id="partner-invoice-start-date">
+                                </div>
+                                <div class="form-group">
+                                    <label for="partner-invoice-end-date">
+                                        <i class="fas fa-calendar"></i> Date de fin
+                                    </label>
+                                    <input type="date" id="partner-invoice-end-date">
+                                </div>
+                            </div>
+                            
+                            <div class="invoice-preview">
+                                <div class="preview-info">
+                                    <i class="fas fa-info-circle"></i>
+                                    <span id="deliveries-count">Sélectionnez un compte et une période</span>
+                                </div>
+                                <button type="button" id="preview-deliveries-btn" class="btn btn-outline-primary" disabled>
+                                    <i class="fas fa-eye"></i> Prévisualiser
+                                </button>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button type="button" id="generate-partner-invoice-btn" class="btn btn-primary" disabled>
+                                    <i class="fas fa-file-pdf"></i> Générer Facture PDF
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <!-- Section des détails d'un compte partenaire -->
                     <div id="partner-details" style="display: none;">
                         <h3 id="partner-details-title">Détails - Compte Partenaire</h3>
