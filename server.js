@@ -6274,29 +6274,29 @@ app.get('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => {
 });
 
 
-// === ROUTES POUR LA G+ëN+ëRATION DE FACTURES PARTENAIRES ===
-// IMPORTANT: Ces routes doivent +¬tre AVANT les routes g+¬n+¬rales avec :deliveryId
+// === ROUTES POUR LA G+ï¿½N+ï¿½RATION DE FACTURES PARTENAIRES ===
+// IMPORTANT: Ces routes doivent +ï¿½tre AVANT les routes g+ï¿½n+ï¿½rales avec :deliveryId
 
-// Route pour pr+¬visualiser les livraisons d'un partenaire pour une p+¬riode donn+¬e
+// Route pour pr+ï¿½visualiser les livraisons d'un partenaire pour une p+ï¿½riode donn+ï¿½e
 app.get('/api/partner/deliveries/preview', requireAuth, async (req, res) => {
     try {
         const { account_id, start_date, end_date } = req.query;
         
         if (!account_id || !start_date || !end_date) {
-            return res.status(400).json({ error: 'Param+¿tres manquants: account_id, start_date, end_date requis' });
+            return res.status(400).json({ error: 'Param+ï¿½tres manquants: account_id, start_date, end_date requis' });
         }
         
-        // V+¬rifier que le compte existe et est de type partenaire
+        // V+ï¿½rifier que le compte existe et est de type partenaire
         const accountResult = await pool.query(
             'SELECT * FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
             [account_id, 'partenaire']
         );
         
         if (accountResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Compte partenaire non trouv+¬' });
+            return res.status(404).json({ error: 'Compte partenaire non trouv+ï¿½' });
         }
         
-        // R+¬cup+¬rer les livraisons valid+¬es pour la p+¬riode
+        // R+ï¿½cup+ï¿½rer les livraisons valid+ï¿½es pour la p+ï¿½riode
         const deliveriesResult = await pool.query(`
             SELECT pd.*, u.full_name as created_by_name, v.full_name as validated_by_name
             FROM partner_deliveries pd
@@ -6316,14 +6316,14 @@ app.get('/api/partner/deliveries/preview', requireAuth, async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Erreur pr+¬visualisation livraisons partenaire:', error);
+        console.error('Erreur pr+ï¿½visualisation livraisons partenaire:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
-// Route pour g+¬n+¬rer et servir directement le PDF de facture partenaire
+// Route pour g+ï¿½n+ï¿½rer et servir directement le PDF de facture partenaire
 app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res) => {
-    // Configuration sp+¬cifique pour cette route
+    // Configuration sp+ï¿½cifique pour cette route
     req.setTimeout(300000); // 5 minutes
     res.setTimeout(300000); // 5 minutes
     
@@ -6331,24 +6331,24 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         const { partner_name, account_id, start_date, end_date, filename } = req.query;
         
         if (!partner_name || !account_id || !start_date || !end_date) {
-            return res.status(400).json({ error: 'Param+¿tres manquants: partner_name, account_id, start_date, end_date requis' });
+            return res.status(400).json({ error: 'Param+ï¿½tres manquants: partner_name, account_id, start_date, end_date requis' });
         }
         
-        console.log('=ƒôä PARTNER PDF: G+¬n+¬ration pour', req.session.user.username);
-        console.log('=ƒôä PARTNER PDF: Partenaire:', partner_name);
-        console.log('=ƒôä PARTNER PDF: P+¬riode:', start_date, 'au', end_date);
+        console.log('=ï¿½ï¿½ï¿½ PARTNER PDF: G+ï¿½n+ï¿½ration pour', req.session.user.username);
+        console.log('=ï¿½ï¿½ï¿½ PARTNER PDF: Partenaire:', partner_name);
+        console.log('=ï¿½ï¿½ï¿½ PARTNER PDF: P+ï¿½riode:', start_date, 'au', end_date);
         
-        // V+¬rifier que le compte existe et est de type partenaire
+        // V+ï¿½rifier que le compte existe et est de type partenaire
         const accountResult = await pool.query(
             'SELECT * FROM accounts WHERE id = $1 AND account_type = $2 AND is_active = true',
             [account_id, 'partenaire']
         );
         
         if (accountResult.rows.length === 0) {
-            return res.status(404).json({ error: 'Compte partenaire non trouv+¬' });
+            return res.status(404).json({ error: 'Compte partenaire non trouv+ï¿½' });
         }
         
-        // R+¬cup+¬rer les livraisons valid+¬es pour la p+¬riode
+        // R+ï¿½cup+ï¿½rer les livraisons valid+ï¿½es pour la p+ï¿½riode
         const deliveriesResult = await pool.query(`
             SELECT pd.*, u.full_name as created_by_name, v.full_name as validated_by_name
             FROM partner_deliveries pd
@@ -6365,12 +6365,18 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         const account = accountResult.rows[0];
         
         if (deliveries.length === 0) {
-            return res.status(400).json({ error: 'Aucune livraison valid+¬e trouv+¬e pour cette p+¬riode' });
+            return res.status(400).json({ error: 'Aucune livraison valid+ï¿½e trouv+ï¿½e pour cette p+ï¿½riode' });
         }
         
-        console.log(`=ƒôä PARTNER PDF: ${deliveries.length} livraisons trouv+¬es`);
+        console.log(`ðŸ“„ PARTNER PDF: ${deliveries.length} livraisons trouvÃ©es`);
         
-        // Cr+¬er le PDF
+        // Fonction helper pour formater les nombres avec des espaces normaux
+        const formatAmount = (amount) => {
+            const num = parseFloat(amount) || 0;
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        };
+        
+        // CrÃ©er le PDF
         const PDFDocument = require('pdfkit');
         const doc = new PDFDocument({ 
             margin: 50,
@@ -6387,14 +6393,14 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         
         doc.pipe(res);
         
-        // === EN-T+èTE MATA (identique au template existant) ===
+        // === EN-T+ï¿½TE MATA (identique au template existant) ===
         doc.fontSize(24).font('Helvetica-Bold').fillColor('#1e3a8a').text('MATA', 50, 50);
         
         doc.fontSize(9).font('Helvetica').fillColor('black');
-        doc.text('Mirage, Apt Nord 603D, R+¬sidence Aquanique', 50, 80);
+        doc.text('Mirage, Apt Nord 603D, Residence Aquanique', 50, 80);
         doc.text('A : 01387695 2Y3 / RC : SN DKR 2024 B 29149', 50, 95);
         doc.text('Ouest foire : 78 480 95 95', 50, 110);
-        doc.text('Grand Mbao / cit+¬ Aliou Sow : 77 858 96 96', 50, 125);
+        doc.text('Grand Mbao / cite Aliou Sow : 77 858 96 96', 50, 125);
         
         doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a').text('FACTURE', 275, 55);
         
@@ -6402,17 +6408,17 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         const currentDate = new Date().toLocaleDateString('fr-FR');
         doc.text(`Date : ${currentDate}`, 450, 50);
         
-        // Num+¬ro de facture bas+¬ sur la date et l'ID du compte
+        // Numero de facture base sur la date et l'ID du compte
         const invoiceNumber = `${Date.now().toString().slice(-8)}`;
         doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626');
-        doc.text(`N-¦ : ${invoiceNumber}`, 450, 70);
+        doc.text(`NÂ° : ${invoiceNumber}`, 450, 70);
         
-        // Ligne de s+¬paration
+        // Ligne de s+ï¿½paration
         doc.moveTo(50, 160).lineTo(545, 160).stroke('#1e3a8a').lineWidth(1);
         
         let yPos = 180;
         
-        // Informations partenaire et p+¬riode
+        // Informations partenaire et periode
         doc.fontSize(12).font('Helvetica-Bold').fillColor('black');
         doc.text(`PARTENAIRE : ${partner_name}`, 50, yPos);
         yPos += 20;
@@ -6420,7 +6426,7 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         const periodText = start_date === end_date 
             ? `le ${new Date(start_date).toLocaleDateString('fr-FR')}`
             : `du ${new Date(start_date).toLocaleDateString('fr-FR')} au ${new Date(end_date).toLocaleDateString('fr-FR')}`;
-        doc.text(`P+ëRIODE : ${periodText}`, 50, yPos);
+        doc.text(`PERIODE : ${periodText}`, 50, yPos);
         yPos += 30;
         
         doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
@@ -6432,7 +6438,7 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         const colPositions = [50, 130, 230, 310, 410];
         const colWidths = [80, 100, 80, 100, 135];
         
-        // En-t+¬te du tableau
+        // En-t+ï¿½te du tableau
         doc.rect(50, tableStartY, 495, 25).fill('#1e3a8a');
         doc.fontSize(11).font('Helvetica-Bold').fillColor('white');
         doc.text('ARTICLES', colPositions[0] + 5, tableStartY + 8);
@@ -6463,10 +6469,10 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
             doc.text(truncatedDesc, colPositions[1] + 5, rowY + 8);
             
             const unitPrice = parseFloat(delivery.unit_price || 0);
-            doc.text(unitPrice.toLocaleString('fr-FR') + ' F', colPositions[2] + 5, rowY + 8);
+            doc.text(formatAmount(unitPrice) + ' F', colPositions[2] + 5, rowY + 8);
             
             const amount = parseFloat(delivery.amount);
-            doc.text(amount.toLocaleString('fr-FR') + ' F', colPositions[3] + 5, rowY + 8);
+            doc.text(formatAmount(amount) + ' F', colPositions[3] + 5, rowY + 8);
             
             doc.text(new Date(delivery.delivery_date).toLocaleDateString('fr-FR'), colPositions[4] + 5, rowY + 8);
             
@@ -6479,14 +6485,14 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         doc.rect(50, yPos, 495, 35).fill('#1e3a8a');
         doc.fontSize(14).font('Helvetica-Bold').fillColor('white');
         doc.text('MONTANT TOTAL', 70, yPos + 12);
-        doc.text(`${totalAmount.toLocaleString('fr-FR')} F`, 400, yPos + 12);
+        doc.text(`${formatAmount(totalAmount)} F`, 400, yPos + 12);
         
         yPos += 50;
         
-        // Informations compl+¬mentaires
+        // Informations complementaires
         doc.fontSize(10).font('Helvetica').fillColor('black');
-        const validatedBy = deliveries.find(d => d.validated_by_name)?.validated_by_name || 'Syst+¿me';
-        doc.text(`Livraisons valid+¬es par : ${validatedBy}`, 50, yPos);
+        const validatedBy = deliveries.find(d => d.validated_by_name)?.validated_by_name || 'Systeme';
+        doc.text(`Livraisons validees par : ${validatedBy}`, 50, yPos);
         doc.text(`Partenaire : ${partner_name}`, 50, yPos + 15);
         
         // Ajouter le cachet MATA
@@ -6496,9 +6502,9 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
             const cachetPath = path.join(__dirname, 'public', 'images', 'CachetMata.jpg');
             
             if (fs.existsSync(cachetPath)) {
-                // Positionner le cachet en bas +á droite
+                // Positionner le cachet en bas +ï¿½ droite
                 const cachetSize = 120; // Taille du cachet
-                const cachetX = 545 - cachetSize - 20; // +Ç droite avec marge
+                const cachetX = 545 - cachetSize - 20; // +ï¿½ droite avec marge
                 const cachetY = yPos + 40; // En bas avec un espacement
                 
                 doc.image(cachetPath, cachetX, cachetY, {
@@ -6506,24 +6512,24 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
                     height: cachetSize
                 });
                 
-                console.log('G£à PARTNER PDF: Cachet MATA ajout+¬');
+                console.log('Gï¿½ï¿½ PARTNER PDF: Cachet MATA ajout+ï¿½');
             } else {
-                console.warn('GÜán+Å PARTNER PDF: Cachet MATA non trouv+¬ +á:', cachetPath);
+                console.warn('Gï¿½ï¿½n+ï¿½ PARTNER PDF: Cachet MATA non trouv+ï¿½ +ï¿½:', cachetPath);
             }
         } catch (error) {
-            console.error('G¥î PARTNER PDF: Erreur ajout cachet:', error);
-            // Ne pas interrompre la g+¬n+¬ration PDF pour une erreur de cachet
+            console.error('Gï¿½ï¿½ PARTNER PDF: Erreur ajout cachet:', error);
+            // Ne pas interrompre la g+ï¿½n+ï¿½ration PDF pour une erreur de cachet
         }
         
         // Finaliser le PDF
         doc.end();
         
-        console.log('G£à PARTNER PDF: PDF g+¬n+¬r+¬ avec succ+¿s');
+        console.log('Gï¿½ï¿½ PARTNER PDF: PDF g+ï¿½n+ï¿½r+ï¿½ avec succ+ï¿½s');
         
     } catch (error) {
-        console.error('G¥î PARTNER PDF: Erreur g+¬n+¬ration:', error);
+        console.error('Gï¿½ï¿½ PARTNER PDF: Erreur g+ï¿½n+ï¿½ration:', error);
         if (!res.headersSent) {
-            res.status(500).json({ error: 'Erreur lors de la g+¬n+¬ration du PDF' });
+            res.status(500).json({ error: 'Erreur lors de la g+ï¿½n+ï¿½ration du PDF' });
         }
     }
 });
