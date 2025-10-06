@@ -6495,32 +6495,6 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         doc.text(`Livraisons validees par : ${validatedBy}`, 50, yPos);
         doc.text(`Partenaire : ${partner_name}`, 50, yPos + 15);
         
-        // Ajouter le cachet MATA
-        try {
-            const path = require('path');
-            const fs = require('fs');
-            const cachetPath = path.join(__dirname, 'public', 'images', 'CachetMata.jpg');
-            
-            if (fs.existsSync(cachetPath)) {
-                // Positionner le cachet en bas +� droite
-                const cachetSize = 120; // Taille du cachet
-                const cachetX = 545 - cachetSize - 20; // +� droite avec marge
-                const cachetY = yPos + 40; // En bas avec un espacement
-                
-                doc.image(cachetPath, cachetX, cachetY, {
-                    width: cachetSize,
-                    height: cachetSize
-                });
-                
-                console.log('G�� PARTNER PDF: Cachet MATA ajout+�');
-            } else {
-                console.warn('G��n+� PARTNER PDF: Cachet MATA non trouv+� +�:', cachetPath);
-            }
-        } catch (error) {
-            console.error('G�� PARTNER PDF: Erreur ajout cachet:', error);
-            // Ne pas interrompre la g+�n+�ration PDF pour une erreur de cachet
-        }
-        
         // Finaliser le PDF
         doc.end();
         
