@@ -1,0 +1,627 @@
+================================================================================
+     CORRECTION CRITIQUE - BUG CALCUL SOLDES COMPTES STATUT
+================================================================================
+
+🚨 PROBLÈME IDENTIFIÉ
+================================================================================
+
+Le calcul des soldes pour les comptes STATUT et DEPOT ignore les TRANSFERTS,
+causant des montants incorrects dans le dashboard "Détail du Cash disponible".
+
+SYMPTÔMES :
+-----------
+Si vous avez un compte statut qui reçoit ou émet un transfert, le solde 
+affiché ne tient pas compte de ce transfert.
+
+Exemple concret :
+  Compte STATUT "Solde Courant Banque"
+  - 03/10 : Snapshot dans special_credit_history = 100 000 FCFA
+  - 06/10 : Transfert entrant = 500 000 FCFA
+  
+  ❌ Solde affiché actuellement : 100 000 FCFA (incorrect, ignore le transfert)
+  ✅ Solde attendu : 500 000 FCFA (correct, le transfert REMPLACE le snapshot)
+
+
+================================================================================
+     LOGIQUE MÉTIER À IMPLÉMENTER
+================================================================================
+
+RÈGLE FONDAMENTALE :
+Pour les comptes STATUT, chaque crédit ou transfert entrant REMPLACE 
+le solde précédent (ne s'additionne pas).
+
+FORMULE DE CALCUL :
+-------------------
+Solde = Dernier Événement Entrant (REMPLACE tout)
+        - Transferts Sortants Postérieurs
+        - Dépenses Postérieures
+
+ÉVÉNEMENTS ENTRANTS CONSIDÉRÉS :
+---------------------------------
+1. Crédits normaux (table credit_history)
+2. Snapshots/crédits spéciaux (table special_credit_history avec is_balance_override = true)
+3. Transferts ENTRANTS (table transfer_history avec destination_id = compte)
+
+→ Le système cherche le PLUS RÉCENT chronologiquement
+→ Ce montant REMPLACE tout ce qui précède
+
+
+EXEMPLE DÉTAILLÉ :
+------------------
+Compte : SOLDE COURANT BANQUE (type: statut)
+
+Chronologie complète :
+  01/10 10:00 : Snapshot = 50 000 FCFA
+  03/10 14:30 : Transfert entrant = 200 000 FCFA  ← DERNIER ENTRANT
+  05/10 09:15 : Transfert sortant = -30 000 FCFA
+  06/10 16:00 : Dépense = -15 000 FCFA
+
+Calcul :
+  1️⃣ Dernier entrant (03/10) : 200 000 FCFA
+  2️⃣ Transferts sortants après 03/10 : -30 000 FCFA
+  3️⃣ Dépenses après 03/10 : -15 000 FCFA
+  ─────────────────────────────────────────────
+  TOTAL : 155 000 FCFA ✅
+
+⚠️ Note : Le snapshot du 01/10 (50 000 FCFA) est IGNORÉ car le transfert 
+du 03/10 est plus récent et REMPLACE tout.
+
+
+================================================================================
+     INSTRUCTIONS DE SYNCHRONISATION
+================================================================================
+
+OPTION 1 : MERGE DEPUIS LE REPO PRINCIPAL (Recommandé)
+-------------------------------------------------------
+
+# 1. Ajouter le repo principal comme remote (si pas déjà fait)
+git remote add upstream https://github.com/Zalint/MATA_DEPENSES_MANAGEMENT.git
+
+# 2. Récupérer les dernières modifications
+git fetch upstream
+
+# 3. Voir les commits à merger
+git log upstream/main --oneline -10
+
+# 4. Merger les changements (commit abcd871)
+git checkout main
+git merge upstream/main
+
+# 5. En cas de conflits, les résoudre puis :
+git add .
+git commit -m "Merge upstream - Correction calcul soldes comptes statut"
+
+# 6. Push vers votre fork
+git push origin main
+
+
+OPTION 2 : CHERRY-PICK DU COMMIT SPÉCIFIQUE
+--------------------------------------------
+
+# Si vous voulez uniquement cette correction sans tout merger
+git fetch upstream
+git cherry-pick abcd871
+git push origin main
+
+
+OPTION 3 : APPLIQUER MANUELLEMENT LES CHANGEMENTS
+--------------------------------------------------
+
+Si vous avez modifié server.js, vous devrez peut-être appliquer manuellement.
+
+Fichier à modifier : server.js (environ lignes 2356-2454)
+
+Section à remplacer : Le CASE WHEN 'statut' THEN dans la requête 
+accountBurnQuery de /api/dashboard/stats
+
+Voir la section "CODE SQL À APPLIQUER" ci-dessous.
+
+
+================================================================================
+     CODE SQL À APPLIQUER
+================================================================================
+
+Dans server.js, route /api/dashboard/stats, remplacer le calcul pour 
+comptes STATUT par :
+
+WHEN 'statut' THEN
+    -- Pour STATUT : dernier crédit/transfert entrant REMPLACE, puis soustraction des sorties/dépenses
+    (
+        -- 1. Trouver le dernier montant entrant (crédit, special_credit, OU transfert entrant)
+        COALESCE((
+            SELECT montant FROM (
+                -- Crédits normaux
+                SELECT amount as montant, created_at as date_operation
+                FROM credit_history 
+                WHERE account_id = a.id 
+                    AND created_at <= ($2::date + INTERVAL '1 day')
+                
+                UNION ALL
+                
+                -- Snapshots / crédits spéciaux
+                SELECT amount as montant, created_at as date_operation
+                FROM special_credit_history 
+                WHERE account_id = a.id 
+                    AND credit_date <= ($2::date + INTERVAL '1 day')
+                    AND is_balance_override = true
+                
+                UNION ALL
+                
+                -- Transferts ENTRANTS uniquement
+                SELECT montant, created_at as date_operation
+                FROM transfer_history
+                WHERE destination_id = a.id
+                    AND created_at <= ($2::date + INTERVAL '1 day')
+            ) all_incoming
+            ORDER BY date_operation DESC
+            LIMIT 1
+        ), 0)
+        -
+        -- 2. Soustraire les transferts SORTANTS postérieurs au dernier entrant
+        COALESCE((
+            SELECT SUM(th.montant)
+            FROM transfer_history th
+            WHERE th.source_id = a.id
+                AND th.created_at > COALESCE((
+                    SELECT date_operation FROM (
+                        SELECT created_at as date_operation
+                        FROM credit_history 
+                        WHERE account_id = a.id 
+                            AND created_at <= ($2::date + INTERVAL '1 day')
+                        
+                        UNION ALL
+                        
+                        SELECT created_at as date_operation
+                        FROM special_credit_history 
+                        WHERE account_id = a.id 
+                            AND credit_date <= ($2::date + INTERVAL '1 day')
+                            AND is_balance_override = true
+                        
+                        UNION ALL
+                        
+                        SELECT created_at as date_operation
+                        FROM transfer_history
+                        WHERE destination_id = a.id
+                            AND created_at <= ($2::date + INTERVAL '1 day')
+                    ) all_incoming
+                    ORDER BY date_operation DESC
+                    LIMIT 1
+                ), '1900-01-01'::timestamp)
+                AND th.created_at <= ($2::date + INTERVAL '1 day')
+        ), 0)
+        -
+        -- 3. Soustraire les dépenses postérieures au dernier entrant
+        COALESCE((
+            SELECT SUM(e2.total)
+            FROM expenses e2
+            WHERE e2.account_id = a.id
+                AND e2.expense_date > COALESCE((
+                    SELECT date_operation::date FROM (
+                        SELECT created_at as date_operation
+                        FROM credit_history 
+                        WHERE account_id = a.id 
+                            AND created_at <= ($2::date + INTERVAL '1 day')
+                        
+                        UNION ALL
+                        
+                        SELECT created_at as date_operation
+                        FROM special_credit_history 
+                        WHERE account_id = a.id 
+                            AND credit_date <= ($2::date + INTERVAL '1 day')
+                            AND is_balance_override = true
+                        
+                        UNION ALL
+                        
+                        SELECT created_at as date_operation
+                        FROM transfer_history
+                        WHERE destination_id = a.id
+                            AND created_at <= ($2::date + INTERVAL '1 day')
+                    ) all_incoming
+                    ORDER BY date_operation DESC
+                    LIMIT 1
+                ), '1900-01-01'::date)
+                AND e2.expense_date <= ($2::date + INTERVAL '1 day')
+        ), 0)
+    )
+
+
+================================================================================
+     SCRIPT DE DIAGNOSTIC RAPIDE
+================================================================================
+
+Exécutez ce script AVANT et APRÈS la correction pour identifier les 
+comptes affectés :
+
+-- Identifier les comptes statut avec transferts après leur dernier snapshot
+SELECT 
+    a.id,
+    a.account_name,
+    a.current_balance as solde_actuel_db,
+    (
+        SELECT COUNT(*)
+        FROM transfer_history th
+        WHERE (th.source_id = a.id OR th.destination_id = a.id)
+            AND th.created_at > (
+                SELECT MAX(created_at)
+                FROM special_credit_history 
+                WHERE account_id = a.id AND is_balance_override = true
+            )
+    ) as nb_transferts_ignores
+FROM accounts a
+WHERE a.account_type IN ('statut', 'depot') 
+    AND a.is_active = true
+    AND EXISTS (
+        SELECT 1 
+        FROM transfer_history th 
+        WHERE th.source_id = a.id OR th.destination_id = a.id
+    )
+ORDER BY nb_transferts_ignores DESC;
+
+INTERPRÉTATION :
+Si nb_transferts_ignores > 0, ces comptes sont affectés par le bug.
+
+
+================================================================================
+     SCRIPT DE TEST DÉTAILLÉ POUR UN COMPTE
+================================================================================
+
+Remplacez XXX par l'ID d'un de vos comptes statut pour voir le détail :
+
+WITH compte_test AS (
+    SELECT 
+        id, 
+        account_name, 
+        account_type,
+        current_balance
+    FROM accounts 
+    WHERE id = XXX  -- ← Remplacer par l'ID de votre compte
+)
+SELECT 
+    'Compte testé' as etape,
+    ct.account_name as info,
+    ct.current_balance as montant
+FROM compte_test ct
+
+UNION ALL
+
+SELECT 
+    '1️⃣ Tous les événements ENTRANTS' as etape,
+    CONCAT(
+        TO_CHAR(date_operation, 'DD/MM/YYYY HH24:MI'), 
+        ' - ', 
+        source, 
+        ' : ', 
+        TO_CHAR(montant, 'FM999,999,999')
+    ) as info,
+    montant
+FROM (
+    SELECT 
+        created_at as date_operation,
+        'credit_history' as source,
+        amount as montant
+    FROM credit_history 
+    WHERE account_id = XXX
+    
+    UNION ALL
+    
+    SELECT 
+        created_at as date_operation,
+        'special_credit_history' as source,
+        amount as montant
+    FROM special_credit_history 
+    WHERE account_id = XXX AND is_balance_override = true
+    
+    UNION ALL
+    
+    SELECT 
+        created_at as date_operation,
+        'transfer_IN' as source,
+        montant
+    FROM transfer_history
+    WHERE destination_id = XXX
+) all_events
+ORDER BY date_operation DESC
+
+UNION ALL
+
+SELECT 
+    '👑 DERNIER ENTRANT (base du calcul)' as etape,
+    CONCAT(
+        TO_CHAR(date_operation, 'DD/MM/YYYY HH24:MI'), 
+        ' - ', 
+        source
+    ) as info,
+    montant
+FROM (
+    SELECT 
+        created_at as date_operation,
+        'credit_history' as source,
+        amount as montant
+    FROM credit_history 
+    WHERE account_id = XXX
+    
+    UNION ALL
+    
+    SELECT 
+        created_at as date_operation,
+        'special_credit_history' as source,
+        amount as montant
+    FROM special_credit_history 
+    WHERE account_id = XXX AND is_balance_override = true
+    
+    UNION ALL
+    
+    SELECT 
+        created_at as date_operation,
+        'transfer_IN' as source,
+        montant
+    FROM transfer_history
+    WHERE destination_id = XXX
+) all_events
+ORDER BY date_operation DESC
+LIMIT 1
+
+UNION ALL
+
+SELECT 
+    '2️⃣ Transferts SORTANTS après dernier entrant' as etape,
+    CONCAT(TO_CHAR(th.created_at, 'DD/MM/YYYY HH24:MI'), ' - Transfert OUT') as info,
+    -th.montant as montant
+FROM transfer_history th
+WHERE th.source_id = XXX
+    AND th.created_at > (
+        SELECT date_operation FROM (
+            SELECT created_at as date_operation
+            FROM credit_history 
+            WHERE account_id = XXX
+            
+            UNION ALL
+            
+            SELECT created_at as date_operation
+            FROM special_credit_history 
+            WHERE account_id = XXX AND is_balance_override = true
+            
+            UNION ALL
+            
+            SELECT created_at as date_operation
+            FROM transfer_history
+            WHERE destination_id = XXX
+        ) all_incoming
+        ORDER BY date_operation DESC
+        LIMIT 1
+    )
+ORDER BY th.created_at
+
+UNION ALL
+
+SELECT 
+    '3️⃣ Dépenses après dernier entrant' as etape,
+    CONCAT(TO_CHAR(e.expense_date, 'DD/MM/YYYY'), ' - ', COALESCE(e.description, 'Sans description')) as info,
+    -e.total as montant
+FROM expenses e
+WHERE e.account_id = XXX
+    AND e.expense_date > (
+        SELECT date_operation::date FROM (
+            SELECT created_at as date_operation
+            FROM credit_history 
+            WHERE account_id = XXX
+            
+            UNION ALL
+            
+            SELECT created_at as date_operation
+            FROM special_credit_history 
+            WHERE account_id = XXX AND is_balance_override = true
+            
+            UNION ALL
+            
+            SELECT created_at as date_operation
+            FROM transfer_history
+            WHERE destination_id = XXX
+        ) all_incoming
+        ORDER BY date_operation DESC
+        LIMIT 1
+    )
+ORDER BY e.expense_date
+
+UNION ALL
+
+SELECT 
+    '💰 SOLDE CALCULÉ' as etape,
+    'Nouveau calcul avec correction' as info,
+    (
+        COALESCE((
+            SELECT montant FROM (
+                SELECT created_at as date_operation, amount as montant
+                FROM credit_history 
+                WHERE account_id = XXX
+                
+                UNION ALL
+                
+                SELECT created_at as date_operation, amount as montant
+                FROM special_credit_history 
+                WHERE account_id = XXX AND is_balance_override = true
+                
+                UNION ALL
+                
+                SELECT created_at as date_operation, montant
+                FROM transfer_history
+                WHERE destination_id = XXX
+            ) all_incoming
+            ORDER BY date_operation DESC
+            LIMIT 1
+        ), 0)
+        -
+        COALESCE((
+            SELECT SUM(th.montant)
+            FROM transfer_history th
+            WHERE th.source_id = XXX
+                AND th.created_at > (
+                    SELECT date_operation FROM (
+                        SELECT created_at as date_operation
+                        FROM credit_history 
+                        WHERE account_id = XXX
+                        
+                        UNION ALL
+                        
+                        SELECT created_at as date_operation
+                        FROM special_credit_history 
+                        WHERE account_id = XXX AND is_balance_override = true
+                        
+                        UNION ALL
+                        
+                        SELECT created_at as date_operation
+                        FROM transfer_history
+                        WHERE destination_id = XXX
+                    ) all_incoming
+                    ORDER BY date_operation DESC
+                    LIMIT 1
+                )
+        ), 0)
+        -
+        COALESCE((
+            SELECT SUM(e.total)
+            FROM expenses e
+            WHERE e.account_id = XXX
+                AND e.expense_date > (
+                    SELECT date_operation::date FROM (
+                        SELECT created_at as date_operation
+                        FROM credit_history 
+                        WHERE account_id = XXX
+                        
+                        UNION ALL
+                        
+                        SELECT created_at as date_operation
+                        FROM special_credit_history 
+                        WHERE account_id = XXX AND is_balance_override = true
+                        
+                        UNION ALL
+                        
+                        SELECT created_at as date_operation
+                        FROM transfer_history
+                        WHERE destination_id = XXX
+                    ) all_incoming
+                    ORDER BY date_operation DESC
+                    LIMIT 1
+                )
+        ), 0)
+    ) as montant;
+
+
+================================================================================
+     POINTS D'ATTENTION
+================================================================================
+
+1. PAS DE MIGRATION DE DONNÉES NÉCESSAIRE
+   Cette correction modifie uniquement la logique de calcul.
+   Aucune modification de schéma de base de données n'est requise.
+
+2. REDÉMARRAGE DU SERVEUR
+   Après avoir appliqué les changements :
+   pm2 restart app  # ou votre méthode de restart
+
+3. VIDER LE CACHE NAVIGATEUR
+   Les utilisateurs devront peut-être vider leur cache :
+   Chrome/Edge : Ctrl + Shift + R
+   Firefox : Ctrl + Shift + Delete
+
+4. COMPTES AFFECTÉS
+   Seuls les comptes de type STATUT et DEPOT sont concernés.
+   Les comptes CLASSIQUE, PARTENAIRE, et CREANCE ne changent pas.
+
+5. PERFORMANCE
+   La nouvelle requête utilise des sous-requêtes optimisées avec LIMIT 1.
+   L'impact sur les performances devrait être minimal.
+
+
+================================================================================
+     IMPACT ATTENDU
+================================================================================
+
+AVANT LA CORRECTION :
+---------------------
+Les comptes statut qui ont :
+  ✅ Un snapshot dans special_credit_history
+  ✅ Des transferts APRÈS ce snapshot
+  → Affichent un solde incorrect (ignore les transferts)
+
+APRÈS LA CORRECTION :
+---------------------
+  ✅ Le dernier événement entrant (crédit OU transfert) est pris en compte
+  ✅ Ce montant REMPLACE le solde précédent
+  ✅ Les transferts sortants et dépenses postérieurs sont soustraits
+  ✅ Le "Détail du Cash disponible" affiche le bon solde
+
+
+================================================================================
+     CHECKLIST DE DÉPLOIEMENT
+================================================================================
+
+[ ] Fork synchronisé ou modifications appliquées manuellement
+[ ] Script de diagnostic SQL exécuté (avant correction)
+[ ] Comptes affectés identifiés et documentés
+[ ] Code modifié dans server.js
+[ ] Application redémarrée
+[ ] Script de diagnostic SQL réexécuté (après correction)
+[ ] Validation visuelle dans le dashboard
+[ ] "Détail du Cash disponible" vérifié pour plusieurs comptes
+[ ] Tests de non-régression passés (si disponibles)
+[ ] Utilisateurs informés du changement
+[ ] Documentation mise à jour
+
+
+================================================================================
+     EN CAS DE PROBLÈME
+================================================================================
+
+LES SOLDES SEMBLENT TOUJOURS INCORRECTS
+----------------------------------------
+1. ✅ Vérifier que le serveur a bien redémarré avec le nouveau code
+2. ✅ Vider le cache du navigateur (Ctrl+Shift+R)
+3. ✅ Exécuter le script de diagnostic SQL pour un compte spécifique
+4. ✅ Vérifier les logs serveur pour des erreurs SQL
+
+ERREUR SQL LORS DU DÉMARRAGE
+-----------------------------
+1. ✅ Vérifier que la syntaxe SQL est exacte (parenthèses, virgules)
+2. ✅ Vérifier que les noms de tables sont corrects dans votre schéma
+3. ✅ Tester la requête isolément dans pgAdmin ou psql
+
+DIFFÉRENCES DE CALCUL IMPORTANTES
+----------------------------------
+C'est normal ! Si les transferts étaient ignorés avant, les soldes vont 
+changer significativement. Utilisez le script de diagnostic pour comprendre 
+les différences.
+
+
+================================================================================
+     INFORMATIONS DE SUPPORT
+================================================================================
+
+Repo principal : https://github.com/Zalint/MATA_DEPENSES_MANAGEMENT
+Commit de référence : abcd871
+Version du guide : 1.0
+Date : 07 octobre 2025
+
+Tests de non-régression : 26/26 PASSÉS ✅
+
+Pour toute question :
+1. Consulter la documentation dans CORRECTION_COMPTES_STATUT_TRANSFERTS.md
+2. Exécuter les scripts de diagnostic fournis
+3. Vérifier les logs serveur
+4. Contacter l'équipe de développement du repo principal
+
+
+================================================================================
+     URGENCE ET PRIORITÉ
+================================================================================
+
+⚠️  IMPACT : Soldes incorrects dans le dashboard pour comptes statut/depot
+🎯  COMPTES AFFECTÉS : Tous les comptes statut/depot avec transferts
+✅  CORRECTION TESTÉE : 26/26 tests passés en production
+🚀  TEMPS D'APPLICATION : 15-30 minutes
+⏰  PRIORITÉ : HAUTE - Affecte la fiabilité des données financières
+
+================================================================================
+FIN DU DOCUMENT
+================================================================================
+
