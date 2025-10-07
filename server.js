@@ -2354,63 +2354,102 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                 -- NOUVEAU CALCUL CORRECT selon le type de compte
                 CASE a.account_type
                     WHEN 'statut' THEN
-                        -- Pour STATUT : dernière transaction chronologique <= end_date (timestamp complet)
-                        COALESCE((
-                            SELECT amount FROM (
-                                SELECT amount, created_at::date as transaction_date, created_at as original_timestamp, id as record_id
-                                FROM credit_history 
-                                WHERE account_id = a.id AND created_at <= ($2::date + INTERVAL '1 day')
-                                
-                                UNION ALL
-                                
-                                SELECT amount, credit_date::date as transaction_date, credit_date as original_timestamp, id as record_id
+                        -- Pour STATUT : dernier snapshot + transferts/dépenses postérieurs
+                        (
+                            -- Dernier snapshot de special_credit_history
+                            COALESCE((
+                                SELECT amount 
                                 FROM special_credit_history 
-                                WHERE account_id = a.id AND credit_date <= ($2::date + INTERVAL '1 day')
-                                
-                                UNION ALL
-                                
-                                SELECT -total as amount, expense_date::date as transaction_date, expense_date as original_timestamp, id as record_id
-                                FROM expenses 
-                                WHERE account_id = a.id AND expense_date <= ($2::date + INTERVAL '1 day')
-                                
-                                UNION ALL
-                                
-                                SELECT montant as amount, ('2025-01-01')::DATE as transaction_date, ('2025-01-01')::timestamp as original_timestamp, 0 as record_id
-                                FROM montant_debut_mois 
-                                WHERE account_id = a.id
-                                
-                            ) last_transactions 
-                            ORDER BY transaction_date DESC, original_timestamp DESC, record_id DESC
-                            LIMIT 1
-                        ), 0)
+                                WHERE account_id = a.id 
+                                    AND credit_date <= ($2::date + INTERVAL '1 day')
+                                    AND is_balance_override = true
+                                ORDER BY credit_date DESC, created_at DESC
+                                LIMIT 1
+                            ), 0)
+                            +
+                            -- Transferts après le dernier snapshot
+                            COALESCE((
+                                SELECT SUM(CASE WHEN th.destination_id = a.id THEN th.montant ELSE -th.montant END)
+                                FROM transfer_history th
+                                WHERE (th.source_id = a.id OR th.destination_id = a.id)
+                                    AND th.created_at > COALESCE((
+                                        SELECT created_at 
+                                        FROM special_credit_history 
+                                        WHERE account_id = a.id 
+                                            AND credit_date <= ($2::date + INTERVAL '1 day')
+                                            AND is_balance_override = true
+                                        ORDER BY credit_date DESC, created_at DESC
+                                        LIMIT 1
+                                    ), '1900-01-01'::timestamp)
+                                    AND th.created_at <= ($2::date + INTERVAL '1 day')
+                            ), 0)
+                            -
+                            -- Dépenses après le dernier snapshot
+                            COALESCE((
+                                SELECT SUM(e2.total)
+                                FROM expenses e2
+                                WHERE e2.account_id = a.id
+                                    AND e2.expense_date > COALESCE((
+                                        SELECT credit_date 
+                                        FROM special_credit_history 
+                                        WHERE account_id = a.id 
+                                            AND credit_date <= ($2::date + INTERVAL '1 day')
+                                            AND is_balance_override = true
+                                        ORDER BY credit_date DESC, created_at DESC
+                                        LIMIT 1
+                                    ), '1900-01-01'::date)
+                                    AND e2.expense_date <= ($2::date + INTERVAL '1 day')
+                            ), 0)
+                        )
                     
                     WHEN 'depot' THEN
-                        -- Pour DEPOT : dernière transaction chronologique <= end_date (timestamp complet)
+                        -- Pour DEPOT : dernière transaction chronologique <= end_date (AVEC transferts inclus)
                         COALESCE((
-                            SELECT amount FROM (
-                                SELECT amount, created_at::date as transaction_date, created_at as original_timestamp, id as record_id
-                                FROM credit_history 
-                                WHERE account_id = a.id AND created_at <= ($2::date + INTERVAL '1 day')
-                                
-                                UNION ALL
-                                
-                                SELECT amount, credit_date::date as transaction_date, credit_date as original_timestamp, id as record_id
-                                FROM special_credit_history 
-                                WHERE account_id = a.id AND credit_date <= ($2::date + INTERVAL '1 day')
-                                
-                                UNION ALL
-                                
-                                SELECT -total as amount, expense_date::date as transaction_date, expense_date as original_timestamp, id as record_id
-                                FROM expenses 
-                                WHERE account_id = a.id AND expense_date <= ($2::date + INTERVAL '1 day')
-                                
-                                UNION ALL
-                                
-                                SELECT montant as amount, ('2025-01-01')::DATE as transaction_date, ('2025-01-01')::timestamp as original_timestamp, 0 as record_id
-                                FROM montant_debut_mois 
-                                WHERE account_id = a.id
-                                
-                            ) last_transactions 
+                            SELECT balance FROM (
+                                -- Calculer le cumul jusqu'à chaque transaction
+                                SELECT 
+                                    transaction_date,
+                                    original_timestamp,
+                                    record_id,
+                                    SUM(amount) OVER (ORDER BY transaction_date, original_timestamp, record_id) as balance
+                                FROM (
+                                    SELECT amount, created_at::date as transaction_date, created_at as original_timestamp, id as record_id
+                                    FROM credit_history 
+                                    WHERE account_id = a.id AND created_at <= ($2::date + INTERVAL '1 day')
+                                    
+                                    UNION ALL
+                                    
+                                    SELECT amount, credit_date::date as transaction_date, credit_date as original_timestamp, id as record_id
+                                    FROM special_credit_history 
+                                    WHERE account_id = a.id AND credit_date <= ($2::date + INTERVAL '1 day')
+                                    
+                                    UNION ALL
+                                    
+                                    SELECT -total as amount, expense_date::date as transaction_date, expense_date as original_timestamp, id as record_id
+                                    FROM expenses 
+                                    WHERE account_id = a.id AND expense_date <= ($2::date + INTERVAL '1 day')
+                                    
+                                    UNION ALL
+                                    
+                                    SELECT 
+                                        CASE 
+                                            WHEN destination_id = a.id THEN montant 
+                                            ELSE -montant 
+                                        END as amount,
+                                        created_at::date as transaction_date,
+                                        created_at as original_timestamp,
+                                        id as record_id
+                                    FROM transfer_history
+                                    WHERE (source_id = a.id OR destination_id = a.id) 
+                                        AND created_at <= ($2::date + INTERVAL '1 day')
+                                    
+                                    UNION ALL
+                                    
+                                    SELECT montant as amount, ('2025-01-01')::DATE as transaction_date, ('2025-01-01')::timestamp as original_timestamp, 0 as record_id
+                                    FROM montant_debut_mois 
+                                    WHERE account_id = a.id
+                                ) all_transactions
+                            ) balances
                             ORDER BY transaction_date DESC, original_timestamp DESC, record_id DESC
                             LIMIT 1
                         ), 0)
