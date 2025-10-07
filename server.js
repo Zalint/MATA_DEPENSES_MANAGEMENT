@@ -2354,48 +2354,99 @@ app.get('/api/dashboard/stats', requireAuth, async (req, res) => {
                 -- NOUVEAU CALCUL CORRECT selon le type de compte
                 CASE a.account_type
                     WHEN 'statut' THEN
-                        -- Pour STATUT : dernier snapshot + transferts/dépenses postérieurs
+                        -- Pour STATUT : dernier crédit/transfert entrant REMPLACE, puis soustraction des sorties/dépenses
                         (
-                            -- Dernier snapshot de special_credit_history
+                            -- 1. Trouver le dernier montant entrant (crédit, special_credit, OU transfert entrant)
                             COALESCE((
-                                SELECT amount 
-                                FROM special_credit_history 
-                                WHERE account_id = a.id 
-                                    AND credit_date <= ($2::date + INTERVAL '1 day')
-                                    AND is_balance_override = true
-                                ORDER BY credit_date DESC, created_at DESC
+                                SELECT montant FROM (
+                                    -- Crédits normaux
+                                    SELECT amount as montant, created_at as date_operation
+                                    FROM credit_history 
+                                    WHERE account_id = a.id 
+                                        AND created_at <= ($2::date + INTERVAL '1 day')
+                                    
+                                    UNION ALL
+                                    
+                                    -- Snapshots / crédits spéciaux
+                                    SELECT amount as montant, created_at as date_operation
+                                    FROM special_credit_history 
+                                    WHERE account_id = a.id 
+                                        AND credit_date <= ($2::date + INTERVAL '1 day')
+                                        AND is_balance_override = true
+                                    
+                                    UNION ALL
+                                    
+                                    -- Transferts ENTRANTS uniquement
+                                    SELECT montant, created_at as date_operation
+                                    FROM transfer_history
+                                    WHERE destination_id = a.id
+                                        AND created_at <= ($2::date + INTERVAL '1 day')
+                                ) all_incoming
+                                ORDER BY date_operation DESC
                                 LIMIT 1
                             ), 0)
-                            +
-                            -- Transferts après le dernier snapshot
+                            -
+                            -- 2. Soustraire les transferts SORTANTS postérieurs au dernier entrant
                             COALESCE((
-                                SELECT SUM(CASE WHEN th.destination_id = a.id THEN th.montant ELSE -th.montant END)
+                                SELECT SUM(th.montant)
                                 FROM transfer_history th
-                                WHERE (th.source_id = a.id OR th.destination_id = a.id)
+                                WHERE th.source_id = a.id
                                     AND th.created_at > COALESCE((
-                                        SELECT created_at 
-                                        FROM special_credit_history 
-                                        WHERE account_id = a.id 
-                                            AND credit_date <= ($2::date + INTERVAL '1 day')
-                                            AND is_balance_override = true
-                                        ORDER BY credit_date DESC, created_at DESC
+                                        SELECT date_operation FROM (
+                                            SELECT created_at as date_operation
+                                            FROM credit_history 
+                                            WHERE account_id = a.id 
+                                                AND created_at <= ($2::date + INTERVAL '1 day')
+                                            
+                                            UNION ALL
+                                            
+                                            SELECT created_at as date_operation
+                                            FROM special_credit_history 
+                                            WHERE account_id = a.id 
+                                                AND credit_date <= ($2::date + INTERVAL '1 day')
+                                                AND is_balance_override = true
+                                            
+                                            UNION ALL
+                                            
+                                            SELECT created_at as date_operation
+                                            FROM transfer_history
+                                            WHERE destination_id = a.id
+                                                AND created_at <= ($2::date + INTERVAL '1 day')
+                                        ) all_incoming
+                                        ORDER BY date_operation DESC
                                         LIMIT 1
                                     ), '1900-01-01'::timestamp)
                                     AND th.created_at <= ($2::date + INTERVAL '1 day')
                             ), 0)
                             -
-                            -- Dépenses après le dernier snapshot
+                            -- 3. Soustraire les dépenses postérieures au dernier entrant
                             COALESCE((
                                 SELECT SUM(e2.total)
                                 FROM expenses e2
                                 WHERE e2.account_id = a.id
                                     AND e2.expense_date > COALESCE((
-                                        SELECT credit_date 
-                                        FROM special_credit_history 
-                                        WHERE account_id = a.id 
-                                            AND credit_date <= ($2::date + INTERVAL '1 day')
-                                            AND is_balance_override = true
-                                        ORDER BY credit_date DESC, created_at DESC
+                                        SELECT date_operation::date FROM (
+                                            SELECT created_at as date_operation
+                                            FROM credit_history 
+                                            WHERE account_id = a.id 
+                                                AND created_at <= ($2::date + INTERVAL '1 day')
+                                            
+                                            UNION ALL
+                                            
+                                            SELECT created_at as date_operation
+                                            FROM special_credit_history 
+                                            WHERE account_id = a.id 
+                                                AND credit_date <= ($2::date + INTERVAL '1 day')
+                                                AND is_balance_override = true
+                                            
+                                            UNION ALL
+                                            
+                                            SELECT created_at as date_operation
+                                            FROM transfer_history
+                                            WHERE destination_id = a.id
+                                                AND created_at <= ($2::date + INTERVAL '1 day')
+                                        ) all_incoming
+                                        ORDER BY date_operation DESC
                                         LIMIT 1
                                     ), '1900-01-01'::date)
                                     AND e2.expense_date <= ($2::date + INTERVAL '1 day')

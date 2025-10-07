@@ -29,8 +29,10 @@ Les comptes **statut** utilisent des **snapshots** de balance via `special_credi
 
 **Formule de calcul correcte :**
 ```
-Solde = Dernier Snapshot + Transferts Nets Postérieurs - Dépenses Postérieures
+Solde = Dernier Crédit/Transfert Entrant (REMPLACE) - Transferts Sortants Postérieurs - Dépenses Postérieures
 ```
+
+**Important :** Chaque crédit ou transfert entrant REMPLACE le solde précédent (ne s'additionne pas).
 
 ### Détails de l'Implémentation
 
@@ -38,26 +40,46 @@ Solde = Dernier Snapshot + Transferts Nets Postérieurs - Dépenses Postérieure
 
 **Étapes du calcul :**
 
-1. **Récupérer le dernier snapshot** ≤ date_fin
+1. **Trouver le dernier événement ENTRANT** (crédit, special_credit, OU transfert entrant)
    ```sql
-   SELECT amount 
-   FROM special_credit_history 
-   WHERE account_id = X 
-       AND credit_date <= date_fin
-       AND is_balance_override = true
-   ORDER BY credit_date DESC, created_at DESC
+   SELECT montant FROM (
+       -- Crédits normaux
+       SELECT amount as montant, created_at as date_operation
+       FROM credit_history 
+       WHERE account_id = X AND created_at <= date_fin
+       
+       UNION ALL
+       
+       -- Snapshots/crédits spéciaux
+       SELECT amount as montant, created_at as date_operation
+       FROM special_credit_history 
+       WHERE account_id = X 
+           AND credit_date <= date_fin
+           AND is_balance_override = true
+       
+       UNION ALL
+       
+       -- Transferts ENTRANTS uniquement
+       SELECT montant, created_at as date_operation
+       FROM transfer_history
+       WHERE destination_id = X
+           AND created_at <= date_fin
+   ) all_incoming
+   ORDER BY date_operation DESC
    LIMIT 1
    ```
+   → Ce montant **REMPLACE** le solde (ne s'additionne pas)
 
-2. **Ajouter les transferts postérieurs au snapshot**
+2. **Soustraire les transferts SORTANTS postérieurs**
    ```sql
-   SUM(CASE WHEN destination_id = X THEN montant ELSE -montant END)
+   SUM(montant)
    FROM transfer_history
-   WHERE created_at > date_snapshot
+   WHERE source_id = X
+       AND created_at > date_dernier_entrant
        AND created_at <= date_fin
    ```
 
-3. **Soustraire les dépenses postérieures au snapshot**
+3. **Soustraire les dépenses postérieures**
    ```sql
    SUM(total)
    FROM expenses
@@ -69,15 +91,23 @@ Solde = Dernier Snapshot + Transferts Nets Postérieurs - Dépenses Postérieure
 
 **Pour BICTORYS ENCOURS au 07/10/2025 :**
 
-| Élément | Montant | Date |
-|---------|---------|------|
-| Dernier snapshot | 2 306 963 FCFA | 03/10/2025 |
-| Transfert sortant | -2 306 963 FCFA | 06/10/2025 |
-| Transfert entrant | +8 222 779 FCFA | 06/10/2025 |
-| Dépenses | 0 FCFA | - |
+**Chronologie des événements :**
+- 03/10/2025 : Snapshot = 2 306 963 FCFA
+- 06/10/2025 12:45 : Transfert sortant = -2 306 963 FCFA
+- 06/10/2025 12:46 : Transfert entrant = **8 222 779 FCFA** ← DERNIER ENTRANT
+
+**Calcul selon la logique métier :**
+
+| Étape | Description | Montant |
+|-------|-------------|---------|
+| 1️⃣ | Dernier entrant (transfert IN du 06/10) | 8 222 779 FCFA |
+| 2️⃣ | Transferts sortants après le 06/10 12:46 | 0 FCFA |
+| 3️⃣ | Dépenses après le 06/10 12:46 | 0 FCFA |
 | **TOTAL** | **8 222 779 FCFA** | ✅ |
 
-**Calcul :** 2 306 963 + (-2 306 963 + 8 222 779) - 0 = **8 222 779 FCFA**
+**Formule :** 8 222 779 - 0 - 0 = **8 222 779 FCFA**
+
+**Note :** Le snapshot du 03/10 et le transfert sortant du 06/10 12:45 sont IGNORÉS car le transfert entrant du 06/10 12:46 est plus récent et REMPLACE tout.
 
 ## 🎯 Types de Comptes Affectés
 
