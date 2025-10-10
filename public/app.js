@@ -179,6 +179,15 @@ async function showApp() {
     document.getElementById('user-name').textContent = currentUser.username;
     document.getElementById('user-role').textContent = currentUser.role.replace('_', ' ');
     
+    // Activer le mode comptable (lecture seule, menus limités)
+    if (currentUser.role === 'comptable') {
+        document.body.classList.add('comptable-mode');
+        // Rediriger vers "Mes Dépenses" pour les comptables
+        showSection('expenses');
+    } else {
+        document.body.classList.remove('comptable-mode');
+    }
+    
     // Afficher le menu admin si nécessaire
     if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
         document.getElementById('admin-menu').style.display = 'block';
@@ -353,7 +362,36 @@ async function showSection(sectionName) {
 
 // Initialiser la visibilité des menus selon les permissions
 function initMenuVisibility() {
-    // Menu Cash Bictorys pour TOUS les utilisateurs
+    // Pour le rôle Comptable: masquer TOUS les menus sauf "Mes Dépenses"
+    if (currentUser.role === 'comptable') {
+        // Masquer toutes les sections sauf "Mes Dépenses"
+        const menuItems = document.querySelectorAll('.menu-item');
+        menuItems.forEach(item => {
+            const menuId = item.id;
+            // Garder visible uniquement le menu "Mes Dépenses"
+            if (menuId !== 'expenses-menu') {
+                item.style.display = 'none';
+            }
+        });
+        
+        // Masquer les sections de navigation principales
+        const suiviTableauSection = document.querySelector('.menu-section:has(#dashboard-menu)');
+        const gestionFinanciereSection = document.querySelector('.menu-section:has(#add-expense-menu)');
+        const gestionStocksSection = document.querySelector('.menu-section:has(#stock-management-menu)');
+        
+        if (suiviTableauSection) suiviTableauSection.style.display = 'none';
+        if (gestionStocksSection) gestionStocksSection.style.display = 'none';
+        
+        // Garder visible uniquement la section contenant "Mes Dépenses"
+        if (gestionFinanciereSection) {
+            gestionFinanciereSection.style.display = 'block';
+        }
+        
+        console.log('👁️ Comptable: Affichage limité à "Mes Dépenses" uniquement');
+        return; // Sortir de la fonction pour le comptable
+    }
+    
+    // Menu Cash Bictorys pour TOUS les autres utilisateurs
     const cashBictorysMenu = document.getElementById('cash-bictorys-menu');
     if (cashBictorysMenu) {
         cashBictorysMenu.style.display = 'block';
@@ -439,6 +477,32 @@ async function loadInitialData() {
             saveSection.style.display = 'block';
             initDashboardSaveSection();
         }
+    }
+    
+    // Pour le rôle Comptable: afficher directement "Mes Dépenses" avec dates du mois courant
+    if (currentUser.role === 'comptable') {
+        // Calculer le premier jour du mois courant
+        const today = new Date();
+        const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+        const firstDayStr = firstDayOfMonth.toISOString().split('T')[0];
+        const todayStr = today.toISOString().split('T')[0];
+        
+        // Définir les dates par défaut pour les filtres de dépenses
+        const filterStartDate = document.getElementById('filter-start-date');
+        const filterEndDate = document.getElementById('filter-end-date');
+        
+        if (filterStartDate && filterEndDate) {
+            filterStartDate.value = firstDayStr;
+            filterEndDate.value = todayStr;
+            console.log(`📅 Comptable: Dates définies - ${firstDayStr} à ${todayStr}`);
+        }
+        
+        // Afficher directement la section "Mes Dépenses"
+        showSection('expenses-section');
+        await loadExpensesWithFilters();
+        
+        console.log('👁️ Comptable: Affichage automatique de "Mes Dépenses"');
+        return; // Sortir de la fonction pour éviter d'exécuter le reste
     }
     
     if (['directeur_general', 'pca', 'admin'] || ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
@@ -1499,13 +1563,18 @@ function displayExpenses(expenses) {
         // Qui peut modifier quoi ?
         const isCreator = expense.username === currentUser.username;
         const viewerIsPowerUser = ['directeur_general', 'pca', 'admin'].includes(currentUser.role);
+        const isComptable = currentUser.role === 'comptable';
         // Assurez-vous que l'API renvoie bien `expense.user_role`
         const expenseIsFromPowerUser = ['directeur_general', 'pca', 'admin'].includes(expense.user_role);
 
         let canEdit = false;
         let cantEditReason = "";
 
-        if (viewerIsPowerUser) {
+        if (isComptable) {
+            // Le comptable ne peut jamais modifier
+            canEdit = false;
+            cantEditReason = "Le rôle Comptable est en lecture seule.";
+        } else if (viewerIsPowerUser) {
             // Un super-utilisateur (DG/PCA/Admin) peut modifier...
             if (isCreator) {
                 canEdit = true; // ...ses propres dépenses.
@@ -1559,7 +1628,10 @@ function displayExpenses(expenses) {
         
         // Bouton pour modifier la dépense avec la nouvelle logique
         let editButton = '';
-        if (canEdit) {
+        if (isComptable) {
+            // Comptable: pas de bouton d'édition du tout (lecture seule)
+            editButton = '';
+        } else if (canEdit) {
             if (currentUser.role === 'directeur') {
                 const expenseDate = new Date(expense.created_at);
                 const now = new Date();
@@ -1694,6 +1766,11 @@ async function downloadJustification(expenseId) {
 function generateDeleteButton(expense, isDGExpenseOnDirectorAccount) {
     // Même logique que pour le bouton d'édition
     let deleteButton = '';
+    
+    // Comptable: accès en lecture seule, aucun bouton de suppression
+    if (currentUser.role === 'comptable') {
+        return '';
+    }
     
     if (isDGExpenseOnDirectorAccount && currentUser.role === 'directeur') {
         // Dépense du DG sur compte directeur - seuls les directeurs simples ne peuvent pas supprimer
@@ -7938,7 +8015,8 @@ function displayAllUsers(users) {
                         const roleLabels = {
                             'directeur': 'Directeur',
                             'directeur_general': 'Directeur Général',
-                            'pca': 'PCA'
+                            'pca': 'PCA',
+                            'comptable': 'Comptable'
                         };
                         
                         let actionButtons = '';

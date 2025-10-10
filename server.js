@@ -1257,6 +1257,17 @@ const requireAuth = (req, res, next) => {
     }
 };
 
+// Middleware pour bloquer les opérations d'écriture pour le rôle comptable
+const requireWriteAccess = (req, res, next) => {
+    if (req.session.user && req.session.user.role === 'comptable') {
+        console.log('❌ WRITE ACCESS: Accès refusé pour comptable:', req.session.user.username);
+        return res.status(403).json({ 
+            error: 'Accès refusé - Le rôle Comptable est en lecture seule' 
+        });
+    }
+    next();
+};
+
 const requireAdminAuth = (req, res, next) => {
     console.log('🔐 SERVER: requireAdminAuth appelé pour:', req.method, req.path);
     
@@ -1522,7 +1533,7 @@ app.post('/api/accounts/credit', requireAuth, async (req, res) => {
 });
 
 // Routes pour les dépenses (modifiées pour utiliser les comptes, le système hiérarchique et les fichiers)
-app.post('/api/expenses', requireAuth, upload.single('justification'), async (req, res) => {
+app.post('/api/expenses', requireAuth, requireWriteAccess, upload.single('justification'), async (req, res) => {
     try {
         console.log('🏷️ ===== DÉBUT AJOUT DÉPENSE =====');
         console.log('👤 Utilisateur:', req.session.user.username, '- Rôle:', req.session.user.role);
@@ -2198,7 +2209,7 @@ app.get('/api/expenses', requireAuth, async (req, res) => {
             console.log('📋 GET EXPENSES: Filtrage directeur appliqué pour UserID:', user_id);
         } else {
             query += ' WHERE 1=1';
-            console.log('📋 GET EXPENSES: Aucun filtrage utilisateur (admin/DG/PCA)');
+            console.log('📋 GET EXPENSES: Aucun filtrage utilisateur (admin/DG/PCA/comptable)');
         }
         
         if (start_date) {
@@ -5156,7 +5167,7 @@ app.get('/api/expenses/:id', requireAuth, async (req, res) => {
 });
 
 // Route pour modifier une dépense
-app.put('/api/expenses/:id', requireAuth, upload.single('justification'), async (req, res) => {
+app.put('/api/expenses/:id', requireAuth, requireWriteAccess, upload.single('justification'), async (req, res) => {
     try {
         console.log('🔄️ ===== DÉBUT MODIFICATION DÉPENSE =====');
         console.log('👤 Utilisateur:', req.session.user.username, '- Rôle:', req.session.user.role);
@@ -5354,7 +5365,7 @@ app.put('/api/expenses/:id', requireAuth, upload.single('justification'), async 
 });
 
 // Route pour supprimer une dépense
-app.delete('/api/expenses/:id', requireAuth, async (req, res) => {
+app.delete('/api/expenses/:id', requireAuth, requireWriteAccess, async (req, res) => {
     try {
         const expenseId = req.params.id;
         const userId = req.session.user.id;
@@ -7321,7 +7332,7 @@ app.post('/api/admin/users', requireAdminAuth, async (req, res) => {
         }
         
         // Valider le rôle
-        const validRoles = ['directeur', 'directeur_general', 'pca'];
+        const validRoles = ['directeur', 'directeur_general', 'pca', 'admin', 'comptable'];
         if (!validRoles.includes(role)) {
             return res.status(400).json({ error: 'Rôle invalide' });
         }
@@ -7388,7 +7399,7 @@ app.put('/api/admin/users/:userId', requireAdminAuth, async (req, res) => {
         
         // Valider le rôle
         if (role) {
-            const validRoles = ['directeur', 'directeur_general', 'pca'];
+            const validRoles = ['directeur', 'directeur_general', 'pca', 'admin', 'comptable'];
             if (!validRoles.includes(role)) {
                 return res.status(400).json({ error: 'Rôle invalide' });
             }

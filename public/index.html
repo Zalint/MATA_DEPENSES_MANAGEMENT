@@ -67,10 +67,10 @@
             <aside class="sidebar" id="sidebar">
                 <ul class="nav-menu">
                     <!-- 📊 SUIVI & TABLEAU DE BORD -->
-                    <li class="menu-section-title collapsible" data-section-group="dashboard-group">
+                    <li class="menu-section-title collapsible comptable-hide" data-section-group="dashboard-group">
                         <span><i class="fas fa-chart-bar"></i> SUIVI & TABLEAU DE BORD <i class="fas fa-chevron-down chevron"></i></span>
                     </li>
-                    <ul class="section-group" data-group="dashboard-group">
+                    <ul class="section-group comptable-hide" data-group="dashboard-group">
                         <li><a href="#" data-section="dashboard" class="nav-link active">
                             <i class="fas fa-tachometer-alt"></i> Tableau de bord
                         </a></li>
@@ -103,7 +103,7 @@
                         <li><a href="#" data-section="expenses" class="nav-link">
                             <i class="fas fa-receipt"></i> Mes Dépenses
                         </a></li>
-                        <li><a href="#" data-section="add-expense" class="nav-link">
+                        <li class="comptable-hide"><a href="#" data-section="add-expense" class="nav-link">
                             <i class="fas fa-plus"></i> Ajouter Dépense
                         </a></li>
                         <li id="credit-menu" style="display: none;">
@@ -138,10 +138,10 @@
                         </li>
                     </ul>
                     <!-- 🏪 GESTION DES STOCKS -->
-                    <li class="menu-section-title collapsible" data-section-group="stock-group">
+                    <li class="menu-section-title collapsible comptable-hide" data-section-group="stock-group">
                         <span><i class="fas fa-warehouse"></i> GESTION DES STOCKS <i class="fas fa-chevron-down chevron"></i></span>
                     </li>
-                    <ul class="section-group" data-group="stock-group">
+                    <ul class="section-group comptable-hide" data-group="stock-group">
                         <li id="stock-menu" style="display: none;">
                             <a href="#" data-section="stock-soir" class="nav-link">
                                 <i class="fas fa-warehouse"></i> Gestion Stock
@@ -154,10 +154,10 @@
                         </li>
                     </ul>
                     <!-- ⚙️ PARAMÉTRAGE -->
-                    <li class="menu-section-title collapsible" data-section-group="param-group">
+                    <li class="menu-section-title collapsible comptable-hide" data-section-group="param-group">
                         <span><i class="fas fa-cogs"></i> PARAMÉTRAGE <i class="fas fa-chevron-down chevron"></i></span>
                     </li>
-                    <ul class="section-group" data-group="param-group">
+                    <ul class="section-group comptable-hide" data-group="param-group">
                         <li id="admin-users-menu" style="display: none;">
                             <a href="#" data-section="manage-users" class="nav-link">
                                 <i class="fas fa-user-shield"></i> Gérer Utilisateurs
@@ -1989,6 +1989,7 @@
                                     <option value="directeur">Directeur</option>
                                     <option value="directeur_general">Directeur Général</option>
                                     <option value="pca">PCA</option>
+                                    <option value="comptable">Comptable</option>
                                 </select>
                             </div>
                         </div>
@@ -2029,6 +2030,7 @@
                                         <option value="directeur">Directeur</option>
                                         <option value="directeur_general">Directeur Général</option>
                                         <option value="pca">PCA</option>
+                                        <option value="comptable">Comptable</option>
                                     </select>
                                 </div>
                                 
