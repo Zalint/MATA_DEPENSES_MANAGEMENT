@@ -10163,6 +10163,18 @@ async function initStockModule() {
     console.log("🏭 CLIENT: Formulaire upload:", uploadForm ? '✅ Trouvé' : '❌ Manquant');
     console.log("🏭 CLIENT: Input fichier:", fileInput ? '✅ Trouvé' : '❌ Manquant');
     
+    // Configure role-based visibility for delete by date button
+    const deleteByDateBtn = document.getElementById('delete-by-date-btn');
+    if (deleteByDateBtn) {
+        if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+            deleteByDateBtn.style.display = 'inline-block';
+            console.log('🔓 CLIENT: Bouton "Supprimer par Date" activé pour', currentUser.role);
+        } else {
+            deleteByDateBtn.style.display = 'none';
+            console.log('🔒 CLIENT: Bouton "Supprimer par Date" masqué pour', currentUser.role);
+        }
+    }
+    
     // Assurez-vous que les écouteurs ne sont pas ajoutés plusieurs fois
     if (uploadForm && !uploadForm.dataset.initialized) {
         console.log('🏭 CLIENT: Configuration des event listeners...');
@@ -10656,6 +10668,140 @@ async function deleteStockItem(stockId) {
         }
     } catch (error) {
         showStockNotification(error.message, 'error');
+    }
+}
+
+// ============================================
+// DELETE BY DATE FUNCTIONALITY
+// ============================================
+
+function openDeleteByDateModal() {
+    const modal = document.getElementById('delete-by-date-modal');
+    if (!modal) {
+        console.error("L'élément 'delete-by-date-modal' est introuvable !");
+        return;
+    }
+    
+    // Reset form
+    document.getElementById('delete-stock-date').value = '';
+    document.getElementById('delete-stock-preview').style.display = 'none';
+    document.getElementById('confirm-delete-by-date-btn').disabled = true;
+    
+    modal.style.display = 'block';
+}
+
+function closeDeleteByDateModal() {
+    const modal = document.getElementById('delete-by-date-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function previewDeleteByDate() {
+    const dateInput = document.getElementById('delete-stock-date');
+    const date = dateInput.value;
+    
+    if (!date) {
+        showStockNotification('Veuillez sélectionner une date', 'error');
+        return;
+    }
+    
+    try {
+        // Fetch stock data for this date to preview
+        const response = await fetch(`/api/stock-mata?date=${date}`);
+        if (!response.ok) {
+            throw new Error('Erreur lors de la récupération des données');
+        }
+        
+        const data = await response.json();
+        
+        if (data.length === 0) {
+            showStockNotification('Aucune entrée trouvée pour cette date', 'warning');
+            document.getElementById('delete-stock-preview').style.display = 'none';
+            document.getElementById('confirm-delete-by-date-btn').disabled = true;
+            return;
+        }
+        
+        // Get unique points of sale
+        const pointsDeVente = [...new Set(data.map(item => item.point_de_vente))];
+        
+        // Update preview
+        document.getElementById('delete-preview-date').textContent = date;
+        document.getElementById('delete-preview-count').textContent = data.length;
+        document.getElementById('delete-preview-points').textContent = pointsDeVente.join(', ');
+        
+        // Show preview and enable delete button
+        document.getElementById('delete-stock-preview').style.display = 'block';
+        document.getElementById('confirm-delete-by-date-btn').disabled = false;
+        
+        showStockNotification(`${data.length} entrée(s) trouvée(s) pour cette date`, 'info');
+        
+    } catch (error) {
+        console.error('Erreur lors de la prévisualisation:', error);
+        showStockNotification(error.message, 'error');
+    }
+}
+
+async function confirmDeleteByDate() {
+    const dateInput = document.getElementById('delete-stock-date');
+    const date = dateInput.value;
+    
+    if (!date) {
+        showStockNotification('Veuillez sélectionner une date', 'error');
+        return;
+    }
+    
+    // Final confirmation
+    const confirmMsg = `ATTENTION : Vous êtes sur le point de supprimer TOUTES les entrées de stock pour la date ${date}.\n\nCette action est IRRÉVERSIBLE.\n\nÊtes-vous absolument certain de vouloir continuer ?`;
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    try {
+        const deleteBtn = document.getElementById('confirm-delete-by-date-btn');
+        deleteBtn.disabled = true;
+        deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Suppression...';
+        
+        const response = await fetch(`/api/stock-mata/delete-by-date/${date}`, {
+            method: 'DELETE'
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showStockNotification(
+                `✅ ${result.count} entrée(s) supprimée(s) avec succès pour la date ${date}`,
+                'success'
+            );
+            
+            // Close modal
+            closeDeleteByDateModal();
+            
+            // Reload stock data
+            await loadStockData();
+            
+            // Reload dashboard summary if visible
+            const dashboardStartDate = document.getElementById('dashboard-start-date')?.value;
+            const dashboardEndDate = document.getElementById('dashboard-end-date')?.value;
+            if (dashboardStartDate && dashboardEndDate) {
+                await loadStockSummary(dashboardStartDate, dashboardEndDate);
+            }
+            
+        } else {
+            throw new Error(result.error || 'Erreur lors de la suppression');
+        }
+        
+    } catch (error) {
+        console.error('Erreur lors de la suppression par date:', error);
+        showStockNotification(`❌ ${error.message}`, 'error');
+    } finally {
+        // Reset button
+        const deleteBtn = document.getElementById('confirm-delete-by-date-btn');
+        if (deleteBtn) {
+            deleteBtn.disabled = false;
+            deleteBtn.innerHTML = '<i class="fas fa-trash-alt"></i> Supprimer Définitivement';
+        }
     }
 }
 

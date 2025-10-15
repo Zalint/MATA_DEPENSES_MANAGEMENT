@@ -9642,6 +9642,56 @@ app.delete('/api/stock-mata/:id', requireAdminAuth, async (req, res) => {
     }
 });
 
+// Route pour supprimer toutes les entrées de stock d'une date donnée
+app.delete('/api/stock-mata/delete-by-date/:date', requireAdminAuth, async (req, res) => {
+    try {
+        const { date } = req.params;
+        const username = req.session?.user?.username || 'Unknown';
+        const userRole = req.session?.user?.role || 'Unknown';
+        
+        console.log(`🗑️ SERVER: Demande de suppression de stock pour la date ${date} par ${username} (${userRole})`);
+        
+        // Vérifier que la date est au bon format (YYYY-MM-DD)
+        if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+            console.log('❌ SERVER: Format de date invalide:', date);
+            return res.status(400).json({ error: 'Format de date invalide. Utilisez YYYY-MM-DD' });
+        }
+        
+        // Compter d'abord le nombre d'entrées à supprimer
+        const countResult = await pool.query(
+            'SELECT COUNT(*) as count FROM stock_mata WHERE date = $1',
+            [date]
+        );
+        
+        const countToDelete = parseInt(countResult.rows[0].count);
+        console.log(`📊 SERVER: ${countToDelete} entrée(s) trouvée(s) pour la date ${date}`);
+        
+        if (countToDelete === 0) {
+            console.log('⚠️ SERVER: Aucune entrée à supprimer pour cette date');
+            return res.status(404).json({ error: 'Aucune entrée trouvée pour cette date' });
+        }
+        
+        // Supprimer toutes les entrées pour cette date
+        const result = await pool.query(
+            'DELETE FROM stock_mata WHERE date = $1 RETURNING id, point_de_vente, produit',
+            [date]
+        );
+        
+        console.log(`✅ SERVER: ${result.rows.length} entrée(s) supprimée(s) avec succès pour la date ${date}`);
+        
+        res.json({
+            message: `${result.rows.length} entrée(s) de stock supprimée(s) avec succès pour la date ${date}`,
+            count: result.rows.length,
+            date: date,
+            deleted_by: username,
+            deleted_items: result.rows
+        });
+    } catch (error) {
+        console.error('❌ SERVER: Erreur suppression stock par date:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+    }
+});
+
 // Route pour récupérer une entrée spécifique
 app.get('/api/stock-mata/:id', requireAdminAuth, async (req, res) => {
     try {

@@ -2174,6 +2174,9 @@
                             <button id="view-stats-btn" class="btn btn-info">
                                 <i class="fas fa-chart-bar"></i> Statistiques
                             </button>
+                            <button id="delete-by-date-btn" class="btn btn-danger" onclick="openDeleteByDateModal()">
+                                <i class="fas fa-trash-alt"></i> Supprimer par Date
+                            </button>
                         </div>
                     </div>
 
@@ -3838,6 +3841,51 @@
                 </button>
                 <button type="button" class="btn btn-primary" id="confirm-copy-btn" onclick="confirmCopyStockData()" disabled>
                     <i class="fas fa-copy"></i> Copier les données
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal pour supprimer tout le stock d'une date -->
+    <div id="delete-by-date-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-exclamation-triangle"></i> Supprimer le Stock par Date</h2>
+                <span class="close" onclick="closeDeleteByDateModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="delete-warning">
+                    <p style="color: #d9534f; font-weight: bold;">
+                        <i class="fas fa-exclamation-circle"></i> 
+                        ATTENTION : Cette action supprimera TOUTES les entrées de stock pour la date sélectionnée.
+                    </p>
+                    <p>Cette action est irréversible. Veuillez confirmer la date avant de continuer.</p>
+                </div>
+                
+                <div class="form-group">
+                    <label for="delete-stock-date">Sélectionnez la date à supprimer</label>
+                    <input type="date" id="delete-stock-date" class="form-control" required>
+                    <small class="form-help">Format: YYYY-MM-DD (ex: 2025-10-15)</small>
+                </div>
+                
+                <div id="delete-stock-preview" class="delete-preview" style="display: none;">
+                    <h4>Aperçu des données à supprimer :</h4>
+                    <div class="preview-stats">
+                        <p><strong>Date :</strong> <span id="delete-preview-date"></span></p>
+                        <p><strong>Nombre d'entrées :</strong> <span id="delete-preview-count"></span></p>
+                        <p><strong>Points de vente :</strong> <span id="delete-preview-points"></span></p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeDeleteByDateModal()">
+                    <i class="fas fa-times"></i> Annuler
+                </button>
+                <button type="button" class="btn btn-info" id="preview-delete-btn" onclick="previewDeleteByDate()">
+                    <i class="fas fa-eye"></i> Prévisualiser
+                </button>
+                <button type="button" class="btn btn-danger" id="confirm-delete-by-date-btn" onclick="confirmDeleteByDate()" disabled>
+                    <i class="fas fa-trash-alt"></i> Supprimer Définitivement
                 </button>
             </div>
         </div>
