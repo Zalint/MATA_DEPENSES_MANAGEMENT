@@ -9407,17 +9407,30 @@ Voici le contexte global:
 Analyses partielles:
 ${chunkAnalyses.map((a, i) => `\n--- Segment ${i + 1} ---\n${a}`).join('\n')}
 
-Tâche: Synthétise ces analyses en un rapport cohérent et structuré en français avec:
+Tâche: Synthétise ces analyses en un rapport cohérent et structuré en français avec les sections suivantes (utilise EXACTEMENT ce format de numérotation) :
 
-1. **Paragraphe sur les Dépenses de la Période**: Vue d'ensemble des dépenses
-2. **Top 5 des Plus Grosses Dépenses**: Liste des 5 plus grosses dépenses mentionnées
-3. **Résumé Exécutif**: 2-3 phrases sur la santé financière globale
-4. **Métriques Clés**: Position de trésorerie, P&L, burn rate
-5. **Insights & Alertes**: Problèmes critiques nécessitant attention
-6. **Analyse des Comptes**: Performance par type de compte
-7. **Recommandations**: Actions concrètes pour améliorer la situation
+1. Dépenses de la Période
+Vue d'ensemble des dépenses de la période analysée.
 
-Sois concis et actionnable. Concentre-toi sur les problèmes les plus critiques.`;
+2. Top 5 des Plus Grosses Dépenses
+Liste des 5 plus grosses dépenses mentionnées avec leurs montants.
+
+3. Résumé Exécutif
+2-3 phrases sur la santé financière globale.
+
+4. Métriques Clés
+Position de trésorerie, P&L, burn rate.
+
+5. Alertes
+Problèmes critiques nécessitant attention immédiate.
+
+6. Analyse des Comptes
+Performance par type de compte.
+
+7. Recommandations
+Actions concrètes pour améliorer la situation.
+
+IMPORTANT: Utilise le format "1. Titre de section" (pas de sous-numérotation). Sois concis et actionnable.
     
     const completion = await openai.chat.completions.create({
         model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
