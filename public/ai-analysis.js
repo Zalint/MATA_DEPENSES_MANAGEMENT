@@ -190,13 +190,12 @@ function formatAIResponse(text) {
     let formatted = text
         .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')  // Bold
         .replace(/\*(.+?)\*/g, '<em>$1</em>')              // Italic
-        .replace(/^#{1,6}\s+(.+)$/gm, '<h4>$1</h4>')      // Headers
-        .replace(/^\d+\.\s+(.+)$/gm, '<li class="numbered-item">$1</li>')  // Numbered list items
+        .replace(/^#{1,6}\s+(.+)$/gm, '<h4>$1</h4>')      // Headers (with #)
+        // Convert section titles (1. Title, 2. Title, etc.) to h3
+        .replace(/^(\d+)\.\s+([A-ZÀ-Ü][^\n]{5,80})$/gm, '<h3>$1. $2</h3>')  // Section titles (capitalized, longer than 5 chars)
         .replace(/^-\s+(.+)$/gm, '<li>$1</li>')           // Bullet list items
         .replace(/\n\n/g, '</p><p>')                       // Paragraphs
-        .replace(/<li class="numbered-item">/g, '<ol><li class="numbered-item">')  // Start numbered lists
-        .replace(/<\/li>\n(?!<li class="numbered-item">)/g, '</li></ol>')  // End numbered lists
-        .replace(/<li>(?!.*class)/g, '<ul><li>')           // Start bullet lists
+        .replace(/<li>/g, '<ul><li>')                     // Start bullet lists
         .replace(/<\/li>\n(?!<li>)/g, '</li></ul>');      // End bullet lists
     
     return `<p>${formatted}</p>`;

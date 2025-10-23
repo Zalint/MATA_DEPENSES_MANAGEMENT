@@ -9,6 +9,10 @@ yarn-error.log
 .env.local
 .env.*.local
 
+# Local scripts with secrets
+start_preprod.ps1
+*.ps1.bak
+
 # IDE
 .idea/
 .vscode/
