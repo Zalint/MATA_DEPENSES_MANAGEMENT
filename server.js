@@ -2906,10 +2906,11 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         const totalPartnerBalance = parseInt(partnerBalanceResult.rows[0].total);
         
         // 7. Calcul de la nouvelle carte PL (sans stock + charges)
-        // PL = Cash Bictorys Du mois + Créances du Mois + Stock Point de Vente - Cash Burn du Mois
+        // PL = Cash Bictorys Du mois + Créances du Mois - Remboursements du Mois + Stock Point de Vente - Cash Burn du Mois
         let plSansStockCharges = 0;
         let cashBictorysValue = 0;
         let creancesMoisValue = 25000;
+        let remboursementsMoisValue = 0;
         let stockPointVenteValue = 0;
         
         // Variables pour stocker les détails des calculs
@@ -3065,6 +3066,69 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 creancesMoisValue = 0;
             }
             
+            // Calculer les remboursements du mois
+            console.log('\n🔍 ===== DÉBUT CALCUL REMBOURSEMENTS =====');
+            console.log(`🔍 monthYear: ${monthYear}`);
+            console.log(`🔍 cutoff_date: ${cutoff_date}`);
+            remboursementsMoisValue = 0;
+            try {
+                const userRole = req.session.user.role;
+                const userId = req.session.user.id;
+                console.log(`🔍 User role: ${userRole}, User ID: ${userId}`);
+
+                let accountFilter = '';
+                let remboursementsParams = [];
+
+                // Filtrer selon les permissions
+                if (userRole === 'directeur') {
+                    accountFilter = 'AND a.user_id = $1';
+                    remboursementsParams = [userId];
+                }
+
+                // Calculer les dates selon le mois demandé
+                let startOfMonth, endOfMonth;
+                
+                const [year, monthNum] = monthYear.split('-').map(Number);
+                startOfMonth = new Date(year, monthNum - 1, 1);
+                endOfMonth = new Date(year, monthNum, 0, 23, 59, 59);
+
+                const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
+                let endOfMonthStr = endOfMonth.toISOString().split('T')[0] + ' 23:59:59';
+                
+                // Si cutoff_date est fourni, l'utiliser comme date de fin
+                if (cutoff_date) {
+                    endOfMonthStr = referenceDateStr + ' 23:59:59';
+                }
+
+                // Paramètres pour la requête
+                const queryParams = userRole === 'directeur' ? [userId, startOfMonthStr, endOfMonthStr] : [startOfMonthStr, endOfMonthStr];
+
+                // Requête pour calculer les remboursements du mois (type 'debit' dans la base)
+                const remboursementsQuery = `
+                    SELECT 
+                        COALESCE(SUM(co.amount), 0) as remboursements_mois
+                    FROM creance_operations co
+                    JOIN creance_clients cc ON co.client_id = cc.id
+                    JOIN accounts a ON cc.account_id = a.id
+                    WHERE co.operation_type = 'debit'
+                    AND co.operation_date >= $${queryParams.length - 1}
+                    AND co.operation_date <= $${queryParams.length}
+                    AND a.account_type = 'creance' 
+                    AND a.is_active = true 
+                    AND cc.is_active = true
+                    ${accountFilter}
+                `;
+
+                const remboursementsResult = await pool.query(remboursementsQuery, queryParams);
+                remboursementsMoisValue = parseInt(remboursementsResult.rows[0].remboursements_mois) || 0;
+                
+                console.log(`💰 Remboursements du mois calculés directement (jusqu'au ${cutoff_date || 'aujourd\'hui'}): ${remboursementsMoisValue} FCFA`);
+                
+            } catch (error) {
+                console.error('Erreur calcul remboursements du mois:', error);
+                remboursementsMoisValue = 0;
+            }
+            
             // Calculer l'écart mensuel du Stock Mata (même logique que stock vivant)
             let stockMataVariation = 0;
             
@@ -3146,10 +3210,10 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 console.log(`📦 Écart Stock Mata Mensuel PL: ${stockPointVenteValue} FCFA (pas de date de référence)`);
             }
             
-            // Calculer PL = Cash Bictorys + Créances du Mois + Stock Point de Vente - Cash Burn du Mois
-            plSansStockCharges = cashBictorysValue + creancesMoisValue + stockPointVenteValue - totalSpent;
+            // Calculer PL = Cash Bictorys + Créances du Mois - Remboursements du Mois + Stock Point de Vente - Cash Burn du Mois
+            plSansStockCharges = cashBictorysValue + creancesMoisValue - remboursementsMoisValue + stockPointVenteValue - totalSpent;
             
-            console.log(`📊 Calcul PL: Cash Bictorys (${cashBictorysValue}) + Créances Mois (${creancesMoisValue}) + Écart Stock Mata (${stockPointVenteValue}) - Cash Burn (${totalSpent}) = ${plSansStockCharges}`);
+            console.log(`📊 Calcul PL: Cash Bictorys (${cashBictorysValue}) + Créances Mois (${creancesMoisValue}) - Remboursements Mois (${remboursementsMoisValue}) + Écart Stock Mata (${stockPointVenteValue}) - Cash Burn (${totalSpent}) = ${plSansStockCharges}`);
             
         } catch (error) {
             console.error('Erreur calcul PL:', error);
@@ -3490,9 +3554,10 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             console.log('🔍=== DÉTAIL CALCUL PL (avec ecart stock mensuel et une estim. charges) ===');
             console.log(`💰 Cash Bictorys du mois: ${cashBictorysValue} FCFA`);
             console.log(`💳 Créances du mois: ${creancesMoisValue} FCFA`);
+            console.log(`💵 Remboursements du mois: ${remboursementsMoisValue} FCFA`);
             console.log(`📦 Écart Stock Mata Mensuel: ${stockPointVenteValue} FCFA`);
             console.log(`💸 Cash Burn du mois: ${totalSpent} FCFA`);
-            console.log(`📊 PL de base = ${cashBictorysValue} + ${creancesMoisValue} + ${stockPointVenteValue} - ${totalSpent} = ${plSansStockCharges} FCFA`);
+            console.log(`📊 PL de base = ${cashBictorysValue} + ${creancesMoisValue} - ${remboursementsMoisValue} + ${stockPointVenteValue} - ${totalSpent} = ${plSansStockCharges} FCFA`);
             console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA`);
             console.log(`🚚 Livraisons partenaires du mois: ${livraisonsPartenaires} FCFA`);
             console.log(`⚙️ Estimation charges fixes mensuelle: ${chargesFixesEstimation} FCFA`);
@@ -3505,6 +3570,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             plCalculationDetails = {
                 cashBictorys: cashBictorysValue,
                 creances: creancesMoisValue,
+                remboursements: remboursementsMoisValue,
                 stockPointVente: stockPointVenteValue,
                 stockVivantVariation: stockVivantVariation,
                 livraisonsPartenaires: livraisonsPartenaires,
@@ -3563,6 +3629,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             plCalculationDetails = {
                 cashBictorys: cashBictorysValue,
                 creances: creancesMoisValue,
+                remboursements: remboursementsMoisValue,
                 stockPointVente: stockPointVenteValue,
                 stockVivantVariation: stockVivantVariation,
                 livraisonsPartenaires: livraisonsPartenaires,
@@ -7659,9 +7726,29 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
     console.log('🌐 EXTERNAL: Appel API status avec params:', req.query);
     
     try {
-        // Déterminer la date sélectionnée (today par défaut)
-        const selectedDate = req.query.date ? new Date(req.query.date) : new Date();
-        const selectedDateStr = selectedDate.toISOString().split('T')[0];
+        // Déterminer les dates (date range ou date unique)
+        let startDateStr, endDateStr;
+        let isRangeMode = false;
+        
+        if (req.query.start_date && req.query.end_date) {
+            // Mode date range
+            isRangeMode = true;
+            startDateStr = new Date(req.query.start_date).toISOString().split('T')[0];
+            endDateStr = new Date(req.query.end_date).toISOString().split('T')[0];
+        } else if (req.query.date) {
+            // Mode date unique (backward compatibility)
+            startDateStr = new Date(req.query.date).toISOString().split('T')[0];
+            endDateStr = startDateStr;
+        } else {
+            // Par défaut: date d'aujourd'hui
+            const today = new Date().toISOString().split('T')[0];
+            startDateStr = today;
+            endDateStr = today;
+        }
+        
+        // Pour la compatibilité avec le reste du code, selectedDate = endDate
+        const selectedDate = new Date(endDateStr);
+        const selectedDateStr = endDateStr;
         
         // Dates pour les calculs
         const startOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
@@ -7678,7 +7765,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         const previousMonthStr = previousMonth.toISOString().split('T')[0];
         const endOfPreviousMonthStr = endOfPreviousMonth.toISOString().split('T')[0];
         
-        console.log(`📅 EXTERNAL: Dates calculées - Sélectionnée: ${selectedDateStr}, Début du mois: ${startOfMonthStr}, Début semaine: ${startOfWeekStr}`);
+        console.log(`📅 EXTERNAL: Dates calculées - ${isRangeMode ? `Range: ${startDateStr} to ${endDateStr}` : `Sélectionnée: ${selectedDateStr}`}, Début du mois: ${startOfMonthStr}, Début semaine: ${startOfWeekStr}`);
 
         // Récupérer tous les comptes actifs
         const accountsQuery = `
@@ -7725,15 +7812,15 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 }
             };
 
-            // ===== 1. DAILY EXPENSES =====
+            // ===== 1. DAILY EXPENSES (or RANGE EXPENSES) =====
             const dailyExpensesQuery = `
                 SELECT id, designation, supplier, total, category, subcategory, expense_type, 
                        created_at, description
                 FROM expenses 
-                WHERE account_id = $1 AND expense_date = $2
+                WHERE account_id = $1 AND expense_date >= $2 AND expense_date <= $3
                 ORDER BY created_at DESC
             `;
-            const dailyExpensesResult = await pool.query(dailyExpensesQuery, [accountId, selectedDateStr]);
+            const dailyExpensesResult = await pool.query(dailyExpensesQuery, [accountId, startDateStr, endDateStr]);
             
             const dailyExpensesTotal = dailyExpensesResult.rows.reduce((sum, exp) => sum + (parseFloat(exp.total) || 0), 0);
             const remainingDailyBalance = (parseFloat(account.current_balance) || 0) - dailyExpensesTotal;
@@ -7784,7 +7871,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                         adresse: ""
                     }));
 
-                    // Récupération des opérations de la date sélectionnée
+                    // Récupération des opérations de la date sélectionnée ou du range
                     const operationsQuery = `
                         SELECT 
                             co.operation_date,
@@ -7797,10 +7884,10 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                         FROM creance_operations co
                         JOIN creance_clients cc ON co.client_id = cc.id
                         LEFT JOIN users u ON co.created_by = u.id
-                        WHERE co.operation_date = $1 AND co.account_id = $2
+                        WHERE co.operation_date >= $1 AND co.operation_date <= $2 AND co.account_id = $3
                         ORDER BY co.created_at DESC
                     `;
-                    const operationsResult = await pool.query(operationsQuery, [selectedDateStr, accountId]);
+                    const operationsResult = await pool.query(operationsQuery, [startDateStr, endDateStr, accountId]);
                     
                     const operations = operationsResult.rows.map(op => ({
                         date_operation: op.operation_date,
@@ -7864,17 +7951,17 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
 
 
 
-            // ===== 4. DAILY CREANCE =====
+            // ===== 4. DAILY CREANCE (or RANGE CREANCE) =====
             if (account.account_type === 'creance') {
                 try {
                     const dailyCreanceQuery = `
                         SELECT cc.client_name, cc.client_phone, co.amount, co.operation_type, co.description
                         FROM creance_operations co
                         JOIN creance_clients cc ON co.client_id = cc.id
-                        WHERE co.operation_date = $1 AND co.account_id = $2
+                        WHERE co.operation_date >= $1 AND co.operation_date <= $2 AND co.account_id = $3
                         ORDER BY cc.client_name
                     `;
-                    const dailyCreanceResult = await pool.query(dailyCreanceQuery, [selectedDateStr, accountId]);
+                    const dailyCreanceResult = await pool.query(dailyCreanceQuery, [startDateStr, endDateStr, accountId]);
                     const dailyCreanceTotal = dailyCreanceResult.rows.reduce((sum, creance) => {
                         const amount = parseInt(creance.amount) || 0;
                         return sum + (creance.operation_type === 'credit' ? amount : -amount);
@@ -8199,15 +8286,16 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 const stockSoirQuery = `
                     SELECT date, point_de_vente, produit, stock_matin, stock_soir, transfert
                     FROM stock_mata 
-                    WHERE date = $1
-                    ORDER BY point_de_vente, produit
+                    WHERE date >= $1 AND date <= $2
+                    ORDER BY point_de_vente, produit, date
                 `;
-                const stockSoirResult = await pool.query(stockSoirQuery, [selectedDateStr]);
+                const stockSoirResult = await pool.query(stockSoirQuery, [startDateStr, endDateStr]);
                 const totalStockSoir = stockSoirResult.rows.reduce((sum, stock) => sum + (parseFloat(stock.stock_soir) || 0), 0);
                 
             globalStockSoirMataData = {
-                    date: selectedDateStr,
+                    date: isRangeMode ? `${startDateStr} to ${endDateStr}` : selectedDateStr,
                     entries: stockSoirResult.rows.map(stock => ({
+                        date: stock.date,
                         point_de_vente: stock.point_de_vente,
                         produit: stock.produit,
                         stock_matin: parseFloat(stock.stock_matin) || 0,
@@ -8228,64 +8316,29 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
 
         // ===== CALCULS GLOBAUX PL ET SOLDES =====
         
+        // Définir monthYear pour les autres requêtes
+        const monthYear = selectedDateStr.substring(0, 7); // Format YYYY-MM
+        
         // Récupération des données pour les calculs PL
-        // Calculer la somme des balances mensuelles (même logique que l'interface)
+        // Calculer le Cash Disponible en utilisant la somme des current_balance
+        // des comptes de type 'classique' et 'statut' (même logique que l'interface)
         let totalBalance = 0;
         try {
-            const monthlyBalanceQuery = `
-                SELECT 
-                    a.account_type,
-                    COALESCE(SUM(e.total), 0) as monthly_credits,
-                    COALESCE(SUM(exp.total), 0) as spent,
-                    COALESCE(SUM(CASE WHEN a.id = t.destination_id THEN t.montant ELSE -t.montant END), 0) as net_transfers,
-                    COALESCE(mdm.montant, 0) as montant_debut_mois
-                FROM accounts a
-                LEFT JOIN expenses e ON a.id = e.account_id 
-                    AND e.expense_date >= $1 
-                    AND e.expense_date <= $2
-                LEFT JOIN expenses exp ON a.id = exp.account_id 
-                    AND exp.expense_date >= $1 
-                    AND exp.expense_date <= $2
-                LEFT JOIN transfer_history t ON (a.id = t.source_id OR a.id = t.destination_id)
-                    AND t.created_at::date >= $1 
-                    AND t.created_at::date <= $2
-                LEFT JOIN montant_debut_mois mdm ON a.id = mdm.account_id 
-                    AND mdm.month_year = $3
-                WHERE a.is_active = true
-                GROUP BY a.id, a.account_type, mdm.montant
+            const balanceQuery = `
+                SELECT COALESCE(SUM(current_balance), 0) as total_balance
+                FROM accounts
+                WHERE is_active = true
+                AND account_type IN ('classique', 'statut')
             `;
-            
-            const monthlyBalanceResult = await pool.query(monthlyBalanceQuery, [startOfMonthStr, selectedDateStr, monthYear]);
-            
-            monthlyBalanceResult.rows.forEach(row => {
-                const monthlyCredits = parseInt(row.monthly_credits || 0);
-                const spent = parseInt(row.spent || 0);
-                const netTransfers = parseInt(row.net_transfers || 0);
-                const montantDebutMois = parseInt(row.montant_debut_mois || 0);
-                
-                let monthlyBalance;
-                if (row.account_type === 'classique') {
-                    monthlyBalance = monthlyCredits - spent + netTransfers + montantDebutMois;
-                } else {
-                    monthlyBalance = monthlyCredits - spent + netTransfers;
-                }
-                
-                totalBalance += monthlyBalance;
-            });
+            const balanceResult = await pool.query(balanceQuery);
+            totalBalance = parseFloat(balanceResult.rows[0]?.total_balance) || 0;
+            console.log(`💰 Cash Disponible (current_balance sum): ${totalBalance.toLocaleString()} FCFA`);
         } catch (error) {
-            console.error('Erreur calcul balance mensuelle:', error);
-            // Fallback au calcul simple
-        const totalBalanceQuery = `
-            SELECT SUM(current_balance) as total_balance
-            FROM accounts 
-            WHERE is_active = true
-        `;
-        const totalBalanceResult = await pool.query(totalBalanceQuery);
-            totalBalance = parseFloat(totalBalanceResult.rows[0]?.total_balance) || 0;
+            console.error('Erreur calcul cash disponible:', error);
+            totalBalance = 0;
         }
 
         // Récupérer la vraie valeur Cash Bictorys du mois (même logique que l'application)
-        const monthYear = selectedDateStr.substring(0, 7); // Format YYYY-MM
         const cashBictorysQuery = `
             SELECT amount
             FROM cash_bictorys
@@ -8323,11 +8376,14 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             cashBictorysValue = fallbackCashBictorysResult.rows.length > 0 ? parseInt(fallbackCashBictorysResult.rows[0].amount) || 0 : 0;
         }
 
+        // Calculer le Cash Burn du Mois en excluant depot, partenaire et creance (même logique que dashboard)
         const monthlyExpensesGlobalQuery = `
             SELECT SUM(total) as total_monthly_expenses
             FROM expenses e
             JOIN accounts a ON e.account_id = a.id
-            WHERE a.is_active = true AND e.expense_date >= $1 AND e.expense_date <= $2
+            WHERE a.is_active = true 
+            AND a.account_type IN ('classique', 'statut')
+            AND e.expense_date >= $1 AND e.expense_date <= $2
         `;
         const monthlyExpensesGlobalResult = await pool.query(monthlyExpensesGlobalQuery, [startOfMonthStr, selectedDateStr]);
         const totalMonthlyExpenses = parseFloat(monthlyExpensesGlobalResult.rows[0]?.total_monthly_expenses) || 0;
@@ -8361,6 +8417,29 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         } catch (error) {
             console.error('Erreur calcul créances:', error);
             totalCreance = 0;
+        }
+
+        // Calcul des remboursements du mois (à soustraire du PL car déjà dans Cash Bictorys)
+        let totalRemboursements = 0;
+        try {
+            const remboursementsQuery = `
+                SELECT COALESCE(SUM(co.amount), 0) as remboursements_mois
+                FROM creance_operations co
+                JOIN creance_clients cc ON co.client_id = cc.id
+                JOIN accounts a ON cc.account_id = a.id
+                WHERE co.operation_type = 'debit'
+                AND co.operation_date >= $1
+                AND co.operation_date <= $2
+                AND a.account_type = 'creance' 
+                AND a.is_active = true 
+                AND cc.is_active = true
+            `;
+            const remboursementsResult = await pool.query(remboursementsQuery, [startOfMonthStr, selectedDateStr]);
+            totalRemboursements = parseInt(remboursementsResult.rows[0]?.remboursements_mois) || 0;
+            console.log(`💰 Remboursements du mois: ${totalRemboursements.toLocaleString()} FCFA`);
+        } catch (error) {
+            console.error('Erreur calcul remboursements:', error);
+            totalRemboursements = 0;
         }
 
         const totalDeliveriesGlobalQuery = `
@@ -8530,7 +8609,8 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         }
         
         // Calculs PL (même logique que l'interface)
-        const plSansStockCharges = cashBictorysValue + totalCreance + totalStockSoir - totalMonthlyExpenses;
+        // NOTE: On soustrait totalRemboursements car ils sont déjà inclus dans cashBictorysValue
+        const plSansStockCharges = cashBictorysValue + totalCreance - totalRemboursements + totalStockSoir - totalMonthlyExpenses;
         const brutPL = plSansStockCharges + stockVivantVariation - totalDeliveriesMonth;
         const estimatedPL = plSansStockCharges + stockVivantVariation - chargesProrata - totalDeliveriesMonth;
 
@@ -8541,6 +8621,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     components: {
                         cash_bictorys: cashBictorysValue,
                         creances: totalCreance,
+                        remboursements: -totalRemboursements,
                         stock_pv: totalStockSoir,
                         cash_burn: -totalMonthlyExpenses,
                         pl_sans_stock_charges: plSansStockCharges,
@@ -8564,8 +8645,10 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 }
             },
             balances: {
-                balance_du_mois: totalBalance,
-                cash_disponible: totalBalance - totalMonthlyExpenses,
+                // Per request: ignore balance_du_mois in API (set to 0)
+                balance_du_mois: 0,
+                // Cash disponible computed directly as credits(all) - expenses + net transfers for classique/statut
+                cash_disponible: totalBalance,
                 cash_burn_du_mois: totalMonthlyExpenses,
                 cash_bictorys_du_mois: cashBictorysValue,
                 cash_burn_depuis_lundi: totalWeeklyExpenses
@@ -8592,8 +8675,11 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
 
         const response = {
             success: true,
-            date_selected: selectedDateStr,
+            date_selected: isRangeMode ? `${startDateStr} to ${endDateStr}` : selectedDateStr,
             period_info: {
+                is_range_mode: isRangeMode,
+                start_date: startDateStr,
+                end_date: endDateStr,
                 selected_date: selectedDateStr,
                 start_of_month: startOfMonthStr,
                 start_of_week: startOfWeekStr,
@@ -9053,6 +9139,145 @@ app.delete('/api/snapshots/:date', requireAdminAuth, async (req, res) => {
             success: false,
             message: 'Erreur lors de la suppression du snapshot',
             error: error.message
+        });
+    }
+});
+
+// ========================================
+// 🤖 AI ANALYSIS ENDPOINT
+// ========================================
+
+// Initialize OpenAI client (optional)
+let openai = null;
+if (process.env.OPENAI_API_KEY) {
+    openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY
+    });
+    console.log('✅ OpenAI client initialized');
+} else {
+    console.log('⚠️ OpenAI API key not found - AI analysis will be disabled');
+}
+
+// AI Analysis endpoint
+app.get('/api/ai-analysis', requireAuth, async (req, res) => {
+    try {
+        // Check if OpenAI is available
+        if (!openai) {
+            return res.status(503).json({
+                success: false,
+                error: 'Service d\'analyse IA non disponible - clé API manquante'
+            });
+        }
+        
+        const { selected_date, start_date, end_date } = req.query;
+        
+        console.log('🤖 AI Analysis request:', { selected_date, start_date, end_date });
+        
+        // Build parameters for external API
+        const apiParams = new URLSearchParams();
+        if (selected_date) {
+            // /external/api/status expects 'date' parameter, not 'selected_date'
+            apiParams.append('date', selected_date);
+        } else if (start_date && end_date) {
+            apiParams.append('start_date', start_date);
+            apiParams.append('end_date', end_date);
+        } else {
+            return res.status(400).json({
+                success: false,
+                error: 'Veuillez fournir soit selected_date, soit start_date et end_date'
+            });
+        }
+        
+        // Fetch financial data from internal API
+        const baseUrl = getAppBaseUrl(req);
+        const apiUrl = `${baseUrl}/external/api/status?${apiParams.toString()}`;
+        
+        console.log('🔗 Fetching data from:', apiUrl);
+        
+        const axios = require('axios');
+        const financialResponse = await axios.get(apiUrl, {
+            headers: {
+                'Cookie': req.headers.cookie // Forward session cookie
+            }
+        });
+        
+        const financialData = financialResponse.data;
+        console.log('📊 Financial data received');
+        
+        // Build AI prompt with comprehensive context
+        const systemPrompt = `You are analyzing financial status data from the Mata Group expense management system, a meat and poultry distribution business operating in Senegal. The data comes from the /external/api/status API endpoint that provides comprehensive financial snapshots.
+
+## BUSINESS CONTEXT
+
+**Company**: Mata Group - Meat & Poultry Distribution
+**Operations**: Multiple sales points (Dahra, Linguere, Keur Massar, Mbao, Ouest Foire, Sacré Coeur) selling beef, lamb, chicken, and related products
+**Business Model**: 
+- Direct sales through retail points (Points de Vente)
+- Credit/debt management for wholesale clients (Créances)
+- Partnership accounts for poultry suppliers (Partenaires)
+- Live animal stock management (Stock Vivant)
+- Daily inventory tracking (Stock Mata)
+
+## YOUR TASK
+
+Analyze the provided financial data and generate:
+
+1. **Executive Summary** (2-3 sentences): Overall financial health
+2. **Key Metrics Analysis**: Cash position, P&L, burn rate
+3. **Insights & Alerts**: Critical issues requiring attention
+4. **Account Analysis**: Performance by account type
+5. **Recommendations**: Actionable steps to improve financial position
+
+Respond in French. Be concise and actionable. Focus on the most critical issues first.`;
+        
+        const userPrompt = `Analyse ces données financières et fournis des insights détaillés:
+
+${JSON.stringify(financialData, null, 2)}
+
+Fournis une analyse structurée en français avec:
+- Résumé exécutif
+- Métriques clés
+- Alertes et insights critiques
+- Analyse des comptes
+- Recommandations prioritaires`;
+        
+        console.log('🤖 Calling OpenAI API...');
+        
+        // Call OpenAI API
+        const completion = await openai.chat.completions.create({
+            model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ],
+            temperature: 0.7,
+            max_tokens: 2000
+        });
+        
+        const aiAnalysis = completion.choices[0].message.content;
+        
+        console.log('✅ AI Analysis completed');
+        
+        // Return both raw data and AI analysis
+        res.json({
+            success: true,
+            data: {
+                financial_data: financialData,
+                ai_analysis: aiAnalysis,
+                metadata: {
+                    model: completion.model,
+                    tokens_used: completion.usage.total_tokens,
+                    analysis_date: new Date().toISOString()
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in AI analysis:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Erreur lors de l\'analyse AI',
+            details: error.message
         });
     }
 });

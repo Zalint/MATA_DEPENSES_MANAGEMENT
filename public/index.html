@@ -418,6 +418,73 @@
                         <button id="reset-dashboard" class="btn btn-secondary">Aujourd'hui</button>
                     </div>
 
+                    <!-- AI Analysis Section -->
+                    <div class="ai-analysis-section" id="ai-analysis-section" style="margin-top: 30px;">
+                        <div class="ai-analysis-card">
+                            <div class="ai-analysis-header">
+                                <h3><i class="fas fa-brain"></i> Analyse AI Financière</h3>
+                                <p class="section-description">Analyse intelligente de la situation financière</p>
+                            </div>
+                            
+                            <div class="ai-analysis-controls">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="ai-analysis-mode">Mode d'analyse</label>
+                                        <select id="ai-analysis-mode" class="form-control">
+                                            <option value="single">Date unique</option>
+                                            <option value="range">Période (plage de dates)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group" id="ai-single-date-group">
+                                        <label for="ai-analysis-date">Date</label>
+                                        <input type="date" id="ai-analysis-date" class="form-control">
+                                    </div>
+                                    <div class="form-group" id="ai-start-date-group" style="display: none;">
+                                        <label for="ai-analysis-start-date">Date de début</label>
+                                        <input type="date" id="ai-analysis-start-date" class="form-control">
+                                    </div>
+                                    <div class="form-group" id="ai-end-date-group" style="display: none;">
+                                        <label for="ai-analysis-end-date">Date de fin</label>
+                                        <input type="date" id="ai-analysis-end-date" class="form-control">
+                                    </div>
+                                </div>
+                                <button id="run-ai-analysis" class="btn btn-primary">
+                                    <i class="fas fa-magic"></i> Lancer l'Analyse AI
+                                </button>
+                            </div>
+                            
+                            <!-- Analysis Results Display -->
+                            <div id="ai-analysis-results" class="ai-analysis-results" style="display: none;">
+                                <div class="analysis-content">
+                                    <div class="analysis-section" id="ai-summary-section">
+                                        <h4><i class="fas fa-info-circle"></i> Résumé Exécutif</h4>
+                                        <div id="ai-summary-content" class="analysis-text"></div>
+                                    </div>
+                                    
+                                    <div class="analysis-section" id="ai-metrics-section">
+                                        <h4><i class="fas fa-chart-bar"></i> Métriques Clés</h4>
+                                        <div id="ai-metrics-content" class="metrics-grid"></div>
+                                    </div>
+                                    
+                                    <div class="analysis-section" id="ai-insights-section">
+                                        <h4><i class="fas fa-lightbulb"></i> Insights & Alertes</h4>
+                                        <div id="ai-insights-content" class="analysis-text"></div>
+                                    </div>
+                                    
+                                    <div class="analysis-section" id="ai-accounts-section">
+                                        <h4><i class="fas fa-wallet"></i> Analyse par Compte</h4>
+                                        <div id="ai-accounts-content" class="accounts-analysis"></div>
+                                    </div>
+                                    
+                                    <div class="analysis-section" id="ai-recommendations-section">
+                                        <h4><i class="fas fa-clipboard-check"></i> Recommandations</h4>
+                                        <div id="ai-recommendations-content" class="analysis-text"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Cartes de statistiques -->
                     <div class="stats-cards">
                         <div class="stat-card">
@@ -3917,6 +3984,10 @@
                                 <span class="label">💳 Créances du mois:</span>
                                 <span class="value" id="pl-creances">0 FCFA</span>
                             </div>
+                            <div class="formula-item negative">
+                                <span class="label">🔄 Remboursements du mois:</span>
+                                <span class="value" id="pl-remboursements">0 FCFA</span>
+                            </div>
                             <div class="formula-item" onclick="togglePLDetails('stock-mata')" id="pl-stock-mata-item">
                                 <span class="label">📦 Écart Stock Mata Mensuel:</span>
                                 <span class="value" id="pl-stock-mata">0 FCFA</span>
@@ -5261,6 +5332,193 @@
             margin-right: 10px;
         }
         
+        /* AI Analysis Section Styles */
+        .ai-analysis-section {
+            margin-top: 30px;
+        }
+        
+        .ai-analysis-card {
+            background: white;
+            border-radius: 8px;
+            padding: 25px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .ai-analysis-header h3 {
+            margin: 0 0 10px 0;
+            color: #667eea;
+            font-size: 24px;
+        }
+        
+        .section-description {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .ai-analysis-controls {
+            margin-bottom: 25px;
+        }
+        
+        .ai-analysis-controls .form-row {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 15px;
+        }
+        
+        .ai-analysis-results {
+            margin-top: 30px;
+        }
+        
+        .analysis-section {
+            margin-bottom: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .analysis-section h4 {
+            margin-top: 0;
+            color: #333;
+            font-size: 18px;
+            margin-bottom: 15px;
+        }
+        
+        .ai-text-response {
+            line-height: 1.8;
+            color: #333;
+        }
+        
+        .ai-text-response p {
+            margin-bottom: 15px;
+        }
+        
+        .ai-text-response ul {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+        
+        .ai-text-response li {
+            margin-bottom: 8px;
+        }
+        
+        .ai-text-response strong {
+            color: #667eea;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+        }
+        
+        .metric-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .metric-label {
+            font-weight: 500;
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .metric-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .metric-value.positive {
+            color: #28a745;
+        }
+        
+        .metric-value.negative {
+            color: #dc3545;
+        }
+        
+        .alert {
+            padding: 12px 15px;
+            margin-bottom: 12px;
+            border-radius: 4px;
+            border-left: 4px solid;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+        
+        .alert i {
+            margin-top: 2px;
+        }
+        
+        .alert-success {
+            background: #d4edda;
+            border-color: #28a745;
+            color: #155724;
+        }
+        
+        .alert-warning {
+            background: #fff3cd;
+            border-color: #ffc107;
+            color: #856404;
+        }
+        
+        .alert-danger {
+            background: #f8d7da;
+            border-color: #dc3545;
+            color: #721c24;
+        }
+        
+        .accounts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+        }
+        
+        .accounts-grid h5 {
+            grid-column: 1 / -1;
+            margin: 20px 0 10px 0;
+            color: #667eea;
+            font-size: 16px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 5px;
+        }
+        
+        .account-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            transition: all 0.2s ease;
+        }
+        
+        .account-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+        }
+        
+        .account-name {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .account-balance {
+            font-size: 16px;
+            margin-bottom: 5px;
+        }
+        
+        .account-expenses {
+            color: #666;
+            font-size: 14px;
+        }
+        
         /* Responsive design pour les snapshots */
         @media (max-width: 768px) {
             .control-panel {
@@ -5316,5 +5574,6 @@
     
     <script src="app.js"></script>
     <script src="snapshots.js"></script>
+    <script src="ai-analysis.js"></script>
 </body>
-</html> 
+</html>

@@ -96,8 +96,21 @@ function formatCurrency(amount) {
 
 function formatDate(dateString) {
     console.log('🚚 DEBUG formatDate - Input dateString:', dateString);
+    
+    // Éviter les problèmes de timezone en parsant manuellement la date YYYY-MM-DD
+    if (typeof dateString === 'string' && dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        const [year, month, day] = dateString.split('-');
+        // Créer la date en heure locale pour éviter le décalage UTC
+        const date = new Date(year, month - 1, day);
+        console.log('🚚 DEBUG formatDate - Parsed Date object (local):', date);
+        const formatted = date.toLocaleDateString('fr-FR');
+        console.log('🚚 DEBUG formatDate - Formatted result:', formatted);
+        return formatted;
+    }
+    
+    // Fallback pour les autres formats de date
     const date = new Date(dateString);
-    console.log('🚚 DEBUG formatDate - Parsed Date object:', date);
+    console.log('🚚 DEBUG formatDate - Parsed Date object (fallback):', date);
     const formatted = date.toLocaleDateString('fr-FR');
     console.log('🚚 DEBUG formatDate - Formatted result:', formatted);
     return formatted;
@@ -522,6 +535,12 @@ async function loadInitialData() {
     
     // Stock vivant sera initialisé seulement quand on clique sur le menu
     console.log('ℹ️ CLIENT: Stock vivant sera initialisé à la demande');
+    
+    // Initialize AI Analysis module
+    if (typeof initAIAnalysis === 'function') {
+        initAIAnalysis();
+        console.log('✅ CLIENT: AI Analysis module initialized');
+    }
 }
 
 // Initialiser le menu collapse
@@ -1241,6 +1260,8 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.group('🔍 DÉTAIL CALCUL PL (sans stock + estim. charges)');
             console.log('💰 Cash Bictorys du mois:', formatCurrency(stats.plCalculationDetails.cashBictorys));
             console.log('💳 Créances du mois:', formatCurrency(stats.plCalculationDetails.creances));
+            console.log('💵 Remboursements du mois:', formatCurrency(stats.plCalculationDetails.remboursements || 0));
+            console.log('🔍 CLIENT: Valeur brute remboursements =', stats.plCalculationDetails.remboursements);
             console.log('📦 Écart Stock Mata Mensuel:', formatCurrency(stats.plCalculationDetails.stockPointVente));
             console.log('💸 Cash Burn du mois:', formatCurrency(stats.plCalculationDetails.cashBurn));
             console.log('📊 PL de base =', 
@@ -9379,48 +9400,42 @@ async function loadDashboardData(cutoffDate = null) {
             };
             
             stats.account_breakdown.forEach(acc => {
-                const name = (acc.account || '').toLowerCase();
-                console.log(`🏦 [CLIENT] Compte: ${acc.account} (${acc.account_type || 'unknown'})`);
+                const type = (acc.account_type || '').toLowerCase();
+                console.log(`🏦 [CLIENT] Compte: ${acc.account} (${type || 'unknown'})`);
                 console.log(`   💰 remaining: ${acc.remaining}, current_balance: ${acc.current_balance}, total_credited: ${acc.total_credited}, spent: ${acc.spent}`);
                 
-                if (
-                    name.includes('classique') ||
-                    name.includes('statut') ||
-                    name.includes('ajustement') ||
-                    (!name.includes('partenaire') && 
-                     !name.includes('fournisseur') && 
-                     !name.includes('depot'))
-                ) {
+                // Inclure STRICTEMENT uniquement les comptes 'classique' et 'statut'
+                if (type === 'classique' || type === 'statut') {
                     let balanceUsed = 0;
                     let sourceUsed = '';
                     if (typeof acc.remaining !== 'undefined') {
                         balanceUsed = parseInt(acc.remaining) || 0;
                         sourceUsed = 'remaining';
-                        console.log(`   ✅ [CLIENT] INCLUS avec remaining: ${balanceUsed.toLocaleString()} FCFA`);
+                        console.log(`   ✅ [CLIENT] INCLUS (type ${type}) avec remaining: ${balanceUsed.toLocaleString()} FCFA`);
                         solde += balanceUsed;
                     } else if (typeof acc.current_balance !== 'undefined') {
                         balanceUsed = parseInt(acc.current_balance) || 0;
                         sourceUsed = 'current_balance';
-                        console.log(`   ✅ [CLIENT] INCLUS avec current_balance: ${balanceUsed.toLocaleString()} FCFA`);
+                        console.log(`   ✅ [CLIENT] INCLUS (type ${type}) avec current_balance: ${balanceUsed.toLocaleString()} FCFA`);
                         solde += balanceUsed;
                     } else if (typeof acc.total_credited !== 'undefined' && typeof acc.spent !== 'undefined') {
                         balanceUsed = (parseInt(acc.total_credited) || 0) - (parseInt(acc.spent) || 0);
                         sourceUsed = 'calculé';
-                        console.log(`   ✅ [CLIENT] INCLUS avec calcul: ${balanceUsed.toLocaleString()} FCFA`);
+                        console.log(`   ✅ [CLIENT] INCLUS (type ${type}) avec calcul: ${balanceUsed.toLocaleString()} FCFA`);
                         solde += balanceUsed;
                     }
                     
                     lastCashCalculation.accounts.push({
                         name: acc.account,
-                        type: acc.account_type || 'unknown',
+                        type: type || 'unknown',
                         balance: balanceUsed,
                         source: sourceUsed
                     });
                 } else {
-                    console.log(`   ❌ [CLIENT] EXCLU (type: ${acc.account_type || 'unknown'})`);
+                    console.log(`   ❌ [CLIENT] EXCLU (type: ${type || 'unknown'})`);
                     lastCashCalculation.excludedAccounts.push({
                         name: acc.account,
-                        type: acc.account_type || 'unknown',
+                        type: type || 'unknown',
                         balance: parseInt(acc.remaining || acc.current_balance || 0)
                     });
                 }
@@ -18297,6 +18312,7 @@ function exportPLDetailsToExcel() {
         switch (key) {
             case 'cashBictorys': return plDetails.cashBictorys || 0;
             case 'creances': return plDetails.creances || 0;
+            case 'remboursements': return plDetails.remboursements || 0;
             case 'stockPointVente': return plDetails.stockPointVente || 0;
             case 'cashBurn': return plDetails.cashBurn || 0;
             case 'plBase': return plDetails.plBase || 0;
@@ -18326,6 +18342,7 @@ function exportPLDetailsToExcel() {
         ['PL DE BASE', ''],
         ['Cash Bictorys du mois', getRawValue('cashBictorys')],
         ['Créances du mois', getRawValue('creances')],
+        ['Remboursements du mois', -getRawValue('remboursements')],
         ['Écart Stock Mata Mensuel', getRawValue('stockPointVente')],
         ['Cash Burn du mois', getRawValue('cashBurn')],
         ['PL de base', getRawValue('plBase')],
@@ -18402,6 +18419,20 @@ function fillPLDetailsModal(details) {
     // Section PL de base
     document.getElementById('pl-cash-bictorys').textContent = formatCurrency(details.cashBictorys);
     document.getElementById('pl-creances').textContent = formatCurrency(details.creances);
+    
+    // Afficher les remboursements (nouveau)
+    console.log('🔍 CLIENT: Début affichage remboursements');
+    console.log('🔍 CLIENT: details.remboursements =', details.remboursements);
+    const remboursementsElement = document.getElementById('pl-remboursements');
+    if (remboursementsElement) {
+        const value = details.remboursements || 0;
+        console.log('🔍 CLIENT: Valeur à afficher:', value);
+        remboursementsElement.textContent = formatCurrency(value);
+        console.log('🔍 CLIENT: Texte affiché:', remboursementsElement.textContent);
+    } else {
+        console.error('❌ CLIENT: Élément pl-remboursements non trouvé dans le DOM');
+    }
+    
     document.getElementById('pl-stock-mata').textContent = formatCurrency(details.stockPointVente);
     document.getElementById('pl-cash-burn').textContent = formatCurrency(details.cashBurn);
     document.getElementById('pl-base-result').textContent = formatCurrency(details.plBase);
