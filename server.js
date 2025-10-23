@@ -9314,9 +9314,41 @@ function extractEssentialDataForAI(financialData) {
         });
     }
     
-    // Sort expenses by amount descending and keep only top 50
-    essential.all_expenses.sort((a, b) => b.amount - a.amount);
-    essential.all_expenses = essential.all_expenses.slice(0, 50);
+    // Agréger les dépenses par description/fournisseur identique
+    const expenseMap = new Map();
+    essential.all_expenses.forEach(expense => {
+        // Créer une clé unique basée sur description et fournisseur
+        const key = `${expense.description || 'N/A'}_${expense.supplier || 'N/A'}`;
+        
+        if (expenseMap.has(key)) {
+            // Si la clé existe, additionner le montant
+            const existing = expenseMap.get(key);
+            existing.amount += expense.amount;
+            existing.count = (existing.count || 1) + 1;
+            existing.accounts = existing.accounts || [existing.account];
+            if (!existing.accounts.includes(expense.account)) {
+                existing.accounts.push(expense.account);
+            }
+        } else {
+            // Nouvelle entrée
+            expenseMap.set(key, {
+                ...expense,
+                count: 1,
+                accounts: [expense.account]
+            });
+        }
+    });
+    
+    // Convertir la map en array et trier par montant décroissant
+    essential.all_expenses = Array.from(expenseMap.values())
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 50)
+        .map(expense => ({
+            ...expense,
+            // Ajouter une note si plusieurs occurrences
+            note: expense.count > 1 ? `${expense.count} achats similaires` : undefined,
+            account: expense.accounts.length > 1 ? expense.accounts.join(', ') : expense.account
+        }));
     
     return essential;
 }
