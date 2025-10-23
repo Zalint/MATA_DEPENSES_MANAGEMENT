@@ -16,6 +16,12 @@ $env:DB_PASSWORD="bonea2024"
 $env:SNAPSHOT_USERNAME="Saliou"
 $env:SNAPSHOT_PASSWORD="Murex2015"
 
+# Variables d'environnement pour OpenAI
+# IMPORTANT: Ne jamais commiter la vraie clé API dans le repo!
+# Utiliser un fichier .env local ou variables d'environnement système
+$env:OPENAI_API_KEY="your-api-key-here"
+$env:OPENAI_MODEL="gpt-4-turbo-preview"
+$env:AI_ANALYSIS_ENABLED="true"
 
 # Démarrage du serveur
 Write-Host "Démarrage de l'application Mata Dépenses Management en mode préprod..." -ForegroundColor Green

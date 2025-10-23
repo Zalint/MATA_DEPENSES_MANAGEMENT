@@ -529,6 +529,25 @@
                                     </button>
                                 </div>
                                 
+                                <!-- Export Buttons (visible only when results are shown) -->
+                                <div id="ai-export-controls" class="ai-export-controls" style="display: none; margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 6px;">
+                                    <h5 style="margin: 0 0 15px 0; color: #333;"><i class="fas fa-share-square"></i> Exporter l'analyse</h5>
+                                    <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                                        <button id="export-ai-pdf" class="btn btn-success">
+                                            <i class="fas fa-file-pdf"></i> Exporter en PDF
+                                        </button>
+                                        <button id="export-ai-html" class="btn btn-info">
+                                            <i class="fas fa-file-code"></i> Exporter en HTML
+                                        </button>
+                                        <button id="export-ai-word" class="btn btn-primary">
+                                            <i class="fas fa-file-word"></i> Exporter en Word
+                                        </button>
+                                        <button id="copy-ai-link" class="btn btn-secondary">
+                                            <i class="fas fa-link"></i> Copier le lien
+                                        </button>
+                                    </div>
+                                </div>
+                                
                                 <!-- Analysis Results Display -->
                                 <div id="ai-analysis-results" class="ai-analysis-results" style="display: none;">
                                 <div class="analysis-content">

@@ -456,6 +456,10 @@ function renderPLDetails(plDetails) {
                                 <span class="pl-label">💳 Créances du mois:</span>
                                 <span class="pl-value">${formatCurrency(plDetails.creancesMois)}</span>
                             </div>
+                            <div class="pl-item negative">
+                                <span class="pl-label">🔄 Remboursements du mois:</span>
+                                <span class="pl-value">-${formatCurrency(plDetails.remboursementsMois || 0)}</span>
+                            </div>
                             <div class="pl-item ${plDetails.ecartStockMata >= 0 ? 'positive' : 'negative'}">
                                 <span class="pl-label">📦 Écart Stock Mata Mensuel:</span>
                                 <span class="pl-value">${formatCurrency(plDetails.ecartStockMata)}</span>

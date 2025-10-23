@@ -2,6 +2,10 @@
 // AI ANALYSIS FUNCTIONALITY
 // =============================
 
+// Store current analysis data for export
+let currentAnalysisData = null;
+let currentAnalysisParams = null;
+
 // Initialize AI Analysis section
 function initAIAnalysis() {
     const modeSelect = document.getElementById('ai-analysis-mode');
@@ -38,6 +42,25 @@ function initAIAnalysis() {
         runButton.addEventListener('click', async function() {
             await runAIAnalysis();
         });
+    }
+    
+    // Export buttons
+    const exportPdfBtn = document.getElementById('export-ai-pdf');
+    const exportHtmlBtn = document.getElementById('export-ai-html');
+    const exportWordBtn = document.getElementById('export-ai-word');
+    const copyLinkBtn = document.getElementById('copy-ai-link');
+    
+    if (exportPdfBtn) {
+        exportPdfBtn.addEventListener('click', exportToPDF);
+    }
+    if (exportHtmlBtn) {
+        exportHtmlBtn.addEventListener('click', exportToHTML);
+    }
+    if (exportWordBtn) {
+        exportWordBtn.addEventListener('click', exportToWord);
+    }
+    if (copyLinkBtn) {
+        copyLinkBtn.addEventListener('click', copyShareLink);
     }
     
     console.log('✅ AI Analysis module initialized');
@@ -109,12 +132,22 @@ async function runAIAnalysis() {
             console.log('🤖 AI Analysis text:\n', result.data.ai_analysis);
         }
         
+        // Store data for export
+        currentAnalysisData = result.data;
+        currentAnalysisParams = params;
+        
         // Display AI analysis results
         displayAIAnalysisResults(result.data, params);
         
         // Show results section
         resultsDiv.style.display = 'block';
         resultsDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        
+        // Show export controls
+        const exportControls = document.getElementById('ai-export-controls');
+        if (exportControls) {
+            exportControls.style.display = 'block';
+        }
         
         showNotification('Analyse terminée avec succès', 'success');
         
@@ -441,6 +474,261 @@ function toggleAIAnalysisSection() {
         icon.classList.remove('fa-chevron-up');
         icon.classList.add('fa-chevron-down');
     }
+}
+
+// ========================================
+// EXPORT FUNCTIONS
+// ========================================
+
+// Export to PDF using browser print
+function exportToPDF() {
+    if (!currentAnalysisData) {
+        showNotification('Aucune analyse à exporter', 'warning');
+        return;
+    }
+    
+    // Create a printable version
+    const printWindow = window.open('', '_blank');
+    const htmlContent = generateExportHTML(currentAnalysisData, currentAnalysisParams);
+    
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    
+    // Wait for content to load, then print
+    printWindow.onload = function() {
+        printWindow.print();
+    };
+    
+    showNotification('Fenêtre d\'impression ouverte', 'success');
+}
+
+// Export to HTML file
+function exportToHTML() {
+    if (!currentAnalysisData) {
+        showNotification('Aucune analyse à exporter', 'warning');
+        return;
+    }
+    
+    const htmlContent = generateExportHTML(currentAnalysisData, currentAnalysisParams);
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    
+    const date = currentAnalysisParams.selected_date || `${currentAnalysisParams.start_date}_${currentAnalysisParams.end_date}`;
+    a.href = url;
+    a.download = `analyse-financiere-${date}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showNotification('Fichier HTML téléchargé', 'success');
+}
+
+// Export to Word (HTML format that Word can open)
+function exportToWord() {
+    if (!currentAnalysisData) {
+        showNotification('Aucune analyse à exporter', 'warning');
+        return;
+    }
+    
+    const htmlContent = generateExportHTML(currentAnalysisData, currentAnalysisParams, true);
+    const blob = new Blob(['\ufeff', htmlContent], { type: 'application/msword' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    
+    const date = currentAnalysisParams.selected_date || `${currentAnalysisParams.start_date}_${currentAnalysisParams.end_date}`;
+    a.href = url;
+    a.download = `analyse-financiere-${date}.doc`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showNotification('Fichier Word téléchargé', 'success');
+}
+
+// Copy shareable link to clipboard
+function copyShareLink() {
+    if (!currentAnalysisParams) {
+        showNotification('Aucune analyse à partager', 'warning');
+        return;
+    }
+    
+    const params = new URLSearchParams(currentAnalysisParams).toString();
+    const shareUrl = `${window.location.origin}/api/ai-analysis?${params}`;
+    
+    navigator.clipboard.writeText(shareUrl).then(() => {
+        showNotification('Lien copié dans le presse-papiers', 'success');
+    }).catch(err => {
+        console.error('Erreur copie:', err);
+        showNotification('Erreur lors de la copie du lien', 'error');
+    });
+}
+
+// Generate HTML content for export
+function generateExportHTML(data, params, forWord = false) {
+    const { financial_data, ai_analysis, metadata } = data;
+    const metrics = financial_data.global_metrics || {};
+    const balances = metrics.balances || {};
+    const profitLoss = metrics.profitAndLoss || {};
+    
+    const date = params.selected_date ? 
+        new Date(params.selected_date).toLocaleDateString('fr-FR') :
+        `${new Date(params.start_date).toLocaleDateString('fr-FR')} - ${new Date(params.end_date).toLocaleDateString('fr-FR')}`;
+    
+    const brutPLValue = profitLoss.brutPL?.value ?? profitLoss.brutPL ?? 0;
+    const estimatedPLValue = profitLoss.estimatedProfitAndLoss?.value ?? profitLoss.estimatedProfitAndLoss ?? 0;
+    
+    return `
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analyse Financière - Mata Group - ${date}</title>
+    <style>
+        body {
+            font-family: ${forWord ? 'Calibri, Arial' : '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto'}, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 30px;
+            background: ${forWord ? 'white' : '#f5f5f5'};
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 20px;
+        }
+        h1 {
+            color: #667eea;
+            margin: 0;
+            font-size: 28px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        .section {
+            background: white;
+            padding: 25px;
+            margin-bottom: 25px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            ${forWord ? '' : 'box-shadow: 0 2px 4px rgba(0,0,0,0.1);'}
+        }
+        h2 {
+            color: #667eea;
+            margin-top: 0;
+            font-size: 22px;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 10px;
+        }
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .metric-box {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+        }
+        .metric-label {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .metric-value {
+            font-size: 22px;
+            font-weight: bold;
+            color: #333;
+        }
+        .metric-value.positive { color: #28a745; }
+        .metric-value.negative { color: #dc3545; }
+        .ai-text {
+            line-height: 1.8;
+            color: #333;
+        }
+        .ai-text p {
+            margin-bottom: 15px;
+        }
+        .ai-text strong {
+            color: #667eea;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #dee2e6;
+            color: #999;
+            font-size: 12px;
+        }
+        @media print {
+            body { background: white; }
+            .section { box-shadow: none; page-break-inside: avoid; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Analyse des Données Financières de la Mata Group</h1>
+        <p class="subtitle">Période: ${date}</p>
+        <p class="subtitle">Générée le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}</p>
+    </div>
+    
+    <div class="section">
+        <h2>📊 Métriques Clés</h2>
+        <div class="metrics-grid">
+            <div class="metric-box">
+                <div class="metric-label">Cash Disponible</div>
+                <div class="metric-value ${balances.cash_disponible >= 0 ? 'positive' : 'negative'}">
+                    ${formatCurrency(balances.cash_disponible || 0)}
+                </div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Balance du Mois</div>
+                <div class="metric-value">${formatCurrency(balances.balance_du_mois || 0)}</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">Cash Burn du Mois</div>
+                <div class="metric-value negative">${formatCurrency(balances.cash_burn_du_mois || 0)}</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">PL Brut</div>
+                <div class="metric-value ${brutPLValue >= 0 ? 'positive' : 'negative'}">
+                    ${formatCurrency(brutPLValue)}
+                </div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">PL Estimé (avec charges)</div>
+                <div class="metric-value ${estimatedPLValue >= 0 ? 'positive' : 'negative'}">
+                    ${formatCurrency(estimatedPLValue)}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="section">
+        <h2>🤖 Analyse AI</h2>
+        <div class="ai-text">
+            ${formatAIResponse(ai_analysis)}
+        </div>
+    </div>
+    
+    <div class="footer">
+        <p>© ${new Date().getFullYear()} Mata Group - Analyse financière générée automatiquement</p>
+        <p>Document confidentiel - Distribution restreinte</p>
+    </div>
+</body>
+</html>
+    `.trim();
 }
 
 // Initialize on page load
