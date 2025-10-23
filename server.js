@@ -9398,6 +9398,17 @@ Fournis une analyse concise pour ce segment en français.`;
 
 // Synthesize all chunk analyses into a final report
 async function synthesizeAnalyses(openai, chunkAnalyses, globalMetrics, periodInfo) {
+    // Format period for display
+    let periodText = '';
+    if (periodInfo.selected_date) {
+        const date = new Date(periodInfo.selected_date);
+        periodText = `du ${date.toLocaleDateString('fr-FR')}`;
+    } else if (periodInfo.start_date && periodInfo.end_date) {
+        const startD = new Date(periodInfo.start_date);
+        const endD = new Date(periodInfo.end_date);
+        periodText = `du ${startD.toLocaleDateString('fr-FR')} au ${endD.toLocaleDateString('fr-FR')}`;
+    }
+    
     const synthesisPrompt = `Tu es un analyste financier senior. Tu as reçu plusieurs analyses partielles de données financières.
 
 Voici le contexte global:
@@ -9410,7 +9421,7 @@ ${chunkAnalyses.map((a, i) => '\n--- Segment ' + (i + 1) + ' ---\n' + a).join('\
 Tâche: Synthétise ces analyses en un rapport cohérent et structuré en français avec les sections suivantes (utilise EXACTEMENT ce format de numérotation) :
 
 1. Dépenses de la Période
-Vue d'ensemble des dépenses de la période analysée.
+Vue d'ensemble des dépenses de la période analysée. IMPORTANT: Mentionne explicitement la période ${periodText} dans la première phrase.
 
 2. Top 5 des Plus Grosses Dépenses
 Liste des 5 plus grosses dépenses mentionnées avec leurs montants.
@@ -9582,13 +9593,24 @@ Analyze financial data and provide insights in French. Be concise and actionable
         } else {
             console.log('🤖 Calling OpenAI API (single request)...');
             
+            // Format period for display
+            let periodText = '';
+            if (selected_date) {
+                const date = new Date(selected_date);
+                periodText = `du ${date.toLocaleDateString('fr-FR')}`;
+            } else if (start_date && end_date) {
+                const startD = new Date(start_date);
+                const endD = new Date(end_date);
+                periodText = `du ${startD.toLocaleDateString('fr-FR')} au ${endD.toLocaleDateString('fr-FR')}`;
+            }
+            
             const userPrompt = `Analyse ces données financières:
 
 ${JSON.stringify(essentialData, null, 2)}
 
 Fournis une analyse structurée en français avec:
 
-1. **Paragraphe sur les Dépenses**: Vue d'ensemble (nombre, montant total, catégories)
+1. **Paragraphe sur les Dépenses**: Vue d'ensemble (nombre, montant total, catégories). IMPORTANT: Mentionne explicitement la période analysée ${periodText} dans la première phrase.
 2. **Top 5 des Plus Grosses Dépenses**: Liste détaillée
 3. **Résumé Exécutif**: Santé financière globale
 4. **Métriques Clés**: Trésorerie, P&L, burn rate
