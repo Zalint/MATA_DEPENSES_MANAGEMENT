@@ -9151,6 +9151,63 @@ app.delete('/api/snapshots/:date', requireAdminAuth, async (req, res) => {
 // 🤖 AI ANALYSIS ENDPOINT
 // ========================================
 
+// Function to extract only essential data for AI analysis (reduce token usage)
+function extractEssentialDataForAI(financialData) {
+    const essential = {
+        period_info: financialData.period_info,
+        global_metrics: financialData.global_metrics,
+        accounts_summary: {},
+        all_expenses: []
+    };
+    
+    // Extract account summaries and expenses
+    if (financialData.accounts) {
+        Object.keys(financialData.accounts).forEach(accountType => {
+            const accountsOfType = financialData.accounts[accountType];
+            
+            Object.entries(accountsOfType).forEach(([accountName, accountData]) => {
+                // Store account summary
+                if (!essential.accounts_summary[accountType]) {
+                    essential.accounts_summary[accountType] = [];
+                }
+                
+                essential.accounts_summary[accountType].push({
+                    name: accountName,
+                    balance: accountData.accountInfo?.current_balance || 0,
+                    monthly_expenses: accountData.monthlyExpenses?.total_monthly_expenses || 0,
+                    daily_expenses: accountData.dailyExpenses?.total_daily_expenses || 0
+                });
+                
+                // Extract expenses
+                const monthlyExpenses = accountData.monthlyExpenses?.expenses || [];
+                const dailyExpenses = accountData.dailyExpenses?.expenses || [];
+                
+                [...monthlyExpenses, ...dailyExpenses].forEach(expense => {
+                    if (expense && expense.amount) {
+                        essential.all_expenses.push({
+                            account: accountName,
+                            account_type: accountType,
+                            description: expense.description,
+                            supplier: expense.supplier,
+                            amount: expense.amount,
+                            category: expense.category,
+                            subcategory: expense.subcategory,
+                            type: expense.type,
+                            date: expense.expense_date || expense.created_at
+                        });
+                    }
+                });
+            });
+        });
+    }
+    
+    // Sort expenses by amount descending and keep only top 50
+    essential.all_expenses.sort((a, b) => b.amount - a.amount);
+    essential.all_expenses = essential.all_expenses.slice(0, 50);
+    
+    return essential;
+}
+
 // Initialize OpenAI client (optional)
 let openai = null;
 if (process.env.OPENAI_API_KEY) {
@@ -9208,6 +9265,10 @@ app.get('/api/ai-analysis', requireAuth, async (req, res) => {
         const financialData = financialResponse.data;
         console.log('📊 Financial data received');
         
+        // Extract only essential data for AI to reduce token usage
+        const essentialData = extractEssentialDataForAI(financialData);
+        console.log('📄 Essential data extracted, estimated tokens:', JSON.stringify(essentialData).length / 4);
+        
         // Build AI prompt with comprehensive context
         const systemPrompt = `You are analyzing financial status data from the Mata Group expense management system, a meat and poultry distribution business operating in Senegal. The data comes from the /external/api/status API endpoint that provides comprehensive financial snapshots.
 
@@ -9252,7 +9313,7 @@ Respond in French. Be concise and actionable. Focus on the most critical issues 
         
         const userPrompt = `Analyse ces données financières et fournis des insights détaillés:
 
-${JSON.stringify(financialData, null, 2)}
+${JSON.stringify(essentialData, null, 2)}
 
 Fournis une analyse structurée en français avec:
 
