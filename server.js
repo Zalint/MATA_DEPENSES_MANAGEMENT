@@ -620,6 +620,7 @@ async function collecteSnapshotData(cutoffDate = null) {
                         
                         cashBictorys: getValue('#cash-bictorys-latest'),
                         creancesMois: getValue('#creances-mois'),
+                        remboursementsMois: getValue('#pl-remboursements'),
                         totalSpent: getValue('#total-spent-amount'),
                         stockVivantVariation: getValue('#stock-vivant-variation'),
                         stockTotal: getValue('#stock-total'),
@@ -640,12 +641,13 @@ async function collecteSnapshotData(cutoffDate = null) {
                 console.log('✅ Extraction HTML réussie');
                 
                 // Debug: Afficher les valeurs brutes scrapées
-                console.log('🔍 === VALEURS SCRAPÉES (BRUTES) ===');
+                console.log('🔍 === VALEURS SCRAPPÉES (BRUTES) ===');
                 console.log(`📊 PL Final (#pl-estim-charges): "${scrapedData.plFinal}"`);
                 console.log(`📊 PL Brut (#pl-brut): "${scrapedData.plBrut}"`);
                 console.log(`📊 PL Sans Stock (#pl-sans-stock-charges): "${scrapedData.plSansStockCharges}"`);
                 console.log(`💰 Cash Bictorys (#cash-bictorys-latest): "${scrapedData.cashBictorys}"`);
                 console.log(`💳 Créances (#creances-mois): "${scrapedData.creancesMois}"`);
+                console.log(`💵 Remboursements (#pl-remboursements): "${scrapedData.remboursementsMois}"`);
                 console.log(`💸 Total Dépensé (#total-spent-amount): "${scrapedData.totalSpent}"`);
                 
             } catch (error) {
@@ -665,6 +667,7 @@ async function collecteSnapshotData(cutoffDate = null) {
                 plFinal: parseFormattedNumber(scrapedData.plFinal),
                 cashBictorys: parseFormattedNumber(scrapedData.cashBictorys),
                 creancesMois: parseFormattedNumber(scrapedData.creancesMois),
+                remboursementsMois: parseFormattedNumber(scrapedData.remboursementsMois),
                 cashBurn: parseFormattedNumber(scrapedData.totalSpent),
                 ecartStockVivant: parseFormattedNumber(scrapedData.stockVivantVariation),
                 ecartStockMata: parseFormattedNumber(scrapedData.stockTotal),
@@ -711,18 +714,19 @@ async function collecteSnapshotData(cutoffDate = null) {
                 console.log(`  📝 Erreur: ${plDetails.error}`);
             }
         }
-        
-        // Créer dashboardStats avec les valeurs scrapées (au lieu des valeurs calculées)
+        // Créer dashboardStats avec les valeurs scrappées (au lieu des valeurs calculées)
         const dashboardStats = {
             totalSpent: plDetails.cashBurn || parseFloat(totalSpentResult.rows[0].total),
             totalRemaining: plDetails.totalRemaining || parseFloat(totalRemainingResult.rows[0].total),
             totalCreditedWithExpenses: plDetails.totalCredits || parseFloat(totalCreditedWithExpensesResult.rows[0].total),
             totalDepotBalance: plDetails.depotBalance || parseFloat(totalDepotBalanceResult.rows[0].total),
             totalPartnerBalance: plDetails.partnerBalance || parseFloat(totalPartnerBalanceResult.rows[0].total),
-            // Ajouter les valeurs PL scrapées - CLÉS PRINCIPALES
+            // Ajouter les valeurs PL scrappées - CLÉS PRINCIPALES
             plFinal: plDetails.plFinal,
             cashBictorys: plDetails.cashBictorys,
             creancesMois: plDetails.creancesMois,
+            remboursementsMois: plDetails.remboursementsMois,
+            stockVivantVariation: plDetails.ecartStockVivant,
             stockVivantVariation: plDetails.ecartStockVivant,
             weeklyBurn: plDetails.weeklyBurn,
             monthlyBurn: plDetails.monthlyBurn,
@@ -9222,24 +9226,43 @@ app.get('/api/ai-analysis', requireAuth, async (req, res) => {
 
 Analyze the provided financial data and generate:
 
-1. **Executive Summary** (2-3 sentences): Overall financial health
-2. **Key Metrics Analysis**: Cash position, P&L, burn rate
-3. **Insights & Alerts**: Critical issues requiring attention
-4. **Account Analysis**: Performance by account type
-5. **Recommendations**: Actionable steps to improve financial position
+1. **Paragraphe sur les Dépenses de la Période**: 
+   - Commencer par un paragraphe résumant les dépenses totales de la période analysée
+   - Indiquer le nombre total de dépenses enregistrées et leur montant total
+   - Mentionner les catégories principales de dépenses
+   
+2. **Top 5 des Plus Grosses Dépenses**:
+   - Lister les 5 plus grosses dépenses individuelles de la période
+   - Pour chaque dépense, indiquer: description, fournisseur, compte, catégorie, et montant
+   - Formater sous forme de liste numérotée claire
 
-Respond in French. Be concise and actionable. Focus on the most critical issues first.`;
+3. **Executive Summary** (2-3 sentences): Overall financial health
+
+4. **Key Metrics Analysis**: Cash position, P&L, burn rate
+
+5. **Insights & Alerts**: Critical issues requiring attention
+
+6. **Account Analysis**: Performance by account type
+
+7. **Recommendations**: Actionable steps to improve financial position
+
+Respond in French. Be concise and actionable. Focus on the most critical issues first.
+
+**IMPORTANT**: Commence TOUJOURS ton analyse par le paragraphe sur les dépenses de la période suivi du Top 5.`;
         
         const userPrompt = `Analyse ces données financières et fournis des insights détaillés:
 
 ${JSON.stringify(financialData, null, 2)}
 
 Fournis une analyse structurée en français avec:
-- Résumé exécutif
-- Métriques clés
-- Alertes et insights critiques
-- Analyse des comptes
-- Recommandations prioritaires`;
+
+1. D'ABORD: Un paragraphe décrivant les dépenses de la période (nombre total, montant total, catégories principales)
+2. ENSUITE: Le Top 5 des plus grosses dépenses avec tous les détails (description, fournisseur, compte, catégorie, montant)
+3. Résumé exécutif
+4. Métriques clés
+5. Alertes et insights critiques
+6. Analyse des comptes
+7. Recommandations prioritaires`;
         
         console.log('🤖 Calling OpenAI API...');
         

@@ -418,73 +418,6 @@
                         <button id="reset-dashboard" class="btn btn-secondary">Aujourd'hui</button>
                     </div>
 
-                    <!-- AI Analysis Section -->
-                    <div class="ai-analysis-section" id="ai-analysis-section" style="margin-top: 30px;">
-                        <div class="ai-analysis-card">
-                            <div class="ai-analysis-header">
-                                <h3><i class="fas fa-brain"></i> Analyse AI Financière</h3>
-                                <p class="section-description">Analyse intelligente de la situation financière</p>
-                            </div>
-                            
-                            <div class="ai-analysis-controls">
-                                <div class="form-row">
-                                    <div class="form-group">
-                                        <label for="ai-analysis-mode">Mode d'analyse</label>
-                                        <select id="ai-analysis-mode" class="form-control">
-                                            <option value="single">Date unique</option>
-                                            <option value="range">Période (plage de dates)</option>
-                                        </select>
-                                    </div>
-                                    <div class="form-group" id="ai-single-date-group">
-                                        <label for="ai-analysis-date">Date</label>
-                                        <input type="date" id="ai-analysis-date" class="form-control">
-                                    </div>
-                                    <div class="form-group" id="ai-start-date-group" style="display: none;">
-                                        <label for="ai-analysis-start-date">Date de début</label>
-                                        <input type="date" id="ai-analysis-start-date" class="form-control">
-                                    </div>
-                                    <div class="form-group" id="ai-end-date-group" style="display: none;">
-                                        <label for="ai-analysis-end-date">Date de fin</label>
-                                        <input type="date" id="ai-analysis-end-date" class="form-control">
-                                    </div>
-                                </div>
-                                <button id="run-ai-analysis" class="btn btn-primary">
-                                    <i class="fas fa-magic"></i> Lancer l'Analyse AI
-                                </button>
-                            </div>
-                            
-                            <!-- Analysis Results Display -->
-                            <div id="ai-analysis-results" class="ai-analysis-results" style="display: none;">
-                                <div class="analysis-content">
-                                    <div class="analysis-section" id="ai-summary-section">
-                                        <h4><i class="fas fa-info-circle"></i> Résumé Exécutif</h4>
-                                        <div id="ai-summary-content" class="analysis-text"></div>
-                                    </div>
-                                    
-                                    <div class="analysis-section" id="ai-metrics-section">
-                                        <h4><i class="fas fa-chart-bar"></i> Métriques Clés</h4>
-                                        <div id="ai-metrics-content" class="metrics-grid"></div>
-                                    </div>
-                                    
-                                    <div class="analysis-section" id="ai-insights-section">
-                                        <h4><i class="fas fa-lightbulb"></i> Insights & Alertes</h4>
-                                        <div id="ai-insights-content" class="analysis-text"></div>
-                                    </div>
-                                    
-                                    <div class="analysis-section" id="ai-accounts-section">
-                                        <h4><i class="fas fa-wallet"></i> Analyse par Compte</h4>
-                                        <div id="ai-accounts-content" class="accounts-analysis"></div>
-                                    </div>
-                                    
-                                    <div class="analysis-section" id="ai-recommendations-section">
-                                        <h4><i class="fas fa-clipboard-check"></i> Recommandations</h4>
-                                        <div id="ai-recommendations-content" class="analysis-text"></div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <!-- Cartes de statistiques -->
                     <div class="stats-cards">
                         <div class="stat-card">
@@ -550,6 +483,82 @@
                         <div class="chart-card">
                             <h3>Dépenses par Catégorie</h3>
                             <div id="category-chart"></div>
+                        </div>
+                    </div>
+
+                    <!-- AI Analysis Section -->
+                    <div class="ai-analysis-section" id="ai-analysis-section" style="margin-top: 30px;">
+                        <div class="ai-analysis-card">
+                            <div class="ai-analysis-header" style="cursor: pointer;" onclick="toggleAIAnalysisSection()">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div>
+                                        <h3><i class="fas fa-brain"></i> Analyse AI Financière</h3>
+                                        <p class="section-description">Analyse intelligente de la situation financière</p>
+                                    </div>
+                                    <button id="ai-analysis-toggle-btn" class="toggle-btn" type="button" title="Afficher/Masquer">
+                                        <i class="fas fa-chevron-down"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div id="ai-analysis-content" style="display: none;">
+                                <div class="ai-analysis-controls">
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label for="ai-analysis-mode">Mode d'analyse</label>
+                                            <select id="ai-analysis-mode" class="form-control">
+                                                <option value="single">Date unique</option>
+                                                <option value="range">Période (plage de dates)</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group" id="ai-single-date-group">
+                                            <label for="ai-analysis-date">Date</label>
+                                            <input type="date" id="ai-analysis-date" class="form-control">
+                                        </div>
+                                        <div class="form-group" id="ai-start-date-group" style="display: none;">
+                                            <label for="ai-analysis-start-date">Date de début</label>
+                                            <input type="date" id="ai-analysis-start-date" class="form-control">
+                                        </div>
+                                        <div class="form-group" id="ai-end-date-group" style="display: none;">
+                                            <label for="ai-analysis-end-date">Date de fin</label>
+                                            <input type="date" id="ai-analysis-end-date" class="form-control">
+                                        </div>
+                                    </div>
+                                    <button id="run-ai-analysis" class="btn btn-primary">
+                                        <i class="fas fa-magic"></i> Lancer l'Analyse AI
+                                    </button>
+                                </div>
+                                
+                                <!-- Analysis Results Display -->
+                                <div id="ai-analysis-results" class="ai-analysis-results" style="display: none;">
+                                <div class="analysis-content">
+                                    <div class="analysis-section" id="ai-summary-section">
+                                        <h4><i class="fas fa-info-circle"></i> Résumé Exécutif</h4>
+                                        <div id="ai-summary-content" class="analysis-text"></div>
+                                    </div>
+                                    
+                                    <div class="analysis-section" id="ai-metrics-section">
+                                        <h4><i class="fas fa-chart-bar"></i> Métriques Clés</h4>
+                                        <div id="ai-metrics-content" class="metrics-grid"></div>
+                                    </div>
+                                    
+                                    <div class="analysis-section" id="ai-insights-section">
+                                        <h4><i class="fas fa-lightbulb"></i> Insights & Alertes</h4>
+                                        <div id="ai-insights-content" class="analysis-text"></div>
+                                    </div>
+                                    
+                                    <div class="analysis-section" id="ai-accounts-section">
+                                        <h4><i class="fas fa-wallet"></i> Analyse par Compte</h4>
+                                        <div id="ai-accounts-content" class="accounts-analysis"></div>
+                                    </div>
+                                    
+                                    <div class="analysis-section" id="ai-recommendations-section">
+                                        <h4><i class="fas fa-clipboard-check"></i> Recommandations</h4>
+                                        <div id="ai-recommendations-content" class="analysis-text"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            </div>
                         </div>
                     </div>
                 </section>
