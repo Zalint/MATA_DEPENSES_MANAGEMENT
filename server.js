@@ -7772,7 +7772,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         const previousMonthStr = previousMonth.toISOString().split('T')[0];
         const endOfPreviousMonthStr = endOfPreviousMonth.toISOString().split('T')[0];
         
-        console.log(`📅 EXTERNAL: Dates calculées - ${isRangeMode ? `Range: ${startDateStr} to ${endDateStr}` : `Sélectionnée: ${selectedDateStr}`}, Début du mois: ${startOfMonthStr}, Début semaine: ${startOfWeekStr}`);
+        console.log(`📅 EXTERNAL: Dates calculées - ${isRangeMode ? 'Range: ' + startDateStr + ' to ' + endDateStr : 'Sélectionnée: ' + selectedDateStr}, Début du mois: ${startOfMonthStr}, Début semaine: ${startOfWeekStr}`);
 
         // Récupérer tous les comptes actifs
         const accountsQuery = `
@@ -9405,7 +9405,7 @@ Voici le contexte global:
 - Métriques globales: ${JSON.stringify(globalMetrics)}
 
 Analyses partielles:
-${chunkAnalyses.map((a, i) => `\n--- Segment ${i + 1} ---\n${a}`).join('\n')}
+${chunkAnalyses.map((a, i) => '\n--- Segment ' + (i + 1) + ' ---\n' + a).join('\n')}
 
 Tâche: Synthétise ces analyses en un rapport cohérent et structuré en français avec les sections suivantes (utilise EXACTEMENT ce format de numérotation) :
 
@@ -9430,7 +9430,7 @@ Performance par type de compte.
 7. Recommandations
 Actions concrètes pour améliorer la situation.
 
-IMPORTANT: Utilise le format "1. Titre de section" (pas de sous-numérotation). Sois concis et actionnable.
+IMPORTANT: Utilise le format "1. Titre de section" (pas de sous-numérotation). Sois concis et actionnable.`;
     
     const completion = await openai.chat.completions.create({
         model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
