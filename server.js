@@ -8324,19 +8324,132 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         const monthYear = selectedDateStr.substring(0, 7); // Format YYYY-MM
         
         // Récupération des données pour les calculs PL
-        // Calculer le Cash Disponible en utilisant la somme des current_balance
-        // des comptes de type 'classique' et 'statut' (même logique que l'interface)
+        // Calculer le Cash Disponible en utilisant les soldes HISTORIQUES à la date sélectionnée
+        // (même logique que /api/dashboard/stats)
         let totalBalance = 0;
         try {
             const balanceQuery = `
-                SELECT COALESCE(SUM(current_balance), 0) as total_balance
-                FROM accounts
-                WHERE is_active = true
-                AND account_type IN ('classique', 'statut')
+                SELECT 
+                    a.id,
+                    a.account_name,
+                    a.account_type,
+                    -- CALCUL SELON LE TYPE DE COMPTE (logique identique à /api/dashboard/stats)
+                    CASE a.account_type
+                        WHEN 'statut' THEN
+                            -- Pour STATUT : dernier crédit/transfert entrant REMPLACE, puis soustraction des sorties/dépenses
+                            (
+                                COALESCE((
+                                    SELECT montant FROM (
+                                        SELECT amount as montant, created_at as date_operation
+                                        FROM credit_history 
+                                        WHERE account_id = a.id 
+                                            AND created_at <= ($1::date + INTERVAL '1 day')
+                                        
+                                        UNION ALL
+                                        
+                                        SELECT amount as montant, created_at as date_operation
+                                        FROM special_credit_history 
+                                        WHERE account_id = a.id 
+                                            AND credit_date <= ($1::date + INTERVAL '1 day')
+                                            AND is_balance_override = true
+                                        
+                                        UNION ALL
+                                        
+                                        SELECT montant, created_at as date_operation
+                                        FROM transfer_history
+                                        WHERE destination_id = a.id
+                                            AND created_at <= ($1::date + INTERVAL '1 day')
+                                    ) all_incoming
+                                    ORDER BY date_operation DESC
+                                    LIMIT 1
+                                ), 0)
+                                -
+                                COALESCE((
+                                    SELECT SUM(th.montant)
+                                    FROM transfer_history th
+                                    WHERE th.source_id = a.id
+                                        AND th.created_at > COALESCE((
+                                            SELECT date_operation FROM (
+                                                SELECT created_at as date_operation
+                                                FROM credit_history 
+                                                WHERE account_id = a.id 
+                                                    AND created_at <= ($1::date + INTERVAL '1 day')
+                                                
+                                                UNION ALL
+                                                
+                                                SELECT created_at as date_operation
+                                                FROM special_credit_history 
+                                                WHERE account_id = a.id 
+                                                    AND credit_date <= ($1::date + INTERVAL '1 day')
+                                                    AND is_balance_override = true
+                                                
+                                                UNION ALL
+                                                
+                                                SELECT created_at as date_operation
+                                                FROM transfer_history
+                                                WHERE destination_id = a.id
+                                                    AND created_at <= ($1::date + INTERVAL '1 day')
+                                            ) all_incoming
+                                            ORDER BY date_operation DESC
+                                            LIMIT 1
+                                        ), '1900-01-01'::timestamp)
+                                        AND th.created_at <= ($1::date + INTERVAL '1 day')
+                                ), 0)
+                                -
+                                COALESCE((
+                                    SELECT SUM(e2.total)
+                                    FROM expenses e2
+                                    WHERE e2.account_id = a.id
+                                        AND e2.expense_date > COALESCE((
+                                            SELECT date_operation::date FROM (
+                                                SELECT created_at as date_operation
+                                                FROM credit_history 
+                                                WHERE account_id = a.id 
+                                                    AND created_at <= ($1::date + INTERVAL '1 day')
+                                                
+                                                UNION ALL
+                                                
+                                                SELECT created_at as date_operation
+                                                FROM special_credit_history 
+                                                WHERE account_id = a.id 
+                                                    AND credit_date <= ($1::date + INTERVAL '1 day')
+                                                    AND is_balance_override = true
+                                                
+                                                UNION ALL
+                                                
+                                                SELECT created_at as date_operation
+                                                FROM transfer_history
+                                                WHERE destination_id = a.id
+                                                    AND created_at <= ($1::date + INTERVAL '1 day')
+                                            ) all_incoming
+                                            ORDER BY date_operation DESC
+                                            LIMIT 1
+                                        ), '1900-01-01'::date)
+                                        AND e2.expense_date <= ($1::date + INTERVAL '1 day')
+                                ), 0)
+                            )
+                        
+                        ELSE
+                            -- Pour CLASSIQUE : cumul complet <= date sélectionnée
+                            (COALESCE((SELECT SUM(ch.amount) FROM credit_history ch WHERE ch.account_id = a.id AND ch.created_at <= $1), 0) +
+                             COALESCE((SELECT SUM(sch.amount) FROM special_credit_history sch WHERE sch.account_id = a.id AND sch.credit_date <= $1), 0) -
+                             COALESCE((SELECT SUM(e2.total) FROM expenses e2 WHERE e2.account_id = a.id AND e2.expense_date <= $1), 0) +
+                             COALESCE((SELECT SUM(CASE WHEN th.destination_id = a.id THEN th.montant ELSE -th.montant END) 
+                                      FROM transfer_history th 
+                                      WHERE (th.source_id = a.id OR th.destination_id = a.id) AND th.created_at <= ($1::date + INTERVAL '1 day')), 0) +
+                             COALESCE((SELECT montant FROM montant_debut_mois WHERE account_id = a.id), 0))
+                    END as balance_at_date
+                FROM accounts a
+                WHERE a.is_active = true
+                AND a.account_type IN ('classique', 'statut')
             `;
-            const balanceResult = await pool.query(balanceQuery);
-            totalBalance = parseFloat(balanceResult.rows[0]?.total_balance) || 0;
-            console.log(`💰 Cash Disponible (current_balance sum): ${totalBalance.toLocaleString()} FCFA`);
+            const balanceResult = await pool.query(balanceQuery, [selectedDateStr]);
+            totalBalance = balanceResult.rows.reduce((sum, row) => sum + (parseFloat(row.balance_at_date) || 0), 0);
+            console.log(`💰 Cash Disponible (soldes historiques au ${selectedDateStr}): ${totalBalance.toLocaleString()} FCFA`);
+            console.log('📊 Détail par compte:');
+            balanceResult.rows.forEach(row => {
+                console.log(`   - ${row.account_name} (${row.account_type}): ${parseFloat(row.balance_at_date || 0).toLocaleString()} FCFA`);
+            });
         } catch (error) {
             console.error('Erreur calcul cash disponible:', error);
             totalBalance = 0;
@@ -9208,6 +9321,85 @@ function extractEssentialDataForAI(financialData) {
     return essential;
 }
 
+// Helper function to split array into chunks
+function chunkArray(array, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < array.length; i += chunkSize) {
+        chunks.push(array.slice(i, i + chunkSize));
+    }
+    return chunks;
+}
+
+// Helper function to estimate token count
+function estimateTokens(data) {
+    return Math.ceil(JSON.stringify(data).length / 4);
+}
+
+// Analyze a single chunk of accounts
+async function analyzeAccountChunk(openai, chunkData, systemPrompt, chunkIndex, totalChunks) {
+    const userPrompt = `Ceci est le chunk ${chunkIndex + 1}/${totalChunks} de l'analyse.
+
+Analyse ces données financières:
+
+${JSON.stringify(chunkData, null, 2)}
+
+Fournis une analyse concise pour ce segment en français.`;
+    
+    const completion = await openai.chat.completions.create({
+        model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 1500
+    });
+    
+    return {
+        analysis: completion.choices[0].message.content,
+        tokens_used: completion.usage.total_tokens
+    };
+}
+
+// Synthesize all chunk analyses into a final report
+async function synthesizeAnalyses(openai, chunkAnalyses, globalMetrics, periodInfo) {
+    const synthesisPrompt = `Tu es un analyste financier senior. Tu as reçu plusieurs analyses partielles de données financières.
+
+Voici le contexte global:
+- Période: ${JSON.stringify(periodInfo)}
+- Métriques globales: ${JSON.stringify(globalMetrics)}
+
+Analyses partielles:
+${chunkAnalyses.map((a, i) => `\n--- Segment ${i + 1} ---\n${a}`).join('\n')}
+
+Tâche: Synthétise ces analyses en un rapport cohérent et structuré en français avec:
+
+1. **Paragraphe sur les Dépenses de la Période**: Vue d'ensemble des dépenses
+2. **Top 5 des Plus Grosses Dépenses**: Liste des 5 plus grosses dépenses mentionnées
+3. **Résumé Exécutif**: 2-3 phrases sur la santé financière globale
+4. **Métriques Clés**: Position de trésorerie, P&L, burn rate
+5. **Insights & Alertes**: Problèmes critiques nécessitant attention
+6. **Analyse des Comptes**: Performance par type de compte
+7. **Recommandations**: Actions concrètes pour améliorer la situation
+
+Sois concis et actionnable. Concentre-toi sur les problèmes les plus critiques.`;
+    
+    const completion = await openai.chat.completions.create({
+        model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
+        messages: [
+            { role: 'system', content: 'Tu es un analyste financier senior spécialisé dans la distribution de viande et volaille au Sénégal.' },
+            { role: 'user', content: synthesisPrompt }
+        ],
+        temperature: 0.7,
+        max_tokens: 3000
+    });
+    
+    return {
+        analysis: completion.choices[0].message.content,
+        tokens_used: completion.usage.total_tokens
+    };
+}
+
 // Initialize OpenAI client (optional)
 let openai = null;
 if (process.env.OPENAI_API_KEY) {
@@ -9267,80 +9459,111 @@ app.get('/api/ai-analysis', requireAuth, async (req, res) => {
         
         // Extract only essential data for AI to reduce token usage
         const essentialData = extractEssentialDataForAI(financialData);
-        console.log('📄 Essential data extracted, estimated tokens:', JSON.stringify(essentialData).length / 4);
+        const estimatedTokens = estimateTokens(essentialData);
+        console.log('📄 Essential data extracted, estimated tokens:', estimatedTokens);
         
         // Build AI prompt with comprehensive context
-        const systemPrompt = `You are analyzing financial status data from the Mata Group expense management system, a meat and poultry distribution business operating in Senegal. The data comes from the /external/api/status API endpoint that provides comprehensive financial snapshots.
+        const systemPrompt = `You are analyzing financial status data from the Mata Group expense management system, a meat and poultry distribution business operating in Senegal.
 
 ## BUSINESS CONTEXT
-
 **Company**: Mata Group - Meat & Poultry Distribution
 **Operations**: Multiple sales points (Dahra, Linguere, Keur Massar, Mbao, Ouest Foire, Sacré Coeur) selling beef, lamb, chicken, and related products
-**Business Model**: 
-- Direct sales through retail points (Points de Vente)
-- Credit/debt management for wholesale clients (Créances)
-- Partnership accounts for poultry suppliers (Partenaires)
-- Live animal stock management (Stock Vivant)
-- Daily inventory tracking (Stock Mata)
+**Business Model**: Direct sales, credit/debt management, poultry partnerships, live animal stock
 
-## YOUR TASK
-
-Analyze the provided financial data and generate:
-
-1. **Paragraphe sur les Dépenses de la Période**: 
-   - Commencer par un paragraphe résumant les dépenses totales de la période analysée
-   - Indiquer le nombre total de dépenses enregistrées et leur montant total
-   - Mentionner les catégories principales de dépenses
-   
-2. **Top 5 des Plus Grosses Dépenses**:
-   - Lister les 5 plus grosses dépenses individuelles de la période
-   - Pour chaque dépense, indiquer: description, fournisseur, compte, catégorie, et montant
-   - Formater sous forme de liste numérotée claire
-
-3. **Executive Summary** (2-3 sentences): Overall financial health
-
-4. **Key Metrics Analysis**: Cash position, P&L, burn rate
-
-5. **Insights & Alerts**: Critical issues requiring attention
-
-6. **Account Analysis**: Performance by account type
-
-7. **Recommendations**: Actionable steps to improve financial position
-
-Respond in French. Be concise and actionable. Focus on the most critical issues first.
-
-**IMPORTANT**: Commence TOUJOURS ton analyse par le paragraphe sur les dépenses de la période suivi du Top 5.`;
+Analyze financial data and provide insights in French. Be concise and actionable.`;
         
-        const userPrompt = `Analyse ces données financières et fournis des insights détaillés:
+        let aiAnalysis;
+        let totalTokensUsed = 0;
+        
+        // Determine if we're in range mode (start_date and end_date provided)
+        const isRangeMode = start_date && end_date;
+        
+        // Check if data is too large AND we're in range mode
+        if (isRangeMode && estimatedTokens > 80000) {
+            console.log('🔄 Data too large, using chunked analysis...');
+            
+            // Prepare global context (always included)
+            const globalContext = {
+                period_info: essentialData.period_info,
+                global_metrics: essentialData.global_metrics,
+                top_expenses: essentialData.all_expenses.slice(0, 10) // Top 10 for context
+            };
+            
+            // Split accounts into chunks
+            const accountTypes = Object.keys(essentialData.accounts_summary);
+            const chunkSize = Math.ceil(accountTypes.length / 3); // Split into ~3 chunks
+            const accountChunks = chunkArray(accountTypes, chunkSize);
+            
+            console.log(`📦 Splitting into ${accountChunks.length} chunks...`);
+            
+            // Analyze each chunk
+            const chunkAnalyses = [];
+            for (let i = 0; i < accountChunks.length; i++) {
+                const chunk = accountChunks[i];
+                const chunkData = {
+                    ...globalContext,
+                    accounts: {}
+                };
+                
+                // Add only accounts in this chunk
+                chunk.forEach(accountType => {
+                    chunkData.accounts[accountType] = essentialData.accounts_summary[accountType];
+                });
+                
+                console.log(`🔍 Analyzing chunk ${i + 1}/${accountChunks.length}...`);
+                const result = await analyzeAccountChunk(openai, chunkData, systemPrompt, i, accountChunks.length);
+                chunkAnalyses.push(result.analysis);
+                totalTokensUsed += result.tokens_used;
+            }
+            
+            console.log('🔄 Synthesizing chunk analyses...');
+            
+            // Synthesize all analyses
+            const synthesis = await synthesizeAnalyses(
+                openai,
+                chunkAnalyses,
+                essentialData.global_metrics,
+                essentialData.period_info
+            );
+            
+            aiAnalysis = synthesis.analysis;
+            totalTokensUsed += synthesis.tokens_used;
+            
+            console.log(`✅ Chunked analysis completed. Total tokens: ${totalTokensUsed}`);
+            
+        } else {
+            console.log('🤖 Calling OpenAI API (single request)...');
+            
+            const userPrompt = `Analyse ces données financières:
 
 ${JSON.stringify(essentialData, null, 2)}
 
 Fournis une analyse structurée en français avec:
 
-1. D'ABORD: Un paragraphe décrivant les dépenses de la période (nombre total, montant total, catégories principales)
-2. ENSUITE: Le Top 5 des plus grosses dépenses avec tous les détails (description, fournisseur, compte, catégorie, montant)
-3. Résumé exécutif
-4. Métriques clés
-5. Alertes et insights critiques
-6. Analyse des comptes
-7. Recommandations prioritaires`;
-        
-        console.log('🤖 Calling OpenAI API...');
-        
-        // Call OpenAI API
-        const completion = await openai.chat.completions.create({
-            model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: userPrompt }
-            ],
-            temperature: 0.7,
-            max_tokens: 2000
-        });
-        
-        const aiAnalysis = completion.choices[0].message.content;
-        
-        console.log('✅ AI Analysis completed');
+1. **Paragraphe sur les Dépenses**: Vue d'ensemble (nombre, montant total, catégories)
+2. **Top 5 des Plus Grosses Dépenses**: Liste détaillée
+3. **Résumé Exécutif**: Santé financière globale
+4. **Métriques Clés**: Trésorerie, P&L, burn rate
+5. **Alertes**: Problèmes critiques
+6. **Analyse des Comptes**: Performance par type
+7. **Recommandations**: Actions prioritaires`;
+            
+            // Call OpenAI API
+            const completion = await openai.chat.completions.create({
+                model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt }
+                ],
+                temperature: 0.7,
+                max_tokens: 3000
+            });
+            
+            aiAnalysis = completion.choices[0].message.content;
+            totalTokensUsed = completion.usage.total_tokens;
+            
+            console.log('✅ AI Analysis completed');
+        }
         
         // Return both raw data and AI analysis
         res.json({
@@ -9349,9 +9572,11 @@ Fournis une analyse structurée en français avec:
                 financial_data: financialData,
                 ai_analysis: aiAnalysis,
                 metadata: {
-                    model: completion.model,
-                    tokens_used: completion.usage.total_tokens,
-                    analysis_date: new Date().toISOString()
+                    model: process.env.OPENAI_MODEL || 'gpt-4-turbo-preview',
+                    tokens_used: totalTokensUsed,
+                    analysis_date: new Date().toISOString(),
+                    chunked: isRangeMode && estimatedTokens > 80000,
+                    mode: isRangeMode ? 'range' : 'single_date'
                 }
             }
         });
