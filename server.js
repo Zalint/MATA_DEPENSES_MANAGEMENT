@@ -8837,6 +8837,198 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
     }
 });
 
+// =====================================================
+// EXTERNAL API FOR EXPENSES STATUS BY ACCOUNT
+// =====================================================
+
+// Endpoint pour récupérer les dépenses d'un compte sur une période
+app.get('/external/api/depenses/status', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API depenses/status avec params:', req.query);
+    
+    try {
+        // Validation des paramètres obligatoires
+        const { compte, date_debut, date_fin } = req.query;
+        
+        if (!compte || !date_debut || !date_fin) {
+            return res.status(400).json({
+                success: false,
+                error: 'Paramètres manquants',
+                message: 'Les paramètres "compte", "date_debut" et "date_fin" sont obligatoires',
+                required_format: {
+                    compte: 'Nom du compte (ex: BOVIN, COMMERCIAL)',
+                    date_debut: 'YYYY-MM-DD',
+                    date_fin: 'YYYY-MM-DD'
+                }
+            });
+        }
+        
+        // Validation du format des dates
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(date_debut) || !dateRegex.test(date_fin)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Format de date invalide',
+                message: 'Les dates doivent être au format YYYY-MM-DD'
+            });
+        }
+        
+        // Normaliser les dates
+        const startDateStr = new Date(date_debut).toISOString().split('T')[0];
+        const endDateStr = new Date(date_fin).toISOString().split('T')[0];
+        
+        // Vérifier que date_debut <= date_fin
+        if (new Date(startDateStr) > new Date(endDateStr)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Période invalide',
+                message: 'La date de début doit être antérieure ou égale à la date de fin'
+            });
+        }
+        
+        console.log(`📅 EXTERNAL: Période demandée: ${startDateStr} à ${endDateStr}`);
+        console.log(`📊 EXTERNAL: Compte demandé: ${compte}`);
+        
+        // Récupérer le compte par son nom
+        const accountQuery = `
+            SELECT a.id, a.account_name, a.user_id, a.account_type, a.current_balance,
+                   u.full_name as assigned_director_name
+            FROM accounts a
+            LEFT JOIN users u ON a.user_id = u.id
+            WHERE LOWER(a.account_name) = LOWER($1) AND a.is_active = true
+        `;
+        
+        const accountResult = await pool.query(accountQuery, [compte]);
+        
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Compte non trouvé',
+                message: `Le compte "${compte}" n'existe pas ou n'est pas actif`
+            });
+        }
+        
+        const account = accountResult.rows[0];
+        const accountId = account.id;
+        const accountName = account.account_name;
+        
+        console.log(`✅ EXTERNAL: Compte trouvé - ${accountName} (ID: ${accountId})`);
+        
+        // Récupérer toutes les dépenses de la période
+        const expensesQuery = `
+            SELECT id, designation, supplier, total, category, subcategory, expense_type,
+                   expense_date, created_at, description
+            FROM expenses
+            WHERE account_id = $1 AND expense_date >= $2 AND expense_date <= $3
+            ORDER BY expense_date DESC, created_at DESC
+        `;
+        
+        const expensesResult = await pool.query(expensesQuery, [accountId, startDateStr, endDateStr]);
+        const expenses = expensesResult.rows;
+        
+        console.log(`📝 EXTERNAL: ${expenses.length} dépenses trouvées`);
+        
+        // Calcul des agrégations
+        const totalDepenses = expenses.reduce((sum, exp) => sum + (parseFloat(exp.total) || 0), 0);
+        const nombreDepenses = expenses.length;
+        const depenseMoyenne = nombreDepenses > 0 ? totalDepenses / nombreDepenses : 0;
+        
+        // Trouver min et max
+        let depenseMin = 0;
+        let depenseMax = 0;
+        if (nombreDepenses > 0) {
+            const montants = expenses.map(exp => parseFloat(exp.total) || 0);
+            depenseMin = Math.min(...montants);
+            depenseMax = Math.max(...montants);
+        }
+        
+        // Agrégation par catégorie
+        const parCategorie = {};
+        expenses.forEach(exp => {
+            const cat = exp.category || 'Non catégorisé';
+            if (!parCategorie[cat]) {
+                parCategorie[cat] = { total: 0, count: 0 };
+            }
+            parCategorie[cat].total += parseFloat(exp.total) || 0;
+            parCategorie[cat].count += 1;
+        });
+        
+        // Agrégation par type de dépense
+        const parType = {};
+        expenses.forEach(exp => {
+            const type = exp.expense_type || 'Non défini';
+            if (!parType[type]) {
+                parType[type] = { total: 0, count: 0 };
+            }
+            parType[type].total += parseFloat(exp.total) || 0;
+            parType[type].count += 1;
+        });
+        
+        // Agrégation par fournisseur
+        const parFournisseur = {};
+        expenses.forEach(exp => {
+            const fournisseur = exp.supplier || 'Non spécifié';
+            if (!parFournisseur[fournisseur]) {
+                parFournisseur[fournisseur] = { total: 0, count: 0 };
+            }
+            parFournisseur[fournisseur].total += parseFloat(exp.total) || 0;
+            parFournisseur[fournisseur].count += 1;
+        });
+        
+        // Construction de la réponse
+        const response = {
+            success: true,
+            metadata: {
+                compte: accountName,
+                compte_id: accountId,
+                compte_type: account.account_type,
+                directeur_assigne: account.assigned_director_name,
+                solde_actuel: parseFloat(account.current_balance) || 0,
+                periode: {
+                    date_debut: startDateStr,
+                    date_fin: endDateStr
+                },
+                generation_timestamp: new Date().toISOString()
+            },
+            aggregation: {
+                total_depenses: totalDepenses,
+                nombre_depenses: nombreDepenses,
+                depense_moyenne: depenseMoyenne,
+                depense_min: depenseMin,
+                depense_max: depenseMax,
+                par_categorie: parCategorie,
+                par_type: parType,
+                par_fournisseur: parFournisseur
+            },
+            details: expenses.map(exp => ({
+                id: exp.id,
+                date: exp.expense_date.toISOString().split('T')[0],
+                designation: exp.designation,
+                fournisseur: exp.supplier,
+                montant: parseFloat(exp.total) || 0,
+                categorie: exp.category,
+                sous_categorie: exp.subcategory,
+                type_depense: exp.expense_type,
+                description: exp.description,
+                created_at: exp.created_at.toISOString()
+            }))
+        };
+        
+        console.log(`✅ EXTERNAL: API depenses/status générée avec succès`);
+        
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.json(response);
+        
+    } catch (error) {
+        console.error('❌ EXTERNAL: Erreur lors de la génération de l\'API depenses/status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Erreur serveur lors de la récupération des données',
+            code: 'DEPENSES_STATUS_API_ERROR',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
 // ========================================
 // 📸 ENDPOINTS SYSTÈME DE SNAPSHOTS
 // ========================================
