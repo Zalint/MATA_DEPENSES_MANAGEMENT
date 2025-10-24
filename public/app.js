@@ -134,6 +134,27 @@ function showNotification(message, type = 'info') {
     }, 5000);
 }
 
+// Fonction pour charger dynamiquement l'agent AI
+function loadAIAgent() {
+    // Vérifier si le script n'est pas déjà chargé
+    if (document.querySelector('script[data-relevanceai-share-id]')) {
+        console.log('🤖 Agent AI déjà chargé');
+        return;
+    }
+    
+    console.log('🤖 Chargement de l\'agent AI pour rôle:', currentUser.role);
+    
+    // Créer et ajouter le script dynamiquement
+    const script = document.createElement('script');
+    script.defer = true;
+    script.setAttribute('data-relevanceai-share-id', 'd7b62b/454efacc47da-463b-877a-66e43c7b454a/57b92281-883c-434e-9319-c6027b3009a9');
+    script.src = 'https://app.relevanceai.com/embed/chat-bubble.js';
+    script.setAttribute('data-share-styles', 'starting_message_prompts=G%C3%A9n%C3%A9rez+un+%C3%A9tat+des+d%C3%A9penses+du+mois+en+cours%2C+d%C3%A9taill%C3%A9+par+sous-cat%C3%A9gorie.&hide_tool_steps=false&hide_file_uploads=false&hide_conversation_list=false&bubble_style=agent&primary_color=%23685FFF&bubble_icon=pd%2Fchat&input_placeholder_text=Type+your+message...&hide_logo=true&hide_description=false');
+    
+    document.body.appendChild(script);
+    console.log('✅ Agent AI chargé avec succès');
+}
+
 // Gestion de l'authentification
 async function login(username, password) {
     try {
@@ -218,11 +239,8 @@ async function showApp() {
 
         // Section de sauvegarde du tableau de bord initialisée dans loadInitialData()
         
-        // Afficher l'agent AI pour les rôles autorisés
-        const aiAgentContainer = document.getElementById('ai-agent-container');
-        if (aiAgentContainer) {
-            aiAgentContainer.style.display = 'block';
-        }
+        // Charger dynamiquement l'agent AI pour les rôles autorisés
+        loadAIAgent();
     }
     
     // Afficher le menu créance pour les utilisateurs autorisés
