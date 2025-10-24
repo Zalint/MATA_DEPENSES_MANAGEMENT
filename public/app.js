@@ -217,6 +217,12 @@ async function showApp() {
         document.getElementById('cash-bictorys-card').style.display = 'block';
 
         // Section de sauvegarde du tableau de bord initialisée dans loadInitialData()
+        
+        // Afficher l'agent AI pour les rôles autorisés
+        const aiAgentContainer = document.getElementById('ai-agent-container');
+        if (aiAgentContainer) {
+            aiAgentContainer.style.display = 'block';
+        }
     }
     
     // Afficher le menu créance pour les utilisateurs autorisés
