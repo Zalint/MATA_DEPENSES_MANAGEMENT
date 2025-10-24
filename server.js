@@ -9029,6 +9029,238 @@ app.get('/external/api/depenses/status', requireAdminAuth, async (req, res) => {
     }
 });
 
+// =====================================================
+// EXTERNAL API FOR PARTNER STATUS
+// =====================================================
+
+// Endpoint pour récupérer les livraisons d'un partenaire sur une période
+app.get('/external/api/partenaire/status', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API partenaire/status avec params:', req.query);
+    
+    try {
+        // Validation des paramètres obligatoires
+        const { partenaire, date_debut, date_fin } = req.query;
+        
+        if (!partenaire || !date_debut || !date_fin) {
+            return res.status(400).json({
+                success: false,
+                error: 'Paramètres manquants',
+                message: 'Les paramètres "partenaire", "date_debut" et "date_fin" sont obligatoires',
+                required_format: {
+                    partenaire: 'Nom du compte partenaire (ex: PARTENAIRE_A)',
+                    date_debut: 'YYYY-MM-DD',
+                    date_fin: 'YYYY-MM-DD'
+                }
+            });
+        }
+        
+        // Validation du format des dates
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(date_debut) || !dateRegex.test(date_fin)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Format de date invalide',
+                message: 'Les dates doivent être au format YYYY-MM-DD'
+            });
+        }
+        
+        // Normaliser les dates
+        const startDateStr = new Date(date_debut).toISOString().split('T')[0];
+        const endDateStr = new Date(date_fin).toISOString().split('T')[0];
+        
+        // Vérifier que date_debut <= date_fin
+        if (new Date(startDateStr) > new Date(endDateStr)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Période invalide',
+                message: 'La date de début doit être antérieure ou égale à la date de fin'
+            });
+        }
+        
+        console.log(`📅 EXTERNAL: Période demandée: ${startDateStr} à ${endDateStr}`);
+        console.log(`📊 EXTERNAL: Partenaire demandé: ${partenaire}`);
+        
+        // Récupérer le compte partenaire par son nom
+        const accountQuery = `
+            SELECT a.id, a.account_name, a.user_id, a.account_type, a.current_balance,
+                   a.total_credited, a.total_spent
+            FROM accounts a
+            WHERE LOWER(a.account_name) = LOWER($1) 
+                AND a.account_type = 'partenaire' 
+                AND a.is_active = true
+        `;
+        
+        const accountResult = await pool.query(accountQuery, [partenaire]);
+        
+        if (accountResult.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Compte partenaire non trouvé',
+                message: `Le compte partenaire "${partenaire}" n'existe pas ou n'est pas actif`
+            });
+        }
+        
+        const account = accountResult.rows[0];
+        const accountId = account.id;
+        const accountName = account.account_name;
+        
+        console.log(`✅ EXTERNAL: Compte partenaire trouvé - ${accountName} (ID: ${accountId})`);
+        
+        // Récupérer les directeurs assignés
+        const directorsQuery = `
+            SELECT u.id, u.full_name
+            FROM partner_account_directors pad
+            JOIN users u ON pad.user_id = u.id
+            WHERE pad.account_id = $1
+            ORDER BY u.full_name
+        `;
+        
+        const directorsResult = await pool.query(directorsQuery, [accountId]);
+        const directors = directorsResult.rows.map(d => ({
+            id: d.id,
+            nom: d.full_name
+        }));
+        
+        console.log(`👥 EXTERNAL: ${directors.length} directeur(s) assigné(s)`);
+        
+        // Récupérer toutes les livraisons de la période avec les informations de validation
+        const deliveriesQuery = `
+            SELECT 
+                pd.id, pd.delivery_date, pd.amount, pd.article_count, pd.unit_price,
+                pd.description, pd.validation_status, pd.created_at,
+                pd.first_validated_at, pd.validated_at, pd.rejected_at,
+                pd.rejection_comment,
+                ufv.full_name as first_validator_name,
+                uv.full_name as final_validator_name,
+                ur.full_name as rejector_name
+            FROM partner_deliveries pd
+            LEFT JOIN users ufv ON pd.first_validated_by = ufv.id
+            LEFT JOIN users uv ON pd.validated_by = uv.id
+            LEFT JOIN users ur ON pd.rejected_by = ur.id
+            WHERE pd.account_id = $1 
+                AND pd.delivery_date >= $2 
+                AND pd.delivery_date <= $3
+            ORDER BY pd.delivery_date DESC, pd.created_at DESC
+        `;
+        
+        const deliveriesResult = await pool.query(deliveriesQuery, [accountId, startDateStr, endDateStr]);
+        const allDeliveries = deliveriesResult.rows;
+        
+        console.log(`📝 EXTERNAL: ${allDeliveries.length} livraison(s) trouvée(s)`);
+        
+        // Séparer les livraisons validées et non validées
+        const validatedDeliveries = allDeliveries.filter(d => d.validation_status === 'fully_validated');
+        const nonValidatedDeliveries = allDeliveries.filter(d => d.validation_status !== 'fully_validated');
+        
+        // Fonction helper pour formatter une livraison
+        const formatDelivery = (delivery) => ({
+            id: delivery.id,
+            date_livraison: delivery.delivery_date.toISOString().split('T')[0],
+            montant: parseFloat(delivery.amount) || 0,
+            nb_articles: parseFloat(delivery.article_count) || 0,
+            prix_unitaire: parseFloat(delivery.unit_price) || 0,
+            description: delivery.description,
+            statut: delivery.validation_status,
+            premiere_validation: delivery.first_validator_name ? {
+                par: delivery.first_validator_name,
+                date: delivery.first_validated_at?.toISOString() || null
+            } : null,
+            validation_finale: delivery.final_validator_name ? {
+                par: delivery.final_validator_name,
+                date: delivery.validated_at?.toISOString() || null
+            } : null,
+            rejection: delivery.rejector_name ? {
+                par: delivery.rejector_name,
+                date: delivery.rejected_at?.toISOString() || null,
+                commentaire: delivery.rejection_comment || ''
+            } : null,
+            created_at: delivery.created_at.toISOString()
+        });
+        
+        // Calcul des agrégations pour les livraisons validées
+        const totalValidated = validatedDeliveries.reduce((sum, d) => sum + (parseFloat(d.amount) || 0), 0);
+        const nombreValidated = validatedDeliveries.length;
+        const avgValidated = nombreValidated > 0 ? totalValidated / nombreValidated : 0;
+        let minValidated = 0;
+        let maxValidated = 0;
+        if (nombreValidated > 0) {
+            const montants = validatedDeliveries.map(d => parseFloat(d.amount) || 0);
+            minValidated = Math.min(...montants);
+            maxValidated = Math.max(...montants);
+        }
+        
+        // Calcul des agrégations pour les livraisons non validées
+        const totalNonValidated = nonValidatedDeliveries.reduce((sum, d) => sum + (parseFloat(d.amount) || 0), 0);
+        const nombreNonValidated = nonValidatedDeliveries.length;
+        const avgNonValidated = nombreNonValidated > 0 ? totalNonValidated / nombreNonValidated : 0;
+        
+        // Agrégation par statut pour les non validées
+        const parStatut = {};
+        nonValidatedDeliveries.forEach(d => {
+            const status = d.validation_status;
+            if (!parStatut[status]) {
+                parStatut[status] = { total: 0, nombre: 0 };
+            }
+            parStatut[status].total += parseFloat(d.amount) || 0;
+            parStatut[status].nombre += 1;
+        });
+        
+        // Construction de la réponse
+        const response = {
+            success: true,
+            metadata: {
+                partenaire: accountName,
+                partenaire_id: accountId,
+                compte_type: account.account_type,
+                directeurs_assignes: directors,
+                solde_actuel: parseFloat(account.current_balance) || 0,
+                total_credite: parseFloat(account.total_credited) || 0,
+                total_depense: parseFloat(account.total_spent) || 0,
+                periode: {
+                    date_debut: startDateStr,
+                    date_fin: endDateStr
+                },
+                generation_timestamp: new Date().toISOString()
+            },
+            aggregation: {
+                livraisons_validees: {
+                    total: totalValidated,
+                    nombre: nombreValidated,
+                    montant_moyen: avgValidated,
+                    montant_min: minValidated,
+                    montant_max: maxValidated
+                },
+                livraisons_non_validees: {
+                    total: totalNonValidated,
+                    nombre: nombreNonValidated,
+                    montant_moyen: avgNonValidated,
+                    par_statut: parStatut
+                },
+                total_general: {
+                    total: totalValidated + totalNonValidated,
+                    nombre: nombreValidated + nombreNonValidated
+                }
+            },
+            livraisons_validees: validatedDeliveries.map(formatDelivery),
+            livraisons_non_validees: nonValidatedDeliveries.map(formatDelivery)
+        };
+        
+        console.log(`✅ EXTERNAL: API partenaire/status générée avec succès`);
+        
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.json(response);
+        
+    } catch (error) {
+        console.error('❌ EXTERNAL: Erreur lors de la génération de l\'API partenaire/status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Erreur serveur lors de la récupération des données',
+            code: 'PARTENAIRE_STATUS_API_ERROR',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
 // ========================================
 // 📸 ENDPOINTS SYSTÈME DE SNAPSHOTS
 // ========================================
