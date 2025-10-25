@@ -56,6 +56,31 @@
         }
       ]
     },
+	
+	{
+  "id": "achatvolaille",
+  "name": "Achat Volaille",
+  "categories": [
+    {
+      "id": "poulet",
+      "name": "Poulet",
+      "subcategories": [
+        { "id": "alim", "name": "Alimentation" },
+        { "id": "deplumage", "name": "Déplumage" },
+        { "id": "trans", "name": "Transport" },
+        { "id": "autres_poulet", "name": "Autres" }
+      ]
+    },
+    {
+      "id": "oeuf",
+      "name": "Oeuf",
+      "subcategories": [
+        { "id": "autres_oeuf", "name": "Autres" },
+        { "id": "trans", "name": "Transport" }
+      ]
+    }
+  ]
+   },
     {
       "id": "depense_mata_group",
       "name": "Dépense Mata Group",
