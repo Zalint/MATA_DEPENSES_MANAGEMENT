@@ -236,6 +236,12 @@ async function showApp() {
         document.getElementById('pl-estim-charges-card').style.display = 'block';
         document.getElementById('pl-brut-card').style.display = 'block';
         document.getElementById('cash-bictorys-card').style.display = 'block';
+        
+        // Afficher les cartes PL alternatifs si elles existent
+        const altCards = document.querySelectorAll('[id^="pl-alt-"]');
+        altCards.forEach(card => {
+            card.style.display = 'block';
+        });
 
         // Section de sauvegarde du tableau de bord initialisée dans loadInitialData()
         
@@ -1363,6 +1369,12 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             window.currentPLDetails = stats.plCalculationDetails;
         }
         
+        // Stocker les PL alternatifs pour le modal
+        if (stats.plAlternatifs) {
+            window.currentPLAlternatifs = stats.plAlternatifs;
+            console.log('📊 CLIENT: PL alternatifs stockés pour le modal:', Object.keys(stats.plAlternatifs).length);
+        }
+        
         // Mettre à jour les périodes
         const periodText = startDate && endDate ? 
             `Du ${formatDate(startDate)} au ${formatDate(endDate)}` : 
@@ -1374,6 +1386,50 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
         document.getElementById('credited-expenses-period').textContent = 'Comptes avec activité';
         document.getElementById('credited-general-period').textContent = 'Tous les comptes';
         console.log('🎯 updateStatsCards: APRÈS mise à jour des périodes');
+        
+        // Créer dynamiquement les cartes PL alternatifs
+        if (stats.plAlternatifs && Object.keys(stats.plAlternatifs).length > 0) {
+            console.log('📊 CLIENT: Création des cartes PL alternatifs:', Object.keys(stats.plAlternatifs).length);
+            
+            // Trouver la première stats-grid qui contient les cartes PL principales
+            const mainStatsGrid = document.querySelector('.stats-grid');
+            
+            // Supprimer les anciennes cartes PL alternatifs si elles existent
+            const oldAltCards = mainStatsGrid.querySelectorAll('[id^="pl-alt-"]');
+            oldAltCards.forEach(card => card.remove());
+            
+            for (const [configKey, plAlt] of Object.entries(stats.plAlternatifs)) {
+                console.log(`📊 CLIENT: Création carte pour "${plAlt.nom}"`);
+                
+                const cardDiv = document.createElement('div');
+                cardDiv.className = 'stat-card';
+                cardDiv.id = `pl-alt-${configKey}`;
+                // Visibilité contrôlée par le rôle utilisateur dans showApp()
+                cardDiv.style.display = ['directeur_general', 'pca', 'admin'].includes(currentUser?.role) ? 'block' : 'none';
+                cardDiv.title = `PL excluant les dépenses de: ${plAlt.comptesExclus.join(', ')}`;
+                
+                cardDiv.innerHTML = `
+                    <div class="stat-icon">
+                        <i class="fas fa-filter"></i>
+                    </div>
+                    <div class="stat-content">
+                        <h3>PL sans ${plAlt.nom}</h3>
+                        <p class="stat-value">${formatCurrency(plAlt.plFinal)}</p>
+                        <small class="stat-period" style="font-size: 0.7em; color: #999;">
+                            🔑 ${configKey}
+                        </small>
+                        <small class="stat-period" style="font-size: 0.75em; color: #666;">
+                            Excluant: ${plAlt.comptesExclus.join(', ')}<br>
+                            Cash Burn: ${formatCurrency(plAlt.cashBurn)} | Exclus: ${formatCurrency(plAlt.depensesExclues)}
+                        </small>
+                    </div>
+                `;
+                
+                mainStatsGrid.appendChild(cardDiv);
+            }
+            
+            console.log('✅ CLIENT: Cartes PL alternatifs créées et ajoutées à la grille principale');
+        }
         
         console.log('✅ updateStatsCards: Mise à jour terminée avec succès');
         console.log('🎯 updateStatsCards: SORTIE du TRY avec succès');
@@ -18629,6 +18685,54 @@ function fillPLDetailsModal(details) {
     
     // Section PL Final
     document.getElementById('pl-final-result').textContent = formatCurrency(details.plFinal);
+    
+    // Section PL Alternatifs (si disponibles)
+    if (window.currentPLAlternatifs && Object.keys(window.currentPLAlternatifs).length > 0) {
+        console.log('📊 CLIENT: Ajout des PL alternatifs dans le modal:', Object.keys(window.currentPLAlternatifs).length);
+        const alternatifSection = document.getElementById('pl-alternatifs-modal-section');
+        const alternatifContent = document.getElementById('pl-alternatifs-modal-content');
+        
+        if (alternatifSection && alternatifContent) {
+            alternatifContent.innerHTML = ''; // Vider le contenu
+            
+            for (const [configKey, plAlt] of Object.entries(window.currentPLAlternatifs)) {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'formula-item';
+                itemDiv.innerHTML = `
+                    <div style="margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
+                        <div style="font-weight: bold; margin-bottom: 5px;">
+                            <i class="fas fa-filter"></i> PL sans ${plAlt.nom}
+                        </div>
+                        <div style="font-size: 0.8em; color: #999; margin-bottom: 5px;">
+                            🔑 Config key: ${configKey}
+                        </div>
+                        <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">
+                            🚫 Comptes exclus: ${plAlt.comptesExclus.join(', ')}
+                        </div>
+                        <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">
+                            💸 Cash Burn excluant: ${formatCurrency(plAlt.cashBurn)}
+                        </div>
+                        <div style="font-size: 0.9em; color: #dc3545; margin-bottom: 5px;">
+                            ➖ Dépenses exclues: ${formatCurrency(plAlt.depensesExclues)}
+                        </div>
+                        <div style="font-size: 1.1em; font-weight: bold; color: #28a745; margin-top: 8px;">
+                            🎯 PL Final: ${formatCurrency(plAlt.plFinal)}
+                        </div>
+                    </div>
+                `;
+                alternatifContent.appendChild(itemDiv);
+            }
+            
+            alternatifSection.style.display = 'block';
+            console.log('✅ CLIENT: PL alternatifs ajoutés dans le modal');
+        }
+    } else {
+        // Cacher la section si pas de PL alternatifs
+        const alternatifSection = document.getElementById('pl-alternatifs-modal-section');
+        if (alternatifSection) {
+            alternatifSection.style.display = 'none';
+        }
+    }
     
     console.log('✅ Modal PL rempli avec les détails');
 }

@@ -3705,6 +3705,105 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             };
         }
         
+        // Calculer dynamiquement les PL alternatifs en fonction des configurations comptes_*
+        const plAlternatifs = {};
+        try {
+            // Lire la configuration financière
+            const configPath = path.join(__dirname, 'financial_settings.json');
+            if (fs.existsSync(configPath)) {
+                const configData = fs.readFileSync(configPath, 'utf8');
+                const financialConfig = JSON.parse(configData);
+                
+                // Extraire tous les noeuds commençant par 'comptes_'
+                const comptesConfigs = Object.keys(financialConfig)
+                    .filter(key => key.startsWith('comptes_'))
+                    .reduce((acc, key) => {
+                        acc[key] = financialConfig[key];
+                        return acc;
+                    }, {});
+                
+                console.log(`\n📊 ===== CALCUL PL ALTERNATIFS =====`);
+                console.log(`📊 Configurations trouvées: ${Object.keys(comptesConfigs).length}`);
+                
+                // Pour chaque configuration, calculer un PL alternatif
+                for (const [configKey, comptesAExclure] of Object.entries(comptesConfigs)) {
+                    if (!Array.isArray(comptesAExclure) || comptesAExclure.length === 0) {
+                        console.log(`⚠️ Configuration ${configKey} invalide ou vide, ignorée`);
+                        continue;
+                    }
+                    
+                    // Générer un nom lisible pour la carte PL
+                    const plName = configKey
+                        .replace('comptes_', '')
+                        .replace(/_/g, ' ')
+                        .replace(/\b\w/g, l => l.toUpperCase());
+                    
+                    console.log(`\n📊 Calcul PL sans: ${plName}`);
+                    console.log(`📊 Config key: ${configKey}`);
+                    console.log(`📊 Comptes exclus: ${comptesAExclure.join(', ')}`);
+                    
+                    // Calculer le Cash Burn en excluant les comptes spécifiés
+                    let cashBurnExclusQuery = `
+                        SELECT COALESCE(SUM(e.total), 0) as total 
+                        FROM expenses e
+                        JOIN accounts a ON e.account_id = a.id
+                        WHERE a.account_name NOT IN (${comptesAExclure.map((_, i) => `$${i + 1}`).join(', ')})
+                    `;
+                    let exclusParams = [...comptesAExclure];
+                    
+                    // Ajouter les filtres de date
+                    if (cutoff_date) {
+                        const cutoffMonth = referenceDateStr.substring(0, 7) + '-01';
+                        cashBurnExclusQuery += ` AND e.expense_date >= $${exclusParams.length + 1} AND e.expense_date <= $${exclusParams.length + 2}`;
+                        exclusParams.push(cutoffMonth, referenceDateStr);
+                    } else if (start_date && end_date) {
+                        cashBurnExclusQuery += ` AND e.expense_date >= $${exclusParams.length + 1} AND e.expense_date <= $${exclusParams.length + 2}`;
+                        exclusParams.push(start_date, end_date);
+                    }
+                    
+                    // Ajouter filtre directeur si nécessaire
+                    if (isDirector) {
+                        cashBurnExclusQuery += ` AND (e.user_id = $${exclusParams.length + 1} OR (EXISTS (
+                            SELECT 1 FROM accounts a2 WHERE a2.id = e.account_id AND a2.user_id = $${exclusParams.length + 1}
+                        ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin'))))`;
+                        exclusParams.push(userId);
+                    }
+                    
+                    const cashBurnExclusResult = await pool.query(cashBurnExclusQuery, exclusParams);
+                    const cashBurnExclus = parseInt(cashBurnExclusResult.rows[0].total);
+                    
+                    // Calculer les montants exclus (pour affichage)
+                    const depensesExclues = totalSpent - cashBurnExclus;
+                    
+                    // Recalculer les PL avec le Cash Burn alternatif
+                    const plBaseAlt = cashBictorysValue + creancesMoisValue - remboursementsMoisValue + stockPointVenteValue - cashBurnExclus;
+                    const plBrutAlt = plBaseAlt + stockVivantVariation + totalVirementsMois - livraisonsPartenaires;
+                    const plFinalAlt = plBrutAlt - chargesProrata;
+                    
+                    console.log(`📊 Cash Burn excluant ${comptesAExclure.join(', ')}: ${cashBurnExclus.toLocaleString()} FCFA`);
+                    console.log(`📊 Dépenses exclues: ${depensesExclues.toLocaleString()} FCFA`);
+                    console.log(`📊 PL Base alternatif: ${plBaseAlt.toLocaleString()} FCFA`);
+                    console.log(`📊 PL Final alternatif: ${Math.round(plFinalAlt).toLocaleString()} FCFA`);
+                    
+                    // Stocker le résultat
+                    plAlternatifs[configKey] = {
+                        configKey: configKey,
+                        nom: plName,
+                        comptesExclus: comptesAExclure,
+                        cashBurn: cashBurnExclus,
+                        depensesExclues: depensesExclues,
+                        plBase: plBaseAlt,
+                        plBrut: Math.round(plBrutAlt),
+                        plFinal: Math.round(plFinalAlt)
+                    };
+                }
+                
+                console.log(`📊 ===== FIN CALCUL PL ALTERNATIFS =====\n`);
+            }
+        } catch (error) {
+            console.error('❌ Erreur calcul PL alternatifs:', error);
+        }
+        
         res.json({
             totalSpent,
             totalRemaining,
@@ -3716,6 +3815,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             plEstimCharges,
             plBrut: Math.round(plBrut),
             plCalculationDetails,
+            plAlternatifs,
             previousMonthsExpenses: previousMonthsResult.rows.map(row => ({
                 account_id: row.account_id,
                 account_name: row.account_name,

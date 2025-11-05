@@ -1,5 +1,12 @@
 {
   "charges_fixes_estimation": 5900000,
   "validate_expense_balance": false,
-  "description": "Paramètres financiers et estimations pour les calculs du système"
+  "comptes_amortissement_investissement": [
+    "EXCEPTIONNEL",
+    "EQUIPEMENT"
+  ],
+  "comptes_investissement": [
+    "EXCEPTIONNEL"
+  ],
+  "description": "Paramètres financiers et estimations pour les calculs du système. comptes_amortissement_investissement et comptes_investissement définissent les comptes à exclure pour les calculs PL alternatifs"
 }

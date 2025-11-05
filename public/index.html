@@ -300,7 +300,11 @@
                                 <p class="stat-value" id="pl-brut">0 FCFA</p>
                             </div>
                         </div>
+                        
+                        <!-- Cartes PL alternatifs (générées dynamiquement) -->
+                        <!-- Container for dynamically generated alternative PL cards -->
                     </div>
+                    <div class="stats-grid" id="pl-alternatifs-container" style="display: none;"></div>
 
                     <!-- Contrôles d'affichage des cartes additionnelles -->
                     <div class="dashboard-controls">
@@ -4418,6 +4422,16 @@
                             <div class="formula-result final">
                                 <span class="label">🎯 PL FINAL =</span>
                                 <span class="value" id="pl-final-result">0 FCFA</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Section PL Alternatifs (générée dynamiquement) -->
+                    <div id="pl-alternatifs-modal-section" style="display: none;">
+                        <div class="pl-section">
+                            <h3><i class="fas fa-filter"></i> PL Alternatifs</h3>
+                            <div class="pl-formula" id="pl-alternatifs-modal-content">
+                                <!-- Les PL alternatifs seront ajoutés ici dynamiquement -->
                             </div>
                         </div>
                     </div>
