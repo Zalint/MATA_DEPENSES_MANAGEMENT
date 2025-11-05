@@ -1,0 +1,181 @@
+<!-- Section Comptes Special - À ajouter dans index.html -->
+<section id="special-accounts-section" class="section">
+    <h2>🔹 Comptes Special</h2>
+    <p class="section-description">
+        Comptes isolés exclus du PL, Cash et Solde global. Aucun transfert autorisé.
+    </p>
+    
+    <div id="special-accounts-container">
+        <!-- Les comptes seront chargés ici dynamiquement -->
+    </div>
+    
+    <div id="special-accounts-loading" style="text-align: center; padding: 40px;">
+        <i class="fas fa-spinner fa-spin" style="font-size: 32px; color: #667eea;"></i>
+        <p style="margin-top: 10px; color: #666;">Chargement des comptes special...</p>
+    </div>
+    
+    <div id="special-accounts-empty" style="display: none; text-align: center; padding: 40px;">
+        <i class="fas fa-inbox" style="font-size: 48px; color: #ccc;"></i>
+        <p style="margin-top: 10px; color: #666;">Aucun compte special créé</p>
+    </div>
+</section>
+
+<style>
+.special-account-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 15px;
+    padding: 25px;
+    margin-bottom: 25px;
+    color: white;
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+}
+
+.special-account-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.2);
+}
+
+.special-account-title {
+    font-size: 24px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.special-account-balance {
+    text-align: right;
+}
+
+.special-balance-label {
+    font-size: 12px;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.special-balance-amount {
+    font-size: 32px;
+    font-weight: 700;
+    margin-top: 5px;
+}
+
+.special-account-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+.special-stat-box {
+    background: rgba(255, 255, 255, 0.15);
+    padding: 15px;
+    border-radius: 10px;
+    text-align: center;
+}
+
+.special-stat-label {
+    font-size: 11px;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.special-stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 5px;
+}
+
+.special-account-tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.special-tab-btn {
+    flex: 1;
+    padding: 12px 20px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    background: transparent;
+    color: white;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.special-tab-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.special-tab-btn.active {
+    background: white;
+    color: #667eea;
+    border-color: white;
+}
+
+.special-movements-list {
+    background: white;
+    border-radius: 10px;
+    padding: 20px;
+    color: #333;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.special-movement-item {
+    padding: 15px;
+    border-bottom: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.special-movement-item:last-child {
+    border-bottom: none;
+}
+
+.special-movement-info {
+    flex: 1;
+}
+
+.special-movement-date {
+    font-size: 12px;
+    color: #999;
+    margin-bottom: 5px;
+}
+
+.special-movement-desc {
+    font-weight: 600;
+    margin-bottom: 3px;
+}
+
+.special-movement-details {
+    font-size: 13px;
+    color: #666;
+}
+
+.special-movement-amount {
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.special-movement-credit {
+    color: #27ae60;
+}
+
+.special-movement-expense {
+    color: #e74c3c;
+}
+
+.special-empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #999;
+}
+</style>

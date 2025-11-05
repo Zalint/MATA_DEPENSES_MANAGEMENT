@@ -1,0 +1,66 @@
+{
+  "types": [
+    {
+      "id": "mlc",
+      "name": "Type de Dépense MLC",
+      "categories": [
+        {
+          "id": "carburant",
+          "name": "Carburant",
+          "subcategories": [
+            {
+              "id": "recharge_electrique",
+              "name": "Recharge électrique"
+            },
+            {
+              "id": "essence",
+              "name": "Essence"
+            },
+            {
+              "id": "diesel",
+              "name": "Diesel"
+            }
+          ]
+        },
+        {
+          "id": "charges",
+          "name": "Charges",
+          "subcategories": [
+            {
+              "id": "reparation",
+              "name": "Réparation"
+            },
+            {
+              "id": "telephone",
+              "name": "Téléphone"
+            }
+          ]
+        },
+        {
+          "id": "amende",
+          "name": "Amende",
+          "subcategories": [
+            {
+              "id": "gendarmerie",
+              "name": "Gendarmerie"
+            },
+            {
+              "id": "police",
+              "name": "Police"
+            }
+          ]
+        },
+        {
+          "id": "autre",
+          "name": "Autre",
+          "subcategories": [
+            {
+              "id": "autres",
+              "name": "Autres"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

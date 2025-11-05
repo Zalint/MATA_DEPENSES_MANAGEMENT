@@ -3482,6 +3482,27 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             livraisonsPartenaires = 0;
         }
 
+        // 🆕 9.5. Calculer les VIREMENTS DU MOIS (somme de tous les virements)
+        console.log('\n💸 ===== CALCUL VIREMENTS DU MOIS =====');
+        let totalVirementsMois = 0;
+        try {
+            const virementsResult = await pool.query(`
+                SELECT COALESCE(SUM(valeur), 0) as total_virements
+                FROM virement_mensuel
+                WHERE month_year = $1
+            `, [monthYear]);
+
+            totalVirementsMois = parseInt(virementsResult.rows[0].total_virements) || 0;
+            
+            console.log(`💸 Virements du mois ${monthYear}: ${totalVirementsMois.toLocaleString()} FCFA`);
+            
+        } catch (error) {
+            console.error('❌ Erreur calcul virements du mois:', error);
+            totalVirementsMois = 0;
+        }
+        console.log('💸 =====================================');
+        
+
         // 10. Calcul de la nouvelle carte PL avec estimation des charges fixes
         // PL = Cash Bictorys + Créances + Stock PV + Écart Stock Vivant - Cash Burn - Estim charge prorata - Livraisons partenaires
         let plEstimCharges = 0;
@@ -3553,12 +3574,12 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             }
             
             // Calculer le PL brut (sans estimation des charges)
-            plBrut = plSansStockCharges + stockVivantVariation - livraisonsPartenaires;
+            plBrut = plSansStockCharges + stockVivantVariation + totalVirementsMois - livraisonsPartenaires;
             
-            // Calculer le PL avec estimation des charges ET écart stock vivant ET livraisons partenaires
-            plEstimCharges = plSansStockCharges + stockVivantVariation - chargesProrata - livraisonsPartenaires;
+            // Calculer le PL avec estimation des charges ET écart stock vivant ET virements ET livraisons partenaires
+            plEstimCharges = plSansStockCharges + stockVivantVariation + totalVirementsMois - chargesProrata - livraisonsPartenaires;
             
-            console.log('🔍=== DÉTAIL CALCUL PL (avec ecart stock mensuel et une estim. charges) ===');
+            console.log('🔍=== DÉTAIL CALCUL PL (avec ecart stock mensuel, virements et estim. charges) ===');
             console.log(`💰 Cash Bictorys du mois: ${cashBictorysValue} FCFA`);
             console.log(`💳 Créances du mois: ${creancesMoisValue} FCFA`);
             console.log(`💵 Remboursements du mois: ${remboursementsMoisValue} FCFA`);
@@ -3566,11 +3587,12 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             console.log(`💸 Cash Burn du mois: ${totalSpent} FCFA`);
             console.log(`📊 PL de base = ${cashBictorysValue} + ${creancesMoisValue} - ${remboursementsMoisValue} + ${stockPointVenteValue} - ${totalSpent} = ${plSansStockCharges} FCFA`);
             console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA`);
+            console.log(`💸 Virements du mois: ${totalVirementsMois} FCFA`);
             console.log(`🚚 Livraisons partenaires du mois: ${livraisonsPartenaires} FCFA`);
             console.log(`⚙️ Estimation charges fixes mensuelle: ${chargesFixesEstimation} FCFA`);
             console.log(`⏰ Charges prorata (jours ouvrables): ${Math.round(chargesProrata)} FCFA`);
-            console.log(`🎯 PL BRUT = ${plSansStockCharges} + ${stockVivantVariation} - ${livraisonsPartenaires} = ${Math.round(plBrut)} FCFA`);
-            console.log(`🎯 PL FINAL = ${plSansStockCharges} + ${stockVivantVariation} - ${Math.round(chargesProrata)} - ${livraisonsPartenaires} = ${Math.round(plEstimCharges)} FCFA`);
+            console.log(`🎯 PL BRUT = ${plSansStockCharges} + ${stockVivantVariation} + ${totalVirementsMois} - ${livraisonsPartenaires} = ${Math.round(plBrut)} FCFA`);
+            console.log(`🎯 PL FINAL = ${plSansStockCharges} + ${stockVivantVariation} + ${totalVirementsMois} - ${Math.round(chargesProrata)} - ${livraisonsPartenaires} = ${Math.round(plEstimCharges)} FCFA`);
             console.log('🔍===============================================');
             
             // Préparer les détails pour le frontend
@@ -3581,6 +3603,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 stockPointVente: stockPointVenteValue,
                 stockVivantVariation: stockVivantVariation,
                 livraisonsPartenaires: livraisonsPartenaires,
+                virementsMois: totalVirementsMois,
                 cashBurn: totalSpent,
                 plBase: plSansStockCharges,
                 plBrut: Math.round(plBrut),
@@ -3629,8 +3652,8 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             console.error('🚨 ERREUR calcul PL avec estim charges:', error);
             console.log(`🚨 DEBUG ERREUR - livraisonsPeriodStart: "${livraisonsPeriodStart}"`);
             console.log(`🚨 DEBUG ERREUR - livraisonsPeriodEnd: "${livraisonsPeriodEnd}"`);
-            plEstimCharges = plSansStockCharges; // Fallback au PL de base
-            plBrut = plSansStockCharges + stockVivantVariation - livraisonsPartenaires; // Fallback PL brut
+            plEstimCharges = plSansStockCharges + stockVivantVariation + totalVirementsMois; // Fallback au PL de base + virements
+            plBrut = plSansStockCharges + stockVivantVariation + totalVirementsMois - livraisonsPartenaires; // Fallback PL brut avec virements
             
             // Préparer les détails d'erreur pour le frontend
             plCalculationDetails = {
@@ -3640,6 +3663,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 stockPointVente: stockPointVenteValue,
                 stockVivantVariation: stockVivantVariation,
                 livraisonsPartenaires: livraisonsPartenaires,
+                virementsMois: totalVirementsMois,
                 cashBurn: totalSpent,
                 plBase: plSansStockCharges,
                 plBrut: Math.round(plBrut),
@@ -13328,6 +13352,291 @@ app.post('/api/external/cash-bictorys', requireCashBictorysAuth, async (req, res
             error: 'Erreur serveur lors du traitement',
             details: error.message 
         });
+    }
+});
+
+// ========================================
+// 💸 VIREMENT MENSUEL - ROUTES API
+// ========================================
+// Module de suivi des virements quotidiens par client
+// La somme mensuelle impacte le calcul du PL
+
+// Middleware pour vérifier les permissions Virement Mensuel (Tous les utilisateurs connectés)
+const requireVirementMensuelAuth = (req, res, next) => {
+    // Check for API key first
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.api_key;
+    
+    if (apiKey) {
+        // API key authentication
+        const validApiKey = process.env.API_KEY || '4f8d9a2b6c7e8f1a3b5c9d0e2f4g6h7i';
+        
+        if (apiKey === validApiKey) {
+            req.session = req.session || {};
+            req.session.user = {
+                id: 1,
+                username: 'api_user',
+                role: 'admin',
+                full_name: 'API User'
+            };
+            return next();
+        }
+        return res.status(401).json({ error: 'Clé API invalide' });
+    }
+
+    // Fallback to session authentication
+    if (!req.session?.user) {
+        return res.status(403).json({ error: 'Accès refusé - Connexion requise' });
+    }
+    next();
+};
+
+// Route pour obtenir les données Virement Mensuel d'un mois donné
+app.get('/api/virement-mensuel/:monthYear', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const { monthYear } = req.params; // Format YYYY-MM
+        
+        // Valider le format
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        console.log(`💸 VIREMENT: Récupération données pour ${monthYear}`);
+
+        // Récupérer toutes les données du mois
+        const result = await pool.query(`
+            SELECT date, valeur, client
+            FROM virement_mensuel 
+            WHERE month_year = $1
+            ORDER BY date, client
+        `, [monthYear]);
+
+        console.log(`💸 VIREMENT: ${result.rows.length} enregistrements trouvés`);
+
+        res.json({
+            monthYear,
+            data: result.rows,
+            count: result.rows.length
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur récupération Virement Mensuel:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir le total des virements d'un mois (pour le calcul PL)
+app.get('/api/virement-mensuel/:monthYear/total', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const { monthYear } = req.params;
+        
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        console.log(`💸 VIREMENT: Calcul total pour ${monthYear}`);
+
+        const result = await pool.query(`
+            SELECT COALESCE(SUM(valeur), 0) as total_virements
+            FROM virement_mensuel
+            WHERE month_year = $1
+        `, [monthYear]);
+
+        const total = parseInt(result.rows[0].total_virements) || 0;
+
+        console.log(`💸 VIREMENT: Total calculé: ${total.toLocaleString()} FCFA`);
+
+        res.json({
+            monthYear,
+            total_virements: total,
+            formatted: `${total.toLocaleString('fr-FR')} FCFA`
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur calcul total Virement Mensuel:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour obtenir les totaux par client d'un mois
+app.get('/api/virement-mensuel/:monthYear/totaux-par-client', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const { monthYear } = req.params;
+        
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        console.log(`💸 VIREMENT: Calcul totaux par client pour ${monthYear}`);
+
+        const result = await pool.query(`
+            SELECT 
+                client,
+                SUM(valeur) as total_virement,
+                COUNT(*) as nombre_virements
+            FROM virement_mensuel
+            WHERE month_year = $1
+            GROUP BY client
+            ORDER BY total_virement DESC
+        `, [monthYear]);
+
+        console.log(`💸 VIREMENT: ${result.rows.length} clients trouvés`);
+
+        res.json({
+            monthYear,
+            totaux: result.rows.map(row => ({
+                client: row.client,
+                total: parseInt(row.total_virement),
+                nombre: parseInt(row.nombre_virements),
+                formatted: `${parseInt(row.total_virement).toLocaleString('fr-FR')} FCFA`
+            }))
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur calcul totaux par client:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour mettre à jour les données Virement Mensuel d'un mois
+app.put('/api/virement-mensuel/:monthYear', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        console.log('💸 VIREMENT: Requête PUT reçue');
+        console.log('💸 VIREMENT: monthYear =', req.params.monthYear);
+        console.log('💸 VIREMENT: user =', req.session.user.username);
+        
+        const { monthYear } = req.params;
+        const { data } = req.body; // Array d'objets {date, valeur, client}
+        const userId = req.session.user.id;
+        const userRole = req.session.user.role;
+
+        // Valider le format
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        // Vérifier les permissions de modification
+        const currentDate = new Date();
+        const currentMonthYear = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+        
+        // DG et PCA peuvent modifier seulement le mois en cours, Admin peut tout modifier
+        if (userRole !== 'admin' && monthYear !== currentMonthYear) {
+            return res.status(403).json({ 
+                error: 'Vous ne pouvez modifier que les données du mois en cours' 
+            });
+        }
+
+        if (!Array.isArray(data)) {
+            return res.status(400).json({ error: 'Les données doivent être un tableau' });
+        }
+
+        await pool.query('BEGIN');
+
+        try {
+            let insertedCount = 0;
+            let updatedCount = 0;
+            let deletedCount = 0;
+
+            // Mettre à jour chaque entrée
+            for (const entry of data) {
+                const { date, valeur, client } = entry;
+                
+                if (!date || !client || valeur === undefined) {
+                    continue; // Ignorer les entrées invalides
+                }
+
+                // Vérifier que la date appartient au mois spécifié
+                if (!date.startsWith(monthYear)) {
+                    continue;
+                }
+
+                const valeurValue = parseInt(valeur) || 0;
+
+                // Ne créer une entrée que si le montant est > 0
+                if (valeurValue > 0) {
+                    // Insérer ou mettre à jour
+                    const result = await pool.query(`
+                        INSERT INTO virement_mensuel (date, valeur, client, month_year, created_by, updated_by)
+                        VALUES ($1, $2, $3, $4, $5, $5)
+                        ON CONFLICT (date, client) 
+                        DO UPDATE SET 
+                            valeur = EXCLUDED.valeur,
+                            updated_by = EXCLUDED.updated_by,
+                            updated_at = CURRENT_TIMESTAMP
+                        RETURNING (xmax = 0) AS inserted
+                    `, [date, valeurValue, client, monthYear, userId]);
+                    
+                    if (result.rows[0].inserted) {
+                        insertedCount++;
+                        console.log(`💸 VIREMENT: Inséré ${date} - ${client}: ${valeurValue.toLocaleString()} FCFA`);
+                    } else {
+                        updatedCount++;
+                        console.log(`💸 VIREMENT: Mis à jour ${date} - ${client}: ${valeurValue.toLocaleString()} FCFA`);
+                    }
+                } else {
+                    // Si valeur = 0, supprimer l'entrée existante (si elle existe)
+                    const result = await pool.query(`
+                        DELETE FROM virement_mensuel 
+                        WHERE date = $1 AND client = $2
+                    `, [date, client]);
+                    
+                    if (result.rowCount > 0) {
+                        deletedCount++;
+                        console.log(`💸 VIREMENT: Supprimé ${date} - ${client} (valeur = 0)`);
+                    }
+                }
+            }
+
+            await pool.query('COMMIT');
+
+            console.log(`💸 VIREMENT: Traitement terminé - ${insertedCount} insérés, ${updatedCount} mis à jour, ${deletedCount} supprimés`);
+
+            res.json({ 
+                success: true,
+                message: 'Données Virement Mensuel mises à jour avec succès',
+                monthYear,
+                stats: {
+                    inserted: insertedCount,
+                    updated: updatedCount,
+                    deleted: deletedCount
+                }
+            });
+
+        } catch (error) {
+            await pool.query('ROLLBACK');
+            throw error;
+        }
+
+    } catch (error) {
+        console.error('❌ Erreur mise à jour Virement Mensuel:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour supprimer toutes les entrées d'un mois (Admin seulement)
+app.delete('/api/admin/virement-mensuel/:monthYear', requireAdminAuth, async (req, res) => {
+    try {
+        const { monthYear } = req.params;
+        
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        const result = await pool.query(`
+            DELETE FROM virement_mensuel 
+            WHERE month_year = $1
+        `, [monthYear]);
+
+        console.log(`💸 VIREMENT: ${result.rowCount} entrées supprimées pour ${monthYear}`);
+
+        res.json({
+            success: true,
+            message: `${result.rowCount} entrées supprimées pour ${monthYear}`,
+            deleted_count: result.rowCount
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur suppression Virement Mensuel:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
