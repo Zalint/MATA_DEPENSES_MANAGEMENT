@@ -508,7 +508,23 @@
             ],
             "subcategories": [
                 {
-                    "id": "autres",
+                    "id": "exceptionnel_autres",
+                    "name": "Autres"
+                }
+            ]
+        },
+        {
+            "id": "caisse_cash",
+            "name": "Cash Money",
+            "categories": [
+                {
+                    "id": "cashMoney_id",
+                    "name": "Cash Disponible"
+                }
+            ],
+            "subcategories": [
+                {
+                    "id": "cash_autres",
                     "name": "Autres"
                 }
             ]

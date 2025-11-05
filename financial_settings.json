@@ -1,5 +1,5 @@
 {
-  "charges_fixes_estimation": 5320000,
-  "validate_expense_balance": true,
+  "charges_fixes_estimation": 5900000,
+  "validate_expense_balance": false,
   "description": "Paramètres financiers et estimations pour les calculs du système"
 }
