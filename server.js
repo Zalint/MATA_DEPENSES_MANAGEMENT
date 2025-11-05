@@ -633,6 +633,7 @@ async function collecteSnapshotData(cutoffDate = null) {
                         totalCredits: getValue('#total-credited-amount'),
                         depotBalance: getValue('#total-depot-balance'),
                         partnerBalance: getValue('#total-partner-balance'),
+                        virementsMois: getValue('#virements-mois-amount'),
                         
                         // Éléments du détail PL si disponibles
                         plBase: getValue('#pl-base-amount'),
@@ -677,6 +678,7 @@ async function collecteSnapshotData(cutoffDate = null) {
                 plBase: parseFormattedNumber(scrapedData.plBase),
                 plBrut: parseFormattedNumber(scrapedData.plBrut),
                 chargesProrata: parseFormattedNumber(scrapedData.chargesProrata),
+                virementsMois: parseFormattedNumber(scrapedData.virementsMois),
                 
                 // Valeurs supplémentaires du dashboard
                 totalRemaining: parseFormattedNumber(scrapedData.totalRemaining),
@@ -3486,15 +3488,19 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         console.log('\n💸 ===== CALCUL VIREMENTS DU MOIS =====');
         let totalVirementsMois = 0;
         try {
+            // Récupérer le mois au format YYYY-MM depuis cutoff_date ou start_date
+            const monthYearStr = (cutoff_date || start_date || referenceDateStr).substring(0, 7);
+            console.log(`💸 Month extrait: ${monthYearStr}`);
+            
             const virementsResult = await pool.query(`
                 SELECT COALESCE(SUM(valeur), 0) as total_virements
                 FROM virement_mensuel
                 WHERE month_year = $1
-            `, [monthYear]);
+            `, [monthYearStr]);
 
             totalVirementsMois = parseInt(virementsResult.rows[0].total_virements) || 0;
             
-            console.log(`💸 Virements du mois ${monthYear}: ${totalVirementsMois.toLocaleString()} FCFA`);
+            console.log(`💸 Virements du mois ${monthYearStr}: ${totalVirementsMois.toLocaleString()} FCFA`);
             
         } catch (error) {
             console.error('❌ Erreur calcul virements du mois:', error);
@@ -13404,7 +13410,7 @@ app.get('/api/virement-mensuel/:monthYear', requireVirementMensuelAuth, async (r
 
         // Récupérer toutes les données du mois
         const result = await pool.query(`
-            SELECT date, valeur, client
+            SELECT TO_CHAR(date, 'YYYY-MM-DD') as date, valeur, client
             FROM virement_mensuel 
             WHERE month_year = $1
             ORDER BY date, client
@@ -13608,6 +13614,38 @@ app.put('/api/virement-mensuel/:monthYear', requireVirementMensuelAuth, async (r
 
     } catch (error) {
         console.error('❌ Erreur mise à jour Virement Mensuel:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route pour supprimer un client spécifique d'un mois
+app.delete('/api/virement-mensuel/:monthYear/client/:clientName', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const { monthYear, clientName } = req.params;
+        
+        if (!/^\d{4}-\d{2}$/.test(monthYear)) {
+            return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        console.log(`💸 VIREMENT: Suppression du client "${clientName}" pour ${monthYear}`);
+
+        const result = await pool.query(`
+            DELETE FROM virement_mensuel 
+            WHERE month_year = $1 AND client = $2
+        `, [monthYear, clientName]);
+
+        console.log(`💸 VIREMENT: ${result.rowCount} entrées supprimées pour le client "${clientName}"`);
+
+        res.json({
+            success: true,
+            message: `Client "${clientName}" supprimé avec ${result.rowCount} entrées`,
+            deleted_count: result.rowCount,
+            client: clientName,
+            monthYear
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur suppression client Virement Mensuel:', error);
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
@@ -14371,13 +14409,17 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
             console.log(`   Créé le: ${existingSnapshot.created_at}`);
         }
         
+        // Récupérer virements du mois depuis plDetails
+        const virements_mois = plDetails.virementsMois || 0;
+        console.log(`💸 Virements du mois pour snapshot ${correctedSnapshotDate}: ${virements_mois} FCFA`);
+        
         // Préparer les valeurs pour le logging
         const sqlValues = [
             correctedSnapshotDate, total_spent_amount || 0, total_remaining_amount || 0,
             total_credited_with_expenses || 0, total_credited_general || 0,
             cash_bictorys_amount || 0, creances_total || 0, creances_mois || 0,
             stock_point_vente || 0, stock_vivant_total || 0, stock_vivant_variation || 0,
-            livraisons_partenaires,
+            livraisons_partenaires, virements_mois,
             daily_burn || 0, weekly_burn || 0, monthly_burn || 0,
             solde_depot || 0, solde_partner || 0, solde_general || 0,
             pl_final,
@@ -14390,13 +14432,13 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
                 total_credited_with_expenses, total_credited_general,
                 cash_bictorys_amount, creances_total, creances_mois,
                 stock_point_vente, stock_vivant_total, stock_vivant_variation,
-                livraisons_partenaires,
+                livraisons_partenaires, virements_mois,
                 daily_burn, weekly_burn, monthly_burn,
                 solde_depot, solde_partner, solde_general,
                 pl_final,
                 created_by, notes
             ) VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22
             )
             ON CONFLICT (snapshot_date) 
             DO UPDATE SET
@@ -14411,6 +14453,7 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
                 stock_vivant_total = EXCLUDED.stock_vivant_total,
                 stock_vivant_variation = EXCLUDED.stock_vivant_variation,
                 livraisons_partenaires = EXCLUDED.livraisons_partenaires,
+                virements_mois = EXCLUDED.virements_mois,
                 daily_burn = EXCLUDED.daily_burn,
                 weekly_burn = EXCLUDED.weekly_burn,
                 monthly_burn = EXCLUDED.monthly_burn,
@@ -14444,15 +14487,16 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
         console.log('$10 (stock_vivant_total):', sqlValues[9]);
         console.log('$11 (stock_vivant_variation):', sqlValues[10]);
         console.log('$12 (livraisons_partenaires):', sqlValues[11]);
-        console.log('$13 (daily_burn):', sqlValues[12]);
-        console.log('$14 (weekly_burn):', sqlValues[13]);
-        console.log('$15 (monthly_burn):', sqlValues[14]);
-        console.log('$16 (solde_depot):', sqlValues[15]);
-        console.log('$17 (solde_partner):', sqlValues[16]);
-        console.log('$18 (solde_general):', sqlValues[17]);
-        console.log('$19 (pl_final):', sqlValues[18]);
-        console.log('$20 (created_by):', sqlValues[19]);
-        console.log('$21 (notes):', sqlValues[20]);
+        console.log('$13 (virements_mois):', sqlValues[12]);
+        console.log('$14 (daily_burn):', sqlValues[13]);
+        console.log('$15 (weekly_burn):', sqlValues[14]);
+        console.log('$16 (monthly_burn):', sqlValues[15]);
+        console.log('$17 (solde_depot):', sqlValues[16]);
+        console.log('$18 (solde_partner):', sqlValues[17]);
+        console.log('$19 (solde_general):', sqlValues[18]);
+        console.log('$20 (pl_final):', sqlValues[19]);
+        console.log('$21 (created_by):', sqlValues[20]);
+        console.log('$22 (notes):', sqlValues[21]);
         console.log('\n⏳ Exécution de la requête...');
         
         // Insérer ou mettre à jour le snapshot (UPSERT)

@@ -384,6 +384,17 @@ async function showSection(sectionName) {
             }
             break;
             
+        case 'virement-mensuel':
+            console.log('🔄 CLIENT: showSection - virement-mensuel appelé');
+            try {
+                await initVirementMensuel();
+                console.log('✅ CLIENT: showSection - virement-mensuel terminé avec succès');
+            } catch (error) {
+                console.error('❌ CLIENT: Erreur dans showSection - virement-mensuel:', error);
+                showNotification('Erreur lors du chargement de Virement Mensuel', 'error');
+            }
+            break;
+            
         case 'visualisation':
             console.log('🔄 CLIENT: showSection - visualisation appelé');
             try {
@@ -432,6 +443,12 @@ function initMenuVisibility() {
     const cashBictorysMenu = document.getElementById('cash-bictorys-menu');
     if (cashBictorysMenu) {
         cashBictorysMenu.style.display = 'block';
+    }
+    
+    // Menu Virement Mensuel pour TOUS les autres utilisateurs
+    const virementMensuelMenu = document.getElementById('virement-mensuel-menu');
+    if (virementMensuelMenu) {
+        virementMensuelMenu.style.display = 'block';
     }
     
     // Menu Créance pour DG, PCA, Admin, Directeur
@@ -1194,6 +1211,22 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
         document.getElementById('pl-estim-charges').textContent = formatCurrency(stats.plEstimCharges || 0);
         document.getElementById('pl-brut').textContent = formatCurrency(stats.plBrut || 0);
         
+        // Mettre à jour la carte virements du mois
+        if (stats.plCalculationDetails && stats.plCalculationDetails.virementsMois !== undefined) {
+            const virementsElement = document.getElementById('virements-mois-amount');
+            if (virementsElement) {
+                virementsElement.textContent = formatCurrency(stats.plCalculationDetails.virementsMois);
+            }
+        }
+        
+        // Mettre à jour la carte virements du mois si disponible
+        if (stats.plCalculationDetails && stats.plCalculationDetails.virementsMois !== undefined) {
+            const virementsElement = document.getElementById('virements-mois-amount');
+            if (virementsElement) {
+                virementsElement.textContent = formatCurrency(stats.plCalculationDetails.virementsMois);
+            }
+        }
+        
         // Mettre à jour les dépenses des mois précédents dans le tableau
         const expensesTable = document.querySelector('.expenses-table tbody');
         if (expensesTable && stats.previousMonthsExpenses) {
@@ -1296,6 +1329,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
                 formatCurrency(stats.plCalculationDetails.plBase)
             );
             console.log('🌱 Écart Stock Vivant Mensuel:', formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0));
+            console.log('💸 Virements du mois:', formatCurrency(stats.plCalculationDetails.virementsMois || 0));
             console.log('🚚 Livraisons partenaires du mois:', formatCurrency(stats.plCalculationDetails.livraisonsPartenaires || 0));
             console.log('⚙️ Estimation charges fixes mensuelle:', formatCurrency(stats.plCalculationDetails.chargesFixesEstimation));
             if (stats.plCalculationDetails.prorata.totalJours > 0) {
@@ -1314,7 +1348,8 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.log('⏰ Charges prorata (jours ouvrables):', formatCurrency(stats.plCalculationDetails.chargesProrata));
             console.log('🎯 PL FINAL =', 
                 formatCurrency(stats.plCalculationDetails.plBase), '+',
-                formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0), '-',
+                formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0), '+',
+                formatCurrency(stats.plCalculationDetails.virementsMois || 0), '-',
                 formatCurrency(stats.plCalculationDetails.chargesProrata), '-',
                 formatCurrency(stats.plCalculationDetails.livraisonsPartenaires || 0), '=',
                 formatCurrency(stats.plCalculationDetails.plFinal)
@@ -18336,6 +18371,7 @@ function exportPLDetailsToExcel() {
         switch (key) {
             case 'cashBictorys': return plDetails.cashBictorys || 0;
             case 'creances': return plDetails.creances || 0;
+            case 'virements': return plDetails.virementsMois || plDetails.virements || 0;
             case 'remboursements': return plDetails.remboursements || 0;
             case 'stockPointVente': return plDetails.stockPointVente || 0;
             case 'cashBurn': return plDetails.cashBurn || 0;
@@ -18366,6 +18402,7 @@ function exportPLDetailsToExcel() {
         ['PL DE BASE', ''],
         ['Cash Bictorys du mois', getRawValue('cashBictorys')],
         ['Créances du mois', getRawValue('creances')],
+        ['Virements du mois', getRawValue('virements')],
         ['Remboursements du mois', -getRawValue('remboursements')],
         ['Écart Stock Mata Mensuel', getRawValue('stockPointVente')],
         ['Cash Burn du mois', getRawValue('cashBurn')],
@@ -18443,6 +18480,7 @@ function fillPLDetailsModal(details) {
     // Section PL de base
     document.getElementById('pl-cash-bictorys').textContent = formatCurrency(details.cashBictorys);
     document.getElementById('pl-creances').textContent = formatCurrency(details.creances);
+    document.getElementById('pl-virements').textContent = formatCurrency(details.virementsMois || details.virements || 0);
     
     // Afficher les remboursements (nouveau)
     console.log('🔍 CLIENT: Début affichage remboursements');
