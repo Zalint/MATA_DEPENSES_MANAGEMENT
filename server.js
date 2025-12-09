@@ -6757,34 +6757,62 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         
         // Lignes du tableau
         doc.fontSize(10).font('Helvetica').fillColor('black');
+        
+        const rowHeight = 25;
+        const pageHeight = 792; // A4 height in points
+        const bottomMargin = 100; // Reserve space for total and footer
+        
         deliveries.forEach((delivery, index) => {
-            const rowY = yPos + (index * 25);
+            // Check if we need a new page
+            if (yPos + rowHeight > pageHeight - bottomMargin) {
+                doc.addPage({ margin: 50, size: 'A4' });
+                yPos = 50;
+                
+                // Redraw table header on new page
+                doc.rect(50, yPos, 495, 25).fill('#1e3a8a');
+                doc.fontSize(11).font('Helvetica-Bold').fillColor('white');
+                doc.text('ARTICLES', colPositions[0] + 5, yPos + 8);
+                doc.text('DESCRIPTION', colPositions[1] + 5, yPos + 8);
+                doc.text('P. UNITAIRE', colPositions[2] + 5, yPos + 8);
+                doc.text('PRIX TOTAL', colPositions[3] + 5, yPos + 8);
+                doc.text('DATE', colPositions[4] + 5, yPos + 8);
+                yPos += 25;
+                
+                doc.fontSize(10).font('Helvetica').fillColor('black');
+            }
             
             // Alternance de couleurs de fond
             if (index % 2 === 1) {
-                doc.rect(50, rowY, 495, 25).fill('#f8f9fa');
+                doc.rect(50, yPos, 495, 25).fill('#f8f9fa');
             }
             
             doc.fillColor('black');
-            doc.text(parseFloat(delivery.article_count).toFixed(2), colPositions[0] + 5, rowY + 8);
+            doc.text(parseFloat(delivery.article_count).toFixed(2), colPositions[0] + 5, yPos + 8);
             
             // Tronquer la description si trop longue
             const description = delivery.description || '-';
             const truncatedDesc = description.length > 15 ? description.substring(0, 15) + '...' : description;
-            doc.text(truncatedDesc, colPositions[1] + 5, rowY + 8);
+            doc.text(truncatedDesc, colPositions[1] + 5, yPos + 8);
             
             const unitPrice = parseFloat(delivery.unit_price || 0);
-            doc.text(formatAmount(unitPrice) + ' F', colPositions[2] + 5, rowY + 8);
+            doc.text(formatAmount(unitPrice) + ' F', colPositions[2] + 5, yPos + 8);
             
             const amount = parseFloat(delivery.amount);
-            doc.text(formatAmount(amount) + ' F', colPositions[3] + 5, rowY + 8);
+            doc.text(formatAmount(amount) + ' F', colPositions[3] + 5, yPos + 8);
             
-            doc.text(new Date(delivery.delivery_date).toLocaleDateString('fr-FR'), colPositions[4] + 5, rowY + 8);
+            doc.text(new Date(delivery.delivery_date).toLocaleDateString('fr-FR'), colPositions[4] + 5, yPos + 8);
             
             totalAmount += amount;
+            yPos += rowHeight;
         });
         
-        yPos += deliveries.length * 25 + 20;
+        yPos += 20;
+        
+        // Check if total section fits on current page
+        if (yPos + 100 > pageHeight - 50) {
+            doc.addPage({ margin: 50, size: 'A4' });
+            yPos = 50;
+        }
         
         // Total
         doc.rect(50, yPos, 495, 35).fill('#1e3a8a');
