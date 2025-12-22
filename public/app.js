@@ -10431,7 +10431,9 @@ async function loadStockData() {
     console.log('🌐 URL finale:', url);
 
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            credentials: 'same-origin'
+        });
         if (!response.ok) {
             throw new Error(`Erreur HTTP: ${response.status}`);
         }
@@ -10641,6 +10643,7 @@ async function handleStockUpload(e) {
         const response = await fetch(apiUrl('/api/stock-mata/upload'), {
             method: 'POST',
             body: formData,
+            credentials: 'same-origin'
         });
 
         console.log('📡 CLIENT: Réponse reçue du serveur:');
@@ -10727,7 +10730,9 @@ function closeStockModal() {
 
 async function loadStockItemForEdit(stockId) {
     try {
-        const response = await fetch(`/api/stock-mata/${stockId}`);
+        const response = await fetch(`/api/stock-mata/${stockId}`, {
+            credentials: 'same-origin'
+        });
         if (!response.ok) {
             throw new Error('Impossible de charger les données de l\'entrée.');
         }
@@ -10764,6 +10769,7 @@ async function handleStockFormSubmit(e) {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify(Object.fromEntries(formData)),
+            credentials: 'same-origin'
         });
 
         if (response.ok) {
@@ -10788,7 +10794,10 @@ async function deleteStockItem(stockId) {
         return;
     }
     try {
-        const response = await fetch(`/api/stock-mata/${stockId}`, { method: 'DELETE' });
+        const response = await fetch(`/api/stock-mata/${stockId}`, { 
+            method: 'DELETE',
+            credentials: 'same-origin'
+        });
         if (response.ok) {
             showStockNotification('Entrée supprimée avec succès.', 'success');
             await loadStockData();
@@ -10838,7 +10847,9 @@ async function previewDeleteByDate() {
     
     try {
         // Fetch stock data for this date to preview
-        const response = await fetch(`/api/stock-mata?date=${date}`);
+        const response = await fetch(`/api/stock-mata?date=${date}`, {
+            credentials: 'same-origin'
+        });
         if (!response.ok) {
             throw new Error('Erreur lors de la récupération des données');
         }
@@ -10894,7 +10905,8 @@ async function confirmDeleteByDate() {
         deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Suppression...';
         
         const response = await fetch(`/api/stock-mata/delete-by-date/${date}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            credentials: 'same-origin'
         });
         
         const result = await response.json();
@@ -10974,7 +10986,9 @@ async function toggleStockStats() {
 async function loadStockStatistics() {
     const container = document.getElementById('stock-stats-container');
     try {
-        const response = await fetch('/api/stock-mata/stats'); // Note: L'API pour cela n'est pas encore définie
+        const response = await fetch('/api/stock-mata/stats', {
+            credentials: 'same-origin'
+        }); // Note: L'API pour cela n'est pas encore définie
         if (!response.ok) throw new Error('Statistiques non disponibles');
         const stats = await response.json();
         displayStockStatistics(stats);

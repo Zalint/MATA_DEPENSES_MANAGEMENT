@@ -8836,8 +8836,10 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         let estimatedMonthlyFixedCharges = 0;
         try {
             const configPath = path.join(__dirname, 'financial_settings.json');
-            if (fs.existsSync(configPath)) {
-                const configData = fs.readFileSync(configPath, 'utf8');
+            const configExists = await fs.promises.access(configPath).then(() => true).catch(() => false);
+            
+            if (configExists) {
+                const configData = await fs.promises.readFile(configPath, 'utf8');
                 const financialConfig = JSON.parse(configData);
                 estimatedMonthlyFixedCharges = parseFloat(financialConfig.charges_fixes_estimation) || 0;
             } else {
@@ -8885,12 +8887,115 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             // Calculer le prorata
             chargesProrata = (estimatedMonthlyFixedCharges * joursOuvrablesEcoules) / totalJoursOuvrables;
         }
+
+        // Calcul des virements du mois (même logique que l'interface)
+        let totalVirementsMois = 0;
+        try {
+            const virementsResult = await pool.query(`
+                SELECT COALESCE(SUM(valeur), 0) as total_virements
+                FROM virement_mensuel
+                WHERE month_year = $1
+            `, [monthYear]);
+
+            totalVirementsMois = parseInt(virementsResult.rows[0].total_virements, 10) || 0;
+            console.log(`💸 Virements du mois ${monthYear}: ${totalVirementsMois.toLocaleString()} FCFA`);
+        } catch (error) {
+            console.error('❌ Erreur calcul virements du mois:', error);
+            totalVirementsMois = 0;
+        }
         
         // Calculs PL (même logique que l'interface)
         // NOTE: On soustrait totalRemboursements car ils sont déjà inclus dans cashBictorysValue
         const plSansStockCharges = cashBictorysValue + totalCreance - totalRemboursements + totalStockSoir - totalMonthlyExpenses;
-        const brutPL = plSansStockCharges + stockVivantVariation - totalDeliveriesMonth;
-        const estimatedPL = plSansStockCharges + stockVivantVariation - chargesProrata - totalDeliveriesMonth;
+        const brutPL = plSansStockCharges + stockVivantVariation + totalVirementsMois - totalDeliveriesMonth;
+        const estimatedPL = plSansStockCharges + stockVivantVariation + totalVirementsMois - chargesProrata - totalDeliveriesMonth;
+
+        // Calculer dynamiquement les PL alternatifs en fonction des configurations comptes_*
+        const plAlternatifs = {};
+        try {
+            // Lire la configuration financière de manière asynchrone
+            const configPath = path.join(__dirname, 'financial_settings.json');
+            const configExists = await fs.promises.access(configPath).then(() => true).catch(() => false);
+            
+            if (configExists) {
+                const configData = await fs.promises.readFile(configPath, 'utf8');
+                const financialConfig = JSON.parse(configData);
+                
+                // Extraire tous les noeuds commençant par 'comptes_'
+                const comptesConfigs = Object.keys(financialConfig)
+                    .filter(key => key.startsWith('comptes_'))
+                    .reduce((acc, key) => {
+                        acc[key] = financialConfig[key];
+                        return acc;
+                    }, {});
+                
+                console.log(`\n📊 EXTERNAL API: CALCUL PL ALTERNATIFS`);
+                console.log(`📊 Configurations trouvées: ${Object.keys(comptesConfigs).length}`);
+                
+                // Pour chaque configuration, calculer un PL alternatif
+                for (const [configKey, comptesAExclure] of Object.entries(comptesConfigs)) {
+                    if (!Array.isArray(comptesAExclure) || comptesAExclure.length === 0) {
+                        console.log(`⚠️ Configuration ${configKey} invalide ou vide, ignorée`);
+                        continue;
+                    }
+                    
+                    // Générer un nom lisible pour la carte PL
+                    const plName = configKey
+                        .replace('comptes_', '')
+                        .replace(/_/g, ' ')
+                        .replace(/\b\w/g, l => l.toUpperCase());
+                    
+                    console.log(`\n📊 Calcul PL sans: ${plName}`);
+                    console.log(`📊 Config key: ${configKey}`);
+                    console.log(`📊 Comptes exclus: ${comptesAExclure.join(', ')}`);
+                    
+                    // Calculer le Cash Burn en excluant les comptes spécifiés
+                    const cashBurnExclusQuery = `
+                        SELECT COALESCE(SUM(e.total), 0) as total 
+                        FROM expenses e
+                        JOIN accounts a ON e.account_id = a.id
+                        WHERE a.account_name NOT IN (${comptesAExclure.map((_, i) => `$${i + 1}`).join(', ')})
+                        AND a.is_active = true 
+                        AND a.account_type IN ('classique', 'statut')
+                        AND e.expense_date >= $${comptesAExclure.length + 1} 
+                        AND e.expense_date <= $${comptesAExclure.length + 2}
+                    `;
+                    const exclusParams = [...comptesAExclure, startOfMonthStr, selectedDateStr];
+                    
+                    const cashBurnExclusResult = await pool.query(cashBurnExclusQuery, exclusParams);
+                    const cashBurnExclus = parseFloat(cashBurnExclusResult.rows[0].total) || 0;
+                    
+                    // Calculer les montants exclus (pour affichage)
+                    const depensesExclues = totalMonthlyExpenses - cashBurnExclus;
+                    
+                    // Recalculer les PL avec le Cash Burn alternatif
+                    const plBaseAlt = cashBictorysValue + totalCreance - totalRemboursements + totalStockSoir - cashBurnExclus;
+                    const plBrutAlt = plBaseAlt + stockVivantVariation + totalVirementsMois - totalDeliveriesMonth;
+                    const plFinalAlt = plBrutAlt - chargesProrata;
+                    
+                    console.log(`📊 Cash Burn excluant ${comptesAExclure.join(', ')}: ${cashBurnExclus.toLocaleString()} FCFA`);
+                    console.log(`📊 Dépenses exclues: ${depensesExclues.toLocaleString()} FCFA`);
+                    console.log(`📊 PL Base alternatif: ${plBaseAlt.toLocaleString()} FCFA`);
+                    console.log(`📊 PL Final alternatif: ${Math.round(plFinalAlt).toLocaleString()} FCFA`);
+                    
+                    // Stocker le résultat
+                    plAlternatifs[configKey] = {
+                        configKey: configKey,
+                        nom: plName,
+                        comptesExclus: comptesAExclure,
+                        cashBurn: cashBurnExclus,
+                        depensesExclues: depensesExclues,
+                        plBase: plBaseAlt,
+                        plBrut: Math.round(plBrutAlt),
+                        plFinal: Math.round(plFinalAlt)
+                    };
+                }
+                
+                console.log(`📊 FIN CALCUL PL ALTERNATIFS\n`);
+            }
+        } catch (error) {
+            console.error('❌ EXTERNAL API: Erreur calcul PL alternatifs:', error);
+        }
 
         const globalMetrics = {
             profitAndLoss: {
@@ -8899,6 +9004,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     components: {
                         cash_bictorys: cashBictorysValue,
                         creances: totalCreance,
+                        virements: totalVirementsMois,
                         remboursements: -totalRemboursements,
                         stock_pv: totalStockSoir,
                         cash_burn: -totalMonthlyExpenses,
@@ -8920,7 +9026,8 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     jours_ouvrables_ecoules: joursOuvrablesEcoules,
                     total_jours_ouvrables: totalJoursOuvrables,
                     pourcentage: totalJoursOuvrables > 0 ? Math.round((joursOuvrablesEcoules / totalJoursOuvrables) * 100) : 0
-                }
+                },
+                plAlternatifs: plAlternatifs
             },
             balances: {
                 // Per request: ignore balance_du_mois in API (set to 0)
@@ -8929,7 +9036,8 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                 cash_disponible: totalBalance,
                 cash_burn_du_mois: totalMonthlyExpenses,
                 cash_bictorys_du_mois: cashBictorysValue,
-                cash_burn_depuis_lundi: totalWeeklyExpenses
+                cash_burn_depuis_lundi: totalWeeklyExpenses,
+                virements_du_mois: totalVirementsMois
             }
         };
 
