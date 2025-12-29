@@ -15860,6 +15860,22 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
 
         console.log(`📅 EXTERNAL: Période demandée - Du ${startDate} au ${endDate}`);
 
+        // Charger le mapping client -> point de vente
+        let virementMapping = {};
+        try {
+            const mappingPath = path.join(__dirname, 'virementMapping.json');
+            if (fs.existsSync(mappingPath)) {
+                const mappingData = fs.readFileSync(mappingPath, 'utf8');
+                virementMapping = JSON.parse(mappingData);
+                console.log('📋 EXTERNAL: Mapping virement chargé:', Object.keys(virementMapping).length, 'mappings');
+            } else {
+                console.log('⚠️ EXTERNAL: Fichier virementMapping.json non trouvé, mapping vide');
+            }
+        } catch (error) {
+            console.error('❌ EXTERNAL: Erreur chargement mapping virement:', error);
+            // Continue sans mapping en cas d'erreur
+        }
+
         // Récupérer les virements groupés par client pour la période
         const virementsQuery = `
             SELECT 
@@ -15876,14 +15892,20 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
 
         const result = await pool.query(virementsQuery, [startDate, endDate]);
         
-        const virementsParClient = result.rows.map(row => ({
-            client: row.client,
-            total_virement: parseInt(row.total_virement) || 0,
-            nombre_virements: parseInt(row.nombre_virements) || 0,
-            premiere_date: row.premiere_date,
-            derniere_date: row.derniere_date,
-            formatted_total: `${parseInt(row.total_virement).toLocaleString('fr-FR')} FCFA`
-        }));
+        const virementsParClient = result.rows.map(row => {
+            const clientName = row.client;
+            const pointDevente = virementMapping[clientName] || null;
+            
+            return {
+                client: clientName,
+                pointDevente: pointDevente,
+                total_virement: parseInt(row.total_virement) || 0,
+                nombre_virements: parseInt(row.nombre_virements) || 0,
+                premiere_date: row.premiere_date,
+                derniere_date: row.derniere_date,
+                formatted_total: `${parseInt(row.total_virement).toLocaleString('fr-FR')} FCFA`
+            };
+        });
 
         // Calculer le total général
         const totalGeneral = virementsParClient.reduce((sum, v) => sum + v.total_virement, 0);
