@@ -15808,6 +15808,120 @@ Répondez en français de manière professionnelle.`;
     }
 });
 
+// =====================================================
+// EXTERNAL API FOR VIREMENT (DAILY TRANSFERS)
+// =====================================================
+
+// Endpoint pour l'API externe des virements par client
+app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API virement avec params:', req.query);
+    
+    try {
+        // Récupérer les paramètres de date
+        const { startDate, endDate } = req.query;
+        
+        // Valider que les dates sont fournies
+        if (!startDate || !endDate) {
+            return res.status(400).json({ 
+                error: 'Les paramètres startDate et endDate sont requis',
+                code: 'MISSING_PARAMETERS',
+                format: 'YYYY-MM-DD'
+            });
+        }
+
+        // Valider le format des dates (YYYY-MM-DD)
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dateRegex.test(startDate) || !dateRegex.test(endDate)) {
+            return res.status(400).json({ 
+                error: 'Format de date invalide. Utiliser YYYY-MM-DD',
+                code: 'INVALID_DATE_FORMAT'
+            });
+        }
+
+        // Convertir en objets Date pour validation
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+        
+        // Vérifier que les dates sont valides
+        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+            return res.status(400).json({ 
+                error: 'Dates invalides',
+                code: 'INVALID_DATES'
+            });
+        }
+
+        // Vérifier que startDate <= endDate
+        if (start > end) {
+            return res.status(400).json({ 
+                error: 'startDate doit être antérieure ou égale à endDate',
+                code: 'INVALID_DATE_RANGE'
+            });
+        }
+
+        console.log(`📅 EXTERNAL: Période demandée - Du ${startDate} au ${endDate}`);
+
+        // Récupérer les virements groupés par client pour la période
+        const virementsQuery = `
+            SELECT 
+                client,
+                SUM(valeur) as total_virement,
+                COUNT(*) as nombre_virements,
+                MIN(date) as premiere_date,
+                MAX(date) as derniere_date
+            FROM virement_mensuel
+            WHERE date >= $1 AND date <= $2
+            GROUP BY client
+            ORDER BY total_virement DESC
+        `;
+
+        const result = await pool.query(virementsQuery, [startDate, endDate]);
+        
+        const virementsParClient = result.rows.map(row => ({
+            client: row.client,
+            total_virement: parseInt(row.total_virement) || 0,
+            nombre_virements: parseInt(row.nombre_virements) || 0,
+            premiere_date: row.premiere_date,
+            derniere_date: row.derniere_date,
+            formatted_total: `${parseInt(row.total_virement).toLocaleString('fr-FR')} FCFA`
+        }));
+
+        // Calculer le total général
+        const totalGeneral = virementsParClient.reduce((sum, v) => sum + v.total_virement, 0);
+
+        console.log(`✅ EXTERNAL: ${virementsParClient.length} clients trouvés, total général: ${totalGeneral.toLocaleString('fr-FR')} FCFA`);
+
+        // Construire la réponse
+        const response = {
+            period: {
+                start_date: startDate,
+                end_date: endDate,
+                days_count: Math.floor((end - start) / (1000 * 60 * 60 * 24)) + 1
+            },
+            summary: {
+                total_clients: virementsParClient.length,
+                total_virements_count: virementsParClient.reduce((sum, v) => sum + v.nombre_virements, 0),
+                total_amount: totalGeneral,
+                formatted_total: `${totalGeneral.toLocaleString('fr-FR')} FCFA`
+            },
+            virements_par_client: virementsParClient,
+            metadata: {
+                generated_at: new Date().toISOString(),
+                api_version: "1.0"
+            }
+        };
+
+        res.json(response);
+
+    } catch (error) {
+        console.error('❌ EXTERNAL: Erreur lors de la génération de l\'API virement:', error);
+        res.status(500).json({ 
+            error: 'Erreur serveur lors de la génération des données virement',
+            code: 'VIREMENT_API_ERROR',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
 // ===== ENDPOINTS AUDIT DE COHÉRENCE =====
 
 // ROUTE SUPPRIMÉE - Dupliquée plus bas avec la nouvelle logique
