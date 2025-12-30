@@ -15862,12 +15862,22 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
 
         // Charger le mapping client -> point de vente
         let virementMapping = {};
+        let exclusionList = [];
         try {
             const mappingPath = path.join(__dirname, 'virementMapping.json');
             if (fs.existsSync(mappingPath)) {
                 const mappingData = fs.readFileSync(mappingPath, 'utf8');
-                virementMapping = JSON.parse(mappingData);
+                const fullMapping = JSON.parse(mappingData);
+                
+                // Extraire la liste d'exclusion
+                exclusionList = fullMapping.virementPointDeVenteInterneToExclude || [];
+                
+                // Retirer la liste d'exclusion du mapping pour ne garder que les mappings client -> point de vente
+                virementMapping = { ...fullMapping };
+                delete virementMapping.virementPointDeVenteInterneToExclude;
+                
                 console.log('📋 EXTERNAL: Mapping virement chargé:', Object.keys(virementMapping).length, 'mappings');
+                console.log('🚫 EXTERNAL: Points de vente à exclure:', exclusionList);
             } else {
                 console.log('⚠️ EXTERNAL: Fichier virementMapping.json non trouvé, mapping vide');
             }
@@ -15892,7 +15902,8 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
 
         const result = await pool.query(virementsQuery, [startDate, endDate]);
         
-        const virementsParClient = result.rows.map(row => {
+        // Mapper les résultats avec le pointDevente
+        let virementsParClient = result.rows.map(row => {
             const clientName = row.client;
             const pointDevente = virementMapping[clientName] || null;
             
@@ -15907,7 +15918,16 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
             };
         });
 
-        // Calculer le total général
+        // Filtrer les virements dont le nom de client (clé) est dans la liste d'exclusion
+        virementsParClient = virementsParClient.filter(v => {
+            if (exclusionList.includes(v.client)) {
+                console.log(`🚫 EXTERNAL: Exclusion de ${v.client}`);
+                return false;
+            }
+            return true;
+        });
+
+        // Calculer le total général après filtrage
         const totalGeneral = virementsParClient.reduce((sum, v) => sum + v.total_virement, 0);
 
         console.log(`✅ EXTERNAL: ${virementsParClient.length} clients trouvés, total général: ${totalGeneral.toLocaleString('fr-FR')} FCFA`);
