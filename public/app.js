@@ -1325,17 +1325,19 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.log('💳 Créances du mois:', formatCurrency(stats.plCalculationDetails.creances));
             console.log('💵 Remboursements du mois:', formatCurrency(stats.plCalculationDetails.remboursements || 0));
             console.log('🔍 CLIENT: Valeur brute remboursements =', stats.plCalculationDetails.remboursements);
+            console.log('💸 Virements du mois:', formatCurrency(stats.plCalculationDetails.virementsMois || 0));
             console.log('📦 Écart Stock Mata Mensuel:', formatCurrency(stats.plCalculationDetails.stockPointVente));
             console.log('💸 Cash Burn du mois:', formatCurrency(stats.plCalculationDetails.cashBurn));
             console.log('📊 PL de base =', 
                 formatCurrency(stats.plCalculationDetails.cashBictorys), '+',
-                formatCurrency(stats.plCalculationDetails.creances), '+',
+                formatCurrency(stats.plCalculationDetails.creances), '-',
+                formatCurrency(stats.plCalculationDetails.remboursements || 0), '+',
+                formatCurrency(stats.plCalculationDetails.virementsMois || 0), '+',
                 formatCurrency(stats.plCalculationDetails.stockPointVente), '-',
                 formatCurrency(stats.plCalculationDetails.cashBurn), '=',
                 formatCurrency(stats.plCalculationDetails.plBase)
             );
             console.log('🌱 Écart Stock Vivant Mensuel:', formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0));
-            console.log('💸 Virements du mois:', formatCurrency(stats.plCalculationDetails.virementsMois || 0));
             console.log('🚚 Livraisons partenaires du mois:', formatCurrency(stats.plCalculationDetails.livraisonsPartenaires || 0));
             console.log('⚙️ Estimation charges fixes mensuelle:', formatCurrency(stats.plCalculationDetails.chargesFixesEstimation));
             if (stats.plCalculationDetails.prorata.totalJours > 0) {
@@ -1354,8 +1356,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.log('⏰ Charges prorata (jours ouvrables):', formatCurrency(stats.plCalculationDetails.chargesProrata));
             console.log('🎯 PL FINAL =', 
                 formatCurrency(stats.plCalculationDetails.plBase), '+',
-                formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0), '+',
-                formatCurrency(stats.plCalculationDetails.virementsMois || 0), '-',
+                formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0), '-',
                 formatCurrency(stats.plCalculationDetails.chargesProrata), '-',
                 formatCurrency(stats.plCalculationDetails.livraisonsPartenaires || 0), '=',
                 formatCurrency(stats.plCalculationDetails.plFinal)
