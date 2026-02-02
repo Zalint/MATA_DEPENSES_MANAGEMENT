@@ -10395,6 +10395,13 @@ Fournis une analyse structurée en français avec:
     }
 });
 
+// Validation des variables d'environnement critiques au démarrage
+if (!process.env.API_KEY) {
+    console.error('❌ ERREUR FATALE: La variable d\'environnement API_KEY n\'est pas définie');
+    console.error('❌ L\'application ne peut pas démarrer sans API_KEY pour sécuriser les endpoints');
+    process.exit(1);
+}
+
 // Démarrage du serveur
 app.listen(PORT, () => {
     console.log(`Serveur démarré sur le port ${PORT}`);
@@ -13654,9 +13661,11 @@ const requireVirementMensuelAuth = (req, res, next) => {
     
     if (apiKey) {
         // API key authentication
-        const validApiKey = process.env.API_KEY || '4f8d9a2b6c7e8f1a3b5c9d0e2f4g6h7i';
+        if (!process.env.API_KEY) {
+            return res.status(500).json({ error: 'Configuration serveur invalide: API_KEY manquante' });
+        }
         
-        if (apiKey === validApiKey) {
+        if (apiKey === process.env.API_KEY) {
             req.session = req.session || {};
             req.session.user = {
                 id: 1,
@@ -13902,9 +13911,21 @@ app.put('/api/virement-mensuel/:monthYear', requireVirementMensuelAuth, async (r
 app.delete('/api/virement-mensuel/:monthYear/client/:clientName', requireVirementMensuelAuth, async (req, res) => {
     try {
         const { monthYear, clientName } = req.params;
+        const userRole = req.session.user.role;
         
         if (!/^\d{4}-\d{2}$/.test(monthYear)) {
             return res.status(400).json({ error: 'Format mois invalide. Utiliser YYYY-MM' });
+        }
+
+        // Vérifier les permissions de suppression
+        const currentDate = new Date();
+        const currentMonthYear = `${currentDate.getFullYear()}-${(currentDate.getMonth() + 1).toString().padStart(2, '0')}`;
+        
+        // DG et PCA peuvent supprimer seulement le mois en cours, Admin peut tout supprimer
+        if (userRole !== 'admin' && monthYear !== currentMonthYear) {
+            return res.status(403).json({ 
+                error: 'Vous ne pouvez supprimer que les données du mois en cours' 
+            });
         }
 
         console.log(`💸 VIREMENT: Suppression du client "${clientName}" pour ${monthYear}`);
