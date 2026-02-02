@@ -1225,14 +1225,6 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             }
         }
         
-        // Mettre à jour la carte virements du mois si disponible
-        if (stats.plCalculationDetails && stats.plCalculationDetails.virementsMois !== undefined) {
-            const virementsElement = document.getElementById('virements-mois-amount');
-            if (virementsElement) {
-                virementsElement.textContent = formatCurrency(stats.plCalculationDetails.virementsMois);
-            }
-        }
-        
         // Mettre à jour les dépenses des mois précédents dans le tableau
         const expensesTable = document.querySelector('.expenses-table tbody');
         if (expensesTable && stats.previousMonthsExpenses) {
@@ -1394,6 +1386,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             
             // Trouver la première stats-grid qui contient les cartes PL principales
             const mainStatsGrid = document.querySelector('.stats-grid');
+            if (!mainStatsGrid) return;
             
             // Supprimer les anciennes cartes PL alternatifs si elles existent
             const oldAltCards = mainStatsGrid.querySelectorAll('[id^="pl-alt-"]');
