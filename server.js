@@ -7895,12 +7895,29 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         let startDateStr, endDateStr;
         let isRangeMode = false;
         
-        if (req.query.start_date && req.query.end_date) {
+        // Si start_date ou end_date sont "undefined", les remplacer par date
+        let effectiveStartDate = (req.query.start_date && req.query.start_date !== 'undefined') ? req.query.start_date : null;
+        let effectiveEndDate = (req.query.end_date && req.query.end_date !== 'undefined') ? req.query.end_date : null;
+        
+        // Si start_date/end_date étaient undefined, fallback sur date
+        if (!effectiveStartDate && !effectiveEndDate && req.query.date && req.query.date !== 'undefined') {
+            effectiveStartDate = req.query.date;
+            effectiveEndDate = req.query.date;
+        }
+        
+        // Si une seule date est fournie, utiliser la même pour les deux
+        if (effectiveStartDate && !effectiveEndDate) {
+            effectiveEndDate = effectiveStartDate;
+        } else if (effectiveEndDate && !effectiveStartDate) {
+            effectiveStartDate = effectiveEndDate;
+        }
+        
+        if (effectiveStartDate && effectiveEndDate) {
             // Mode date range
             isRangeMode = true;
-            startDateStr = new Date(req.query.start_date).toISOString().split('T')[0];
-            endDateStr = new Date(req.query.end_date).toISOString().split('T')[0];
-        } else if (req.query.date) {
+            startDateStr = new Date(effectiveStartDate).toISOString().split('T')[0];
+            endDateStr = new Date(effectiveEndDate).toISOString().split('T')[0];
+        } else if (req.query.date && req.query.date !== 'undefined') {
             // Mode date unique (backward compatibility)
             startDateStr = new Date(req.query.date).toISOString().split('T')[0];
             endDateStr = startDateStr;
@@ -7909,6 +7926,7 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             const today = new Date().toISOString().split('T')[0];
             startDateStr = today;
             endDateStr = today;
+            console.log('📅 Aucune date fournie, utilisation de la date d\'aujourd\'hui:', today);
         }
         
         // Pour la compatibilité avec le reste du code, selectedDate = endDate
@@ -9113,19 +9131,32 @@ app.get('/external/api/depenses/status', requireAdminAuth, async (req, res) => {
     
     try {
         // Validation des paramètres obligatoires
-        const { compte, date_debut, date_fin } = req.query;
+        let { compte, date_debut, date_fin } = req.query;
         
-        if (!compte || !date_debut || !date_fin) {
+        if (!compte) {
             return res.status(400).json({
                 success: false,
                 error: 'Paramètres manquants',
-                message: 'Les paramètres "compte", "date_debut" et "date_fin" sont obligatoires',
+                message: 'Le paramètre "compte" est obligatoire',
                 required_format: {
                     compte: 'Nom du compte (ex: BOVIN, COMMERCIAL)',
-                    date_debut: 'YYYY-MM-DD',
-                    date_fin: 'YYYY-MM-DD'
+                    date_debut: 'YYYY-MM-DD (optionnel, défaut: aujourd\'hui)',
+                    date_fin: 'YYYY-MM-DD (optionnel, défaut: aujourd\'hui)'
                 }
             });
+        }
+        
+        // Si une seule date est fournie, utiliser la même pour les deux
+        if (date_debut && !date_fin) {
+            date_fin = date_debut;
+        } else if (date_fin && !date_debut) {
+            date_debut = date_fin;
+        } else if (!date_debut && !date_fin) {
+            // Par défaut: date d'aujourd'hui
+            const today = new Date().toISOString().split('T')[0];
+            date_debut = today;
+            date_fin = today;
+            console.log('📅 Aucune date fournie, utilisation de la date d\'aujourd\'hui:', today);
         }
         
         // Validation du format des dates
@@ -9305,19 +9336,32 @@ app.get('/external/api/partenaire/status', requireAdminAuth, async (req, res) =>
     
     try {
         // Validation des paramètres obligatoires
-        const { partenaire, date_debut, date_fin } = req.query;
+        let { partenaire, date_debut, date_fin } = req.query;
         
-        if (!partenaire || !date_debut || !date_fin) {
+        if (!partenaire) {
             return res.status(400).json({
                 success: false,
                 error: 'Paramètres manquants',
-                message: 'Les paramètres "partenaire", "date_debut" et "date_fin" sont obligatoires',
+                message: 'Le paramètre "partenaire" est obligatoire',
                 required_format: {
                     partenaire: 'Nom du compte partenaire (ex: PARTENAIRE_A)',
-                    date_debut: 'YYYY-MM-DD',
-                    date_fin: 'YYYY-MM-DD'
+                    date_debut: 'YYYY-MM-DD (optionnel, défaut: aujourd\'hui)',
+                    date_fin: 'YYYY-MM-DD (optionnel, défaut: aujourd\'hui)'
                 }
             });
+        }
+        
+        // Si une seule date est fournie, utiliser la même pour les deux
+        if (date_debut && !date_fin) {
+            date_fin = date_debut;
+        } else if (date_fin && !date_debut) {
+            date_debut = date_fin;
+        } else if (!date_debut && !date_fin) {
+            // Par défaut: date d'aujourd'hui
+            const today = new Date().toISOString().split('T')[0];
+            date_debut = today;
+            date_fin = today;
+            console.log('📅 Aucune date fournie, utilisation de la date d\'aujourd\'hui:', today);
         }
         
         // Validation du format des dates
