@@ -3219,13 +3219,51 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 console.log(`📦 Écart Stock Mata Mensuel PL: ${stockPointVenteValue} FCFA (pas de date de référence)`);
             }
             
-            // Calculer PL = Cash Bictorys + Créances du Mois - Remboursements du Mois + Stock Point de Vente - Cash Burn du Mois
-            plSansStockCharges = cashBictorysValue + creancesMoisValue - remboursementsMoisValue + stockPointVenteValue - totalSpent;
+        } catch (error) {
+            console.error('Erreur calcul écart stock Mata:', error);
+            stockPointVenteValue = 0;
+        }
+
+        // 7.5. Calculer les VIREMENTS DU MOIS (somme de tous les virements) - AVANT calcul PL de base
+        console.log('\n💸 ===== CALCUL VIREMENTS DU MOIS =====');
+        let totalVirementsMois = 0;
+        try {
+            // Récupérer le mois au format YYYY-MM depuis cutoff_date ou start_date
+            const monthYearStr = (cutoff_date || start_date || referenceDateStr).substring(0, 7);
+            console.log(`💸 Month extrait: ${monthYearStr}`);
             
-            console.log(`📊 Calcul PL: Cash Bictorys (${cashBictorysValue}) + Créances Mois (${creancesMoisValue}) - Remboursements Mois (${remboursementsMoisValue}) + Écart Stock Mata (${stockPointVenteValue}) - Cash Burn (${totalSpent}) = ${plSansStockCharges}`);
+            const virementsResult = await pool.query(`
+                SELECT COALESCE(SUM(valeur), 0) as total_virements
+                FROM virement_mensuel
+                WHERE month_year = $1
+            `, [monthYearStr]);
+
+            totalVirementsMois = parseInt(virementsResult.rows[0].total_virements) || 0;
+            
+            console.log(`💸 Virements du mois ${monthYearStr}: ${totalVirementsMois.toLocaleString()} FCFA`);
             
         } catch (error) {
-            console.error('Erreur calcul PL:', error);
+            console.error('❌ Erreur calcul virements du mois:', error);
+            totalVirementsMois = 0;
+        }
+        console.log('💸 =====================================\n');
+
+        // 7.6. Calculer PL de base (AVEC virements du mois)
+        try {
+            // PL de base = Cash Bictorys + Créances - Remboursements + Virements + Écart Stock Mata - Cash Burn
+            plSansStockCharges = cashBictorysValue + creancesMoisValue - remboursementsMoisValue + totalVirementsMois + stockPointVenteValue - totalSpent;
+            
+            console.log(`📊 Calcul PL de base:`);
+            console.log(`   Cash Bictorys: ${cashBictorysValue.toLocaleString()} FCFA`);
+            console.log(`   Créances Mois: ${creancesMoisValue.toLocaleString()} FCFA`);
+            console.log(`   Remboursements: -${remboursementsMoisValue.toLocaleString()} FCFA`);
+            console.log(`   Virements: ${totalVirementsMois.toLocaleString()} FCFA`);
+            console.log(`   Écart Stock Mata: ${stockPointVenteValue.toLocaleString()} FCFA`);
+            console.log(`   Cash Burn: -${totalSpent.toLocaleString()} FCFA`);
+            console.log(`   = ${plSansStockCharges.toLocaleString()} FCFA`);
+            
+        } catch (error) {
+            console.error('Erreur calcul PL de base:', error);
             plSansStockCharges = 0;
         }
         
@@ -3484,31 +3522,6 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             livraisonsPartenaires = 0;
         }
 
-        // 🆕 9.5. Calculer les VIREMENTS DU MOIS (somme de tous les virements)
-        console.log('\n💸 ===== CALCUL VIREMENTS DU MOIS =====');
-        let totalVirementsMois = 0;
-        try {
-            // Récupérer le mois au format YYYY-MM depuis cutoff_date ou start_date
-            const monthYearStr = (cutoff_date || start_date || referenceDateStr).substring(0, 7);
-            console.log(`💸 Month extrait: ${monthYearStr}`);
-            
-            const virementsResult = await pool.query(`
-                SELECT COALESCE(SUM(valeur), 0) as total_virements
-                FROM virement_mensuel
-                WHERE month_year = $1
-            `, [monthYearStr]);
-
-            totalVirementsMois = parseInt(virementsResult.rows[0].total_virements) || 0;
-            
-            console.log(`💸 Virements du mois ${monthYearStr}: ${totalVirementsMois.toLocaleString()} FCFA`);
-            
-        } catch (error) {
-            console.error('❌ Erreur calcul virements du mois:', error);
-            totalVirementsMois = 0;
-        }
-        console.log('💸 =====================================');
-        
-
         // 10. Calcul de la nouvelle carte PL avec estimation des charges fixes
         // PL = Cash Bictorys + Créances + Stock PV + Écart Stock Vivant - Cash Burn - Estim charge prorata - Livraisons partenaires
         let plEstimCharges = 0;
@@ -3580,25 +3593,26 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             }
             
             // Calculer le PL brut (sans estimation des charges)
-            plBrut = plSansStockCharges + stockVivantVariation + totalVirementsMois - livraisonsPartenaires;
+            // Les virements sont maintenant dans plSansStockCharges, donc on ne les ajoute plus ici
+            plBrut = plSansStockCharges + stockVivantVariation - livraisonsPartenaires;
             
-            // Calculer le PL avec estimation des charges ET écart stock vivant ET virements ET livraisons partenaires
-            plEstimCharges = plSansStockCharges + stockVivantVariation + totalVirementsMois - chargesProrata - livraisonsPartenaires;
+            // Calculer le PL avec estimation des charges ET écart stock vivant ET livraisons partenaires
+            plEstimCharges = plSansStockCharges + stockVivantVariation - chargesProrata - livraisonsPartenaires;
             
             console.log('🔍=== DÉTAIL CALCUL PL (avec ecart stock mensuel, virements et estim. charges) ===');
             console.log(`💰 Cash Bictorys du mois: ${cashBictorysValue} FCFA`);
             console.log(`💳 Créances du mois: ${creancesMoisValue} FCFA`);
             console.log(`💵 Remboursements du mois: ${remboursementsMoisValue} FCFA`);
+            console.log(`💸 Virements du mois: ${totalVirementsMois} FCFA`);
             console.log(`📦 Écart Stock Mata Mensuel: ${stockPointVenteValue} FCFA`);
             console.log(`💸 Cash Burn du mois: ${totalSpent} FCFA`);
-            console.log(`📊 PL de base = ${cashBictorysValue} + ${creancesMoisValue} - ${remboursementsMoisValue} + ${stockPointVenteValue} - ${totalSpent} = ${plSansStockCharges} FCFA`);
+            console.log(`📊 PL de base = ${cashBictorysValue} + ${creancesMoisValue} - ${remboursementsMoisValue} + ${totalVirementsMois} + ${stockPointVenteValue} - ${totalSpent} = ${plSansStockCharges} FCFA`);
             console.log(`🌱 Écart Stock Vivant Mensuel: ${stockVivantVariation} FCFA`);
-            console.log(`💸 Virements du mois: ${totalVirementsMois} FCFA`);
             console.log(`🚚 Livraisons partenaires du mois: ${livraisonsPartenaires} FCFA`);
             console.log(`⚙️ Estimation charges fixes mensuelle: ${chargesFixesEstimation} FCFA`);
             console.log(`⏰ Charges prorata (jours ouvrables): ${Math.round(chargesProrata)} FCFA`);
-            console.log(`🎯 PL BRUT = ${plSansStockCharges} + ${stockVivantVariation} + ${totalVirementsMois} - ${livraisonsPartenaires} = ${Math.round(plBrut)} FCFA`);
-            console.log(`🎯 PL FINAL = ${plSansStockCharges} + ${stockVivantVariation} + ${totalVirementsMois} - ${Math.round(chargesProrata)} - ${livraisonsPartenaires} = ${Math.round(plEstimCharges)} FCFA`);
+            console.log(`🎯 PL BRUT = ${plSansStockCharges} + ${stockVivantVariation} - ${livraisonsPartenaires} = ${Math.round(plBrut)} FCFA`);
+            console.log(`🎯 PL FINAL = ${plSansStockCharges} + ${stockVivantVariation} - ${Math.round(chargesProrata)} - ${livraisonsPartenaires} = ${Math.round(plEstimCharges)} FCFA`);
             console.log('🔍===============================================');
             
             // Préparer les détails pour le frontend
@@ -3658,8 +3672,9 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             console.error('🚨 ERREUR calcul PL avec estim charges:', error);
             console.log(`🚨 DEBUG ERREUR - livraisonsPeriodStart: "${livraisonsPeriodStart}"`);
             console.log(`🚨 DEBUG ERREUR - livraisonsPeriodEnd: "${livraisonsPeriodEnd}"`);
-            plEstimCharges = plSansStockCharges + stockVivantVariation + totalVirementsMois; // Fallback au PL de base + virements
-            plBrut = plSansStockCharges + stockVivantVariation + totalVirementsMois - livraisonsPartenaires; // Fallback PL brut avec virements
+            // Virements déjà inclus dans plSansStockCharges, ne pas les ajouter à nouveau
+            plEstimCharges = plSansStockCharges + stockVivantVariation; // Fallback au PL de base
+            plBrut = plSansStockCharges + stockVivantVariation - livraisonsPartenaires; // Fallback PL brut
             
             // Préparer les détails d'erreur pour le frontend
             plCalculationDetails = {
@@ -3775,9 +3790,9 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                     // Calculer les montants exclus (pour affichage)
                     const depensesExclues = totalSpent - cashBurnExclus;
                     
-                    // Recalculer les PL avec le Cash Burn alternatif
-                    const plBaseAlt = cashBictorysValue + creancesMoisValue - remboursementsMoisValue + stockPointVenteValue - cashBurnExclus;
-                    const plBrutAlt = plBaseAlt + stockVivantVariation + totalVirementsMois - livraisonsPartenaires;
+                    // Recalculer les PL avec le Cash Burn alternatif (virements inclus dans PL de base)
+                    const plBaseAlt = cashBictorysValue + creancesMoisValue - remboursementsMoisValue + totalVirementsMois + stockPointVenteValue - cashBurnExclus;
+                    const plBrutAlt = plBaseAlt + stockVivantVariation - livraisonsPartenaires;
                     const plFinalAlt = plBrutAlt - chargesProrata;
                     
                     console.log(`📊 Cash Burn excluant ${comptesAExclure.join(', ')}: ${cashBurnExclus.toLocaleString()} FCFA`);
@@ -8924,9 +8939,10 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         
         // Calculs PL (même logique que l'interface)
         // NOTE: On soustrait totalRemboursements car ils sont déjà inclus dans cashBictorysValue
-        const plSansStockCharges = cashBictorysValue + totalCreance - totalRemboursements + totalStockSoir - totalMonthlyExpenses;
-        const brutPL = plSansStockCharges + stockVivantVariation + totalVirementsMois - totalDeliveriesMonth;
-        const estimatedPL = plSansStockCharges + stockVivantVariation + totalVirementsMois - chargesProrata - totalDeliveriesMonth;
+        // PL de base inclut maintenant les virements du mois (revenus)
+        const plSansStockCharges = cashBictorysValue + totalCreance - totalRemboursements + totalVirementsMois + totalStockSoir - totalMonthlyExpenses;
+        const brutPL = plSansStockCharges + stockVivantVariation - totalDeliveriesMonth;
+        const estimatedPL = plSansStockCharges + stockVivantVariation - chargesProrata - totalDeliveriesMonth;
 
         // Calculer dynamiquement les PL alternatifs en fonction des configurations comptes_*
         const plAlternatifs = {};
@@ -8986,9 +9002,9 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
                     // Calculer les montants exclus (pour affichage)
                     const depensesExclues = totalMonthlyExpenses - cashBurnExclus;
                     
-                    // Recalculer les PL avec le Cash Burn alternatif
-                    const plBaseAlt = cashBictorysValue + totalCreance - totalRemboursements + totalStockSoir - cashBurnExclus;
-                    const plBrutAlt = plBaseAlt + stockVivantVariation + totalVirementsMois - totalDeliveriesMonth;
+                    // Recalculer les PL avec le Cash Burn alternatif (virements inclus dans PL de base)
+                    const plBaseAlt = cashBictorysValue + totalCreance - totalRemboursements + totalVirementsMois + totalStockSoir - cashBurnExclus;
+                    const plBrutAlt = plBaseAlt + stockVivantVariation - totalDeliveriesMonth;
                     const plFinalAlt = plBrutAlt - chargesProrata;
                     
                     console.log(`📊 Cash Burn excluant ${comptesAExclure.join(', ')}: ${cashBurnExclus.toLocaleString()} FCFA`);

@@ -1225,14 +1225,6 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             }
         }
         
-        // Mettre à jour la carte virements du mois si disponible
-        if (stats.plCalculationDetails && stats.plCalculationDetails.virementsMois !== undefined) {
-            const virementsElement = document.getElementById('virements-mois-amount');
-            if (virementsElement) {
-                virementsElement.textContent = formatCurrency(stats.plCalculationDetails.virementsMois);
-            }
-        }
-        
         // Mettre à jour les dépenses des mois précédents dans le tableau
         const expensesTable = document.querySelector('.expenses-table tbody');
         if (expensesTable && stats.previousMonthsExpenses) {
@@ -1325,17 +1317,19 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.log('💳 Créances du mois:', formatCurrency(stats.plCalculationDetails.creances));
             console.log('💵 Remboursements du mois:', formatCurrency(stats.plCalculationDetails.remboursements || 0));
             console.log('🔍 CLIENT: Valeur brute remboursements =', stats.plCalculationDetails.remboursements);
+            console.log('💸 Virements du mois:', formatCurrency(stats.plCalculationDetails.virementsMois || 0));
             console.log('📦 Écart Stock Mata Mensuel:', formatCurrency(stats.plCalculationDetails.stockPointVente));
             console.log('💸 Cash Burn du mois:', formatCurrency(stats.plCalculationDetails.cashBurn));
             console.log('📊 PL de base =', 
                 formatCurrency(stats.plCalculationDetails.cashBictorys), '+',
-                formatCurrency(stats.plCalculationDetails.creances), '+',
+                formatCurrency(stats.plCalculationDetails.creances), '-',
+                formatCurrency(stats.plCalculationDetails.remboursements || 0), '+',
+                formatCurrency(stats.plCalculationDetails.virementsMois || 0), '+',
                 formatCurrency(stats.plCalculationDetails.stockPointVente), '-',
                 formatCurrency(stats.plCalculationDetails.cashBurn), '=',
                 formatCurrency(stats.plCalculationDetails.plBase)
             );
             console.log('🌱 Écart Stock Vivant Mensuel:', formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0));
-            console.log('💸 Virements du mois:', formatCurrency(stats.plCalculationDetails.virementsMois || 0));
             console.log('🚚 Livraisons partenaires du mois:', formatCurrency(stats.plCalculationDetails.livraisonsPartenaires || 0));
             console.log('⚙️ Estimation charges fixes mensuelle:', formatCurrency(stats.plCalculationDetails.chargesFixesEstimation));
             if (stats.plCalculationDetails.prorata.totalJours > 0) {
@@ -1354,8 +1348,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             console.log('⏰ Charges prorata (jours ouvrables):', formatCurrency(stats.plCalculationDetails.chargesProrata));
             console.log('🎯 PL FINAL =', 
                 formatCurrency(stats.plCalculationDetails.plBase), '+',
-                formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0), '+',
-                formatCurrency(stats.plCalculationDetails.virementsMois || 0), '-',
+                formatCurrency(stats.plCalculationDetails.stockVivantVariation || 0), '-',
                 formatCurrency(stats.plCalculationDetails.chargesProrata), '-',
                 formatCurrency(stats.plCalculationDetails.livraisonsPartenaires || 0), '=',
                 formatCurrency(stats.plCalculationDetails.plFinal)
@@ -1393,6 +1386,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
             
             // Trouver la première stats-grid qui contient les cartes PL principales
             const mainStatsGrid = document.querySelector('.stats-grid');
+            if (!mainStatsGrid) return;
             
             // Supprimer les anciennes cartes PL alternatifs si elles existent
             const oldAltCards = mainStatsGrid.querySelectorAll('[id^="pl-alt-"]');
