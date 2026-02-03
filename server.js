@@ -1259,6 +1259,21 @@ app.use(session({
 
 // Middleware d'authentification
 const requireAuth = (req, res, next) => {
+    // Vérifier d'abord si une clé API est fournie
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.api_key;
+    
+    if (apiKey) {
+        // Authentification par clé API
+        if (apiKey === process.env.API_KEY) {
+            // Créer un objet user factice pour les routes qui en ont besoin
+            req.user = { username: 'API', role: 'admin' };
+            return next();
+        } else {
+            return res.status(403).json({ error: 'Clé API invalide' });
+        }
+    }
+    
+    // Sinon, vérifier la session
     if (req.session.user) {
         next();
     } else {
@@ -2728,8 +2743,9 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
     console.log(`🚚 ===== ROUTE STATS-CARDS DÉMARRÉE =====`);
     try {
         const { start_date, end_date, cutoff_date } = req.query;
-        const isDirector = req.session.user.role === 'directeur';
-        const userId = req.session.user.id;
+        const user = req.session?.user || req.user;
+        const isDirector = user?.role === 'directeur';
+        const userId = user?.id || null;
         
         console.log(`🚚 ===== ROUTE /api/dashboard/stats-cards APPELÉE =====`);
         console.log(`🚚 DEBUG - Paramètres reçus: start_date=${start_date}, end_date=${end_date}, cutoff_date=${cutoff_date}`);
@@ -14643,25 +14659,26 @@ async function createDashboardSnapshotsTable() {
 // Route pour sauvegarder un snapshot du tableau de bord
 app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
     try {
+        // Tous les champs sont optionnels sauf snapshot_date
         const {
             snapshot_date,
-            total_spent_amount,
-            total_remaining_amount,
-            total_credited_with_expenses,
-            total_credited_general,
-            cash_bictorys_amount,
-            creances_total,
-            creances_mois,
-            stock_point_vente,
-            stock_vivant_total,
-            stock_vivant_variation,
-            daily_burn,
-            weekly_burn,
-            monthly_burn,
-            solde_depot,
-            solde_partner,
-            solde_general,
-            notes
+            total_spent_amount = 0,
+            total_remaining_amount = 0,
+            total_credited_with_expenses = 0,
+            total_credited_general = 0,
+            cash_bictorys_amount = 0,
+            creances_total = 0,
+            creances_mois = 0,
+            stock_point_vente = 0,
+            stock_vivant_total = 0,
+            stock_vivant_variation = 0,
+            daily_burn = 0,
+            weekly_burn = 0,
+            monthly_burn = 0,
+            solde_depot = 0,
+            solde_partner = 0,
+            solde_general = 0,
+            notes = ''
         } = req.body;
         
         if (!snapshot_date) {
@@ -14672,7 +14689,8 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
         let correctedSnapshotDate = snapshot_date;
         console.log(`📅 Date snapshot reçue: ${snapshot_date} (utilisée directement)`);
         
-        const username = req.session.user.username;
+        // Gérer le nom d'utilisateur (session ou API)
+        const username = req.session?.user?.username || req.user?.username || 'API';
         
         // Calculer automatiquement les livraisons partenaires validées du mois
         let livraisons_partenaires = 0;
@@ -14726,8 +14744,8 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
             console.log(`   Créé le: ${existingSnapshot.created_at}`);
         }
         
-        // Récupérer virements du mois depuis plDetails
-        const virements_mois = plDetails.virementsMois || 0;
+        // Récupérer virements du mois (peut être envoyé par le frontend ou calculé)
+        const virements_mois = req.body.virements_mois || 0;
         console.log(`💸 Virements du mois pour snapshot ${correctedSnapshotDate}: ${virements_mois} FCFA`);
         
         // Préparer les valeurs pour le logging
@@ -14881,6 +14899,138 @@ app.get('/api/dashboard/snapshots/:date', requireAdminAuth, async (req, res) => 
     } catch (error) {
         console.error('❌ Erreur vérification snapshot:', error);
         res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route simplifiée pour sauvegarder un snapshot en ne donnant que la date
+// Calcule automatiquement toutes les valeurs du dashboard pour cette date
+app.post('/api/dashboard/save-snapshot-auto', requireAdminAuth, async (req, res) => {
+    try {
+        const { snapshot_date, notes } = req.body;
+        
+        if (!snapshot_date) {
+            return res.status(400).json({ error: 'La date du snapshot est requise' });
+        }
+        
+        console.log(`📅 AUTO SNAPSHOT: Création snapshot automatique pour ${snapshot_date}`);
+        
+        // Faire un appel HTTP interne à /api/dashboard/stats-cards avec la date
+        const http = require('http');
+        const querystring = require('querystring');
+        
+        const params = querystring.stringify({
+            start_date: snapshot_date,
+            end_date: snapshot_date,
+            cutoff_date: snapshot_date
+        });
+        
+        const options = {
+            hostname: 'localhost',
+            port: process.env.PORT || 3000,
+            path: `/api/dashboard/stats-cards?${params}`,
+            method: 'GET',
+            headers: {
+                'Cookie': req.headers.cookie || '', // Transférer la session
+                'x-api-key': req.headers['x-api-key'] || '' // Transférer la clé API
+            }
+        };
+        
+        console.log(`📡 AUTO SNAPSHOT: Appel interne vers ${options.path}`);
+        
+        const statsPromise = new Promise((resolve, reject) => {
+            const request = http.request(options, (response) => {
+                let data = '';
+                response.on('data', (chunk) => { data += chunk; });
+                response.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        reject(new Error('Erreur parsing réponse stats'));
+                    }
+                });
+            });
+            request.on('error', reject);
+            request.end();
+        });
+        
+        const stats = await statsPromise;
+        
+        if (!stats || stats.error) {
+            throw new Error('Impossible de récupérer les statistiques');
+        }
+        
+        console.log(`✅ AUTO SNAPSHOT: Stats récupérées, préparation des données`);
+        
+        // Préparer les données du snapshot
+        const snapshotData = {
+            snapshot_date: snapshot_date,
+            notes: notes || `Snapshot automatique créé via API le ${new Date().toLocaleString('fr-FR')}`,
+            total_spent_amount: stats.totalSpentAmount || 0,
+            total_remaining_amount: stats.totalRemainingAmount || 0,
+            cash_bictorys_amount: stats.cashBictorysLatest || 0,
+            creances_total: stats.totalCreances || 0,
+            creances_mois: stats.creancesMois || 0,
+            stock_point_vente: stats.stockTotal || 0,
+            stock_vivant_total: stats.stockVivantTotal || 0,
+            stock_vivant_variation: stats.stockVivantVariation || 0,
+            virements_mois: stats.virementsMois || 0,
+            daily_burn: 0,
+            weekly_burn: stats.weeklyBurn || 0,
+            monthly_burn: stats.monthlyBurn || 0,
+            solde_general: stats.soldeAmount || 0,
+            solde_depot: stats.totalDepotBalance || 0,
+            solde_partner: stats.totalPartnerBalance || 0,
+            pl_final: stats.plEstimCharges || 0,
+            total_credited_with_expenses: 0,
+            total_credited_general: 0
+        };
+        
+        console.log(`📊 AUTO SNAPSHOT: Données préparées:`, snapshotData);
+        
+        // Faire un appel POST interne à /api/dashboard/save-snapshot
+        const saveOptions = {
+            hostname: 'localhost',
+            port: process.env.PORT || 3000,
+            path: '/api/dashboard/save-snapshot',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': req.headers.cookie || '',
+                'x-api-key': req.headers['x-api-key'] || ''
+            }
+        };
+        
+        const savePromise = new Promise((resolve, reject) => {
+            const request = http.request(saveOptions, (response) => {
+                let data = '';
+                response.on('data', (chunk) => { data += chunk; });
+                response.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        reject(new Error('Erreur parsing réponse save'));
+                    }
+                });
+            });
+            request.on('error', reject);
+            request.write(JSON.stringify(snapshotData));
+            request.end();
+        });
+        
+        const result = await savePromise;
+        
+        console.log(`✅ AUTO SNAPSHOT: Snapshot sauvegardé avec succès`);
+        
+        res.json({
+            success: true,
+            message: `Snapshot automatique créé pour ${snapshot_date}`,
+            snapshot: result.snapshot,
+            auto_calculated: true
+        });
+        
+    } catch (error) {
+        console.error('❌ Erreur création snapshot auto:', error);
+        res.status(500).json({ error: 'Erreur serveur', details: error.message });
     }
 });
 
