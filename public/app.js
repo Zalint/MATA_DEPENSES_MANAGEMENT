@@ -8593,6 +8593,11 @@ function setupDesktopMenu() {
             if (mainContent) {
                 mainContent.classList.add('sidebar-collapsed');
             }
+            // Set ARIA attribute to reflect collapsed state
+            desktopMenuToggle.setAttribute('aria-expanded', 'false');
+        } else {
+            // Set ARIA attribute to reflect expanded state
+            desktopMenuToggle.setAttribute('aria-expanded', 'true');
         }
     }
 }
@@ -8600,12 +8605,18 @@ function setupDesktopMenu() {
 function toggleDesktopMenu() {
     const sidebar = document.getElementById('sidebar');
     const mainContent = document.querySelector('.main-content');
+    const desktopMenuToggle = document.getElementById('desktop-menu-toggle');
     
     if (sidebar) {
         const isCollapsed = sidebar.classList.toggle('collapsed');
         
         if (mainContent) {
             mainContent.classList.toggle('sidebar-collapsed');
+        }
+        
+        // Update ARIA attribute for screen readers
+        if (desktopMenuToggle) {
+            desktopMenuToggle.setAttribute('aria-expanded', !isCollapsed);
         }
         
         // Save state to localStorage
@@ -15492,9 +15503,11 @@ function initCreanceAccordions() {
     const operationsHeader = document.getElementById('creance-operations-header');
     if (operationsHeader) {
         operationsHeader.addEventListener('click', function() {
-            this.classList.toggle('collapsed');
+            const isCollapsed = this.classList.toggle('collapsed');
             const content = document.getElementById('creance-operations-content');
             if (content) content.classList.toggle('collapsed');
+            // Update ARIA attribute for accessibility
+            this.setAttribute('aria-expanded', !isCollapsed);
         });
     }
     
@@ -15502,9 +15515,11 @@ function initCreanceAccordions() {
     const clientsHeader = document.getElementById('creance-clients-header');
     if (clientsHeader) {
         clientsHeader.addEventListener('click', function() {
-            this.classList.toggle('collapsed');
+            const isCollapsed = this.classList.toggle('collapsed');
             const content = document.getElementById('creance-clients-content');
             if (content) content.classList.toggle('collapsed');
+            // Update ARIA attribute for accessibility
+            this.setAttribute('aria-expanded', !isCollapsed);
         });
     }
     
@@ -15512,9 +15527,11 @@ function initCreanceAccordions() {
     const summaryHeader = document.getElementById('creance-summary-header');
     if (summaryHeader) {
         summaryHeader.addEventListener('click', function() {
-            this.classList.toggle('collapsed');
+            const isCollapsed = this.classList.toggle('collapsed');
             const content = document.getElementById('creance-summary-content');
             if (content) content.classList.toggle('collapsed');
+            // Update ARIA attribute for accessibility
+            this.setAttribute('aria-expanded', !isCollapsed);
         });
     }
 }

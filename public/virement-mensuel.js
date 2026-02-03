@@ -698,8 +698,10 @@ function toggleClientsAccordion() {
     const content = document.getElementById('clients-accordion-content');
     
     if (header && content) {
-        header.classList.toggle('collapsed');
+        const isCollapsed = header.classList.toggle('collapsed');
         content.classList.toggle('collapsed');
+        // Update ARIA attribute for accessibility
+        header.setAttribute('aria-expanded', !isCollapsed);
     }
 }
 

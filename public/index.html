@@ -46,7 +46,7 @@
                 <button class="mobile-menu-toggle" id="mobile-menu-toggle">
                     <i class="fas fa-bars"></i>
                 </button>
-                <button class="desktop-menu-toggle" id="desktop-menu-toggle">
+                <button class="desktop-menu-toggle" id="desktop-menu-toggle" aria-expanded="true" aria-label="Basculer le menu latéral">
                     <i class="fas fa-bars"></i>
                 </button>
                 <!--<img src="matabanq_logo.svg" alt="MataBanq Logo" class="app-logo">-->
@@ -1439,9 +1439,11 @@
                         <!-- Opérations créance (Tous les utilisateurs autorisés) -->
                         <div id="creance-operations-section" class="creance-section">
                             <div class="section-card">
-                                <h4 class="accordion-header" id="creance-operations-header">
-                                    <span><i class="fas fa-exchange-alt"></i> Opérations Créance</span>
-                                    <i class="fas fa-chevron-down accordion-icon"></i>
+                                <h4>
+                                    <button class="accordion-header" id="creance-operations-header" aria-expanded="true" aria-controls="creance-operations-content">
+                                        <span><i class="fas fa-exchange-alt"></i> Opérations Créance</span>
+                                        <i class="fas fa-chevron-down accordion-icon"></i>
+                                    </button>
                                 </h4>
                                 
                                 <!-- Formulaire d'ajout d'opération -->
@@ -1494,9 +1496,11 @@
                         <!-- Gestion des clients (Admin/DG/PCA uniquement) -->
                         <div id="creance-admin-section" class="creance-section" style="display: none;">
                             <div class="section-card">
-                                <h4 class="accordion-header collapsed" id="creance-clients-header">
-                                    <span><i class="fas fa-users"></i> Gestion des Clients</span>
-                                    <i class="fas fa-chevron-down accordion-icon"></i>
+                                <h4>
+                                    <button class="accordion-header collapsed" id="creance-clients-header" aria-expanded="false" aria-controls="creance-clients-content">
+                                        <span><i class="fas fa-users"></i> Gestion des Clients</span>
+                                        <i class="fas fa-chevron-down accordion-icon"></i>
+                                    </button>
                                 </h4>
                                 
                                 <!-- Formulaire d'ajout de client -->
@@ -1534,9 +1538,11 @@
                         <!-- Tableau récapitulatif par client -->
                         <div class="creance-summary-section">
                             <div class="section-card">
-                                <h4 class="accordion-header collapsed" id="creance-summary-header">
-                                    <span><i class="fas fa-table"></i> Récapitulatif par Client</span>
-                                    <i class="fas fa-chevron-down accordion-icon"></i>
+                                <h4>
+                                    <button class="accordion-header collapsed" id="creance-summary-header" aria-expanded="false" aria-controls="creance-summary-content">
+                                        <span><i class="fas fa-table"></i> Récapitulatif par Client</span>
+                                        <i class="fas fa-chevron-down accordion-icon"></i>
+                                    </button>
                                 </h4>
                                 
                                 <div class="accordion-content collapsed" id="creance-summary-content">
@@ -1743,9 +1749,11 @@
                         <!-- Gestion des clients -->
                         <div class="virement-clients-management">
                             <div class="section-card">
-                                <h4 class="accordion-header" id="clients-accordion-header">
-                                    <span><i class="fas fa-users-cog"></i> Gérer les Clients</span>
-                                    <i class="fas fa-chevron-down accordion-icon"></i>
+                                <h4>
+                                    <button class="accordion-header" id="clients-accordion-header" aria-expanded="true" aria-controls="clients-accordion-content">
+                                        <span><i class="fas fa-users-cog"></i> Gérer les Clients</span>
+                                        <i class="fas fa-chevron-down accordion-icon"></i>
+                                    </button>
                                 </h4>
                                 <div class="client-management-section accordion-content" id="clients-accordion-content">
                                     <div class="add-client-form">
@@ -1945,6 +1953,11 @@
                 }
                 
                 .accordion-header {
+                    width: 100%;
+                    border: none;
+                    text-align: left;
+                    font-size: inherit;
+                    font-family: inherit;
                     cursor: pointer;
                     user-select: none;
                     display: flex;
