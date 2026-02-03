@@ -1402,23 +1402,44 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
                 cardDiv.style.display = ['directeur_general', 'pca', 'admin'].includes(currentUser?.role) ? 'block' : 'none';
                 cardDiv.title = `PL excluant les dépenses de: ${plAlt.comptesExclus.join(', ')}`;
                 
-                cardDiv.innerHTML = `
-                    <div class="stat-icon">
-                        <i class="fas fa-filter"></i>
-                    </div>
-                    <div class="stat-content">
-                        <h3>PL sans ${plAlt.nom}</h3>
-                        <p class="stat-value">${formatCurrency(plAlt.plFinal)}</p>
-                        <small class="stat-period" style="font-size: 0.7em; color: #999;">
-                            🔑 ${configKey}
-                        </small>
-                        <small class="stat-period" style="font-size: 0.75em; color: #666;">
-                            Excluant: ${plAlt.comptesExclus.join(', ')}<br>
-                            Cash Burn: ${formatCurrency(plAlt.cashBurn)} | Exclus: ${formatCurrency(plAlt.depensesExclues)}
-                        </small>
-                    </div>
-                `;
+                // Create stat-icon div
+                const iconDiv = document.createElement('div');
+                iconDiv.className = 'stat-icon';
+                const icon = document.createElement('i');
+                icon.className = 'fas fa-filter';
+                iconDiv.appendChild(icon);
+                cardDiv.appendChild(iconDiv);
                 
+                // Create stat-content div
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'stat-content';
+                
+                // Create h3 title
+                const title = document.createElement('h3');
+                title.textContent = 'PL sans ' + plAlt.nom;
+                contentDiv.appendChild(title);
+                
+                // Create stat-value paragraph
+                const valueP = document.createElement('p');
+                valueP.className = 'stat-value';
+                valueP.textContent = formatCurrency(plAlt.plFinal);
+                contentDiv.appendChild(valueP);
+                
+                // Create config key small
+                const configSmall = document.createElement('small');
+                configSmall.className = 'stat-period';
+                configSmall.style.cssText = 'font-size: 0.7em; color: #999;';
+                configSmall.textContent = '🔑 ' + configKey;
+                contentDiv.appendChild(configSmall);
+                
+                // Create details small
+                const detailsSmall = document.createElement('small');
+                detailsSmall.className = 'stat-period';
+                detailsSmall.style.cssText = 'font-size: 0.75em; color: #666;';
+                detailsSmall.textContent = 'Excluant: ' + plAlt.comptesExclus.join(', ') + '\nCash Burn: ' + formatCurrency(plAlt.cashBurn) + ' | Exclus: ' + formatCurrency(plAlt.depensesExclues);
+                contentDiv.appendChild(detailsSmall);
+                
+                cardDiv.appendChild(contentDiv);
                 mainStatsGrid.appendChild(cardDiv);
             }
             
@@ -8555,10 +8576,50 @@ function closeMobileMenu() {
         }
     }
 }
+
+// Desktop Menu Functions
+function setupDesktopMenu() {
+    const desktopMenuToggle = document.getElementById('desktop-menu-toggle');
+    const sidebar = document.getElementById('sidebar');
+    const mainContent = document.querySelector('.main-content');
+    
+    if (desktopMenuToggle && sidebar) {
+        desktopMenuToggle.addEventListener('click', toggleDesktopMenu);
+        
+        // Restore sidebar state from localStorage
+        const isCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+        if (isCollapsed && window.innerWidth >= 1024) {
+            sidebar.classList.add('collapsed');
+            if (mainContent) {
+                mainContent.classList.add('sidebar-collapsed');
+            }
+        }
+    }
+}
+
+function toggleDesktopMenu() {
+    const sidebar = document.getElementById('sidebar');
+    const mainContent = document.querySelector('.main-content');
+    
+    if (sidebar) {
+        const isCollapsed = sidebar.classList.toggle('collapsed');
+        
+        if (mainContent) {
+            mainContent.classList.toggle('sidebar-collapsed');
+        }
+        
+        // Save state to localStorage
+        localStorage.setItem('sidebarCollapsed', isCollapsed);
+    }
+}
+
 // Event listeners pour le formulaire utilisateur
 document.addEventListener('DOMContentLoaded', function() {
     // Setup mobile menu
     setupMobileMenu();
+    
+    // Setup desktop menu
+    setupDesktopMenu();
     
     // Update navigation links to close mobile menu
     document.querySelectorAll('.nav-link').forEach(link => {
@@ -15417,6 +15478,167 @@ async function initCreanceSection() {
     if (operationDateInput) {
         operationDateInput.value = new Date().toISOString().split('T')[0];
     }
+    
+    // Initialiser les accordéons
+    initCreanceAccordions();
+    
+    // Initialiser les filtres de l'historique
+    initHistoryFilters();
+}
+
+// Initialiser les accordéons de la section créance
+function initCreanceAccordions() {
+    // Accordéon "Opérations Créance"
+    const operationsHeader = document.getElementById('creance-operations-header');
+    if (operationsHeader) {
+        operationsHeader.addEventListener('click', function() {
+            this.classList.toggle('collapsed');
+            const content = document.getElementById('creance-operations-content');
+            if (content) content.classList.toggle('collapsed');
+        });
+    }
+    
+    // Accordéon "Gestion des Clients"
+    const clientsHeader = document.getElementById('creance-clients-header');
+    if (clientsHeader) {
+        clientsHeader.addEventListener('click', function() {
+            this.classList.toggle('collapsed');
+            const content = document.getElementById('creance-clients-content');
+            if (content) content.classList.toggle('collapsed');
+        });
+    }
+    
+    // Accordéon "Récapitulatif par Client"
+    const summaryHeader = document.getElementById('creance-summary-header');
+    if (summaryHeader) {
+        summaryHeader.addEventListener('click', function() {
+            this.classList.toggle('collapsed');
+            const content = document.getElementById('creance-summary-content');
+            if (content) content.classList.toggle('collapsed');
+        });
+    }
+}
+
+// Initialiser les filtres de l'historique des opérations
+function initHistoryFilters() {
+    const filterDate = document.getElementById('history-filter-date');
+    const filterClient = document.getElementById('history-filter-client');
+    const filterType = document.getElementById('history-filter-type');
+    const filterAmount = document.getElementById('history-filter-amount');
+    const filterDescription = document.getElementById('history-filter-description');
+    const resetBtn = document.getElementById('history-reset-filters');
+    
+    // Appliquer les filtres en temps réel
+    if (filterDate) filterDate.addEventListener('input', applyHistoryFilters);
+    if (filterClient) filterClient.addEventListener('input', applyHistoryFilters);
+    if (filterType) filterType.addEventListener('change', applyHistoryFilters);
+    if (filterAmount) filterAmount.addEventListener('input', applyHistoryFilters);
+    if (filterDescription) filterDescription.addEventListener('input', applyHistoryFilters);
+    
+    // Bouton de réinitialisation
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            if (filterDate) filterDate.value = '';
+            if (filterClient) filterClient.value = '';
+            if (filterType) filterType.value = '';
+            if (filterAmount) filterAmount.value = '';
+            if (filterDescription) filterDescription.value = '';
+            applyHistoryFilters();
+        });
+    }
+}
+
+// Appliquer les filtres sur l'historique des opérations
+function applyHistoryFilters() {
+    const filterDate = document.getElementById('history-filter-date')?.value || '';
+    const filterClient = document.getElementById('history-filter-client')?.value.toLowerCase() || '';
+    const filterType = document.getElementById('history-filter-type')?.value || '';
+    const filterAmount = document.getElementById('history-filter-amount')?.value || '';
+    const filterDescription = document.getElementById('history-filter-description')?.value.toLowerCase() || '';
+    
+    const tbody = document.getElementById('operations-history-tbody');
+    if (!tbody) return;
+    
+    const rows = tbody.getElementsByTagName('tr');
+    let visibleCount = 0;
+    let activeFilters = [];
+    
+    // Construire la liste des filtres actifs
+    if (filterDate) activeFilters.push(`Date: ${filterDate}`);
+    if (filterClient) activeFilters.push(`Client: ${filterClient}`);
+    if (filterType) activeFilters.push(`Type: ${filterType === 'credit' ? 'Avance' : 'Remboursement'}`);
+    if (filterAmount) activeFilters.push(`Montant: ${filterAmount} FCFA`);
+    if (filterDescription) activeFilters.push(`Description: ${filterDescription}`);
+    
+    // Convertir la date du filtre au format dd/mm/yyyy si elle existe
+    let filterDateFormatted = '';
+    if (filterDate) {
+        const [year, month, day] = filterDate.split('-');
+        filterDateFormatted = `${day}/${month}/${year}`;
+    }
+    
+    // Filtrer les lignes
+    for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const cells = row.getElementsByTagName('td');
+        
+        if (cells.length >= 6) {
+            const dateOp = cells[0].textContent.trim();
+            const client = cells[2].textContent.toLowerCase();
+            const type = cells[3].textContent.toLowerCase();
+            const montantText = cells[4].textContent.replace(/[^0-9]/g, ''); // Extraire les chiffres
+            const description = cells[5].textContent.toLowerCase();
+            
+            let show = true;
+            
+            // Filtre par date
+            if (filterDate && dateOp !== filterDateFormatted) {
+                show = false;
+            }
+            
+            // Filtre par client
+            if (filterClient && !client.includes(filterClient)) {
+                show = false;
+            }
+            
+            // Filtre par type
+            if (filterType) {
+                if (filterType === 'credit' && !type.includes('avance')) {
+                    show = false;
+                }
+                if (filterType === 'debit' && !type.includes('remboursement')) {
+                    show = false;
+                }
+            }
+            
+            // Filtre par montant
+            if (filterAmount && montantText !== filterAmount) {
+                show = false;
+            }
+            
+            // Filtre par description
+            if (filterDescription && !description.includes(filterDescription)) {
+                show = false;
+            }
+            
+            row.style.display = show ? '' : 'none';
+            if (show) visibleCount++;
+        }
+    }
+    
+    // Mettre à jour le statut
+    const statusElement = document.getElementById('history-filter-status');
+    if (statusElement) {
+        if (activeFilters.length > 0) {
+            statusElement.textContent = `Filtres actifs: ${activeFilters.join(' | ')} - ${visibleCount} résultat(s)`;
+            statusElement.style.color = '#0066cc';
+            statusElement.style.fontWeight = '600';
+        } else {
+            statusElement.textContent = 'Aucun filtre actif';
+            statusElement.style.color = '#6c757d';
+            statusElement.style.fontWeight = 'normal';
+        }
+    }
 }
 
 // Initialization functions
@@ -16424,8 +16646,15 @@ function updateVisualisationTable(tab, data) {
     // Vider le tableau
     tbody.innerHTML = '';
     
-    // Remplir avec les nouvelles données
-    data.data.forEach((row, index) => {
+    // Trier les données par date en ordre décroissant (plus récent en premier)
+    const sortedData = [...data.data].sort((a, b) => {
+        const dateA = new Date(a.date);
+        const dateB = new Date(b.date);
+        return dateB - dateA; // Ordre décroissant
+    });
+    
+    // Remplir avec les nouvelles données triées
+    sortedData.forEach((row, index) => {
         console.log(`📊 CLIENT: Ligne ${index + 1} - Données brutes:`, row);
         console.log(`📅 CLIENT: Ligne ${index + 1} - Date brute: "${row.date}" (type: ${typeof row.date})`);
         
@@ -16483,7 +16712,7 @@ function updateVisualisationTable(tab, data) {
         tbody.appendChild(tr);
     });
     
-    console.log(`✅ CLIENT: Tableau ${tbodyId} mis à jour avec ${data.data.length} lignes`);
+    console.log(`✅ CLIENT: Tableau ${tbodyId} mis à jour avec ${sortedData.length} lignes (triées par date décroissante)`);
 }
 
 // ===== FONCTIONS SETUP POUR LE MODULE VISUALISATION =====
@@ -16819,6 +17048,7 @@ async function saveDashboardSnapshot() {
             stock_point_vente: parseFormattedNumber(document.getElementById('stock-total')?.textContent),
             stock_vivant_total: parseFormattedNumber(document.getElementById('stock-vivant-total')?.textContent),
             stock_vivant_variation: parseFormattedNumber(document.getElementById('stock-vivant-variation')?.textContent),
+            virements_mois: parseFormattedNumber(document.getElementById('virements-mois-amount')?.textContent),
             daily_burn: 0, // À implémenter si nécessaire
             weekly_burn: parseFormattedNumber(document.getElementById('weekly-burn')?.textContent),
             monthly_burn: parseFormattedNumber(document.getElementById('monthly-burn')?.textContent),
@@ -18706,28 +18936,51 @@ function fillPLDetailsModal(details) {
             for (const [configKey, plAlt] of Object.entries(window.currentPLAlternatifs)) {
                 const itemDiv = document.createElement('div');
                 itemDiv.className = 'formula-item';
-                itemDiv.innerHTML = `
-                    <div style="margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;">
-                        <div style="font-weight: bold; margin-bottom: 5px;">
-                            <i class="fas fa-filter"></i> PL sans ${plAlt.nom}
-                        </div>
-                        <div style="font-size: 0.8em; color: #999; margin-bottom: 5px;">
-                            🔑 Config key: ${configKey}
-                        </div>
-                        <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">
-                            🚫 Comptes exclus: ${plAlt.comptesExclus.join(', ')}
-                        </div>
-                        <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">
-                            💸 Cash Burn excluant: ${formatCurrency(plAlt.cashBurn)}
-                        </div>
-                        <div style="font-size: 0.9em; color: #dc3545; margin-bottom: 5px;">
-                            ➖ Dépenses exclues: ${formatCurrency(plAlt.depensesExclues)}
-                        </div>
-                        <div style="font-size: 1.1em; font-weight: bold; color: #28a745; margin-top: 8px;">
-                            🎯 PL Final: ${formatCurrency(plAlt.plFinal)}
-                        </div>
-                    </div>
-                `;
+                
+                // Create wrapper div
+                const wrapperDiv = document.createElement('div');
+                wrapperDiv.style.cssText = 'margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px;';
+                
+                // Title section
+                const titleDiv = document.createElement('div');
+                titleDiv.style.cssText = 'font-weight: bold; margin-bottom: 5px;';
+                const icon = document.createElement('i');
+                icon.className = 'fas fa-filter';
+                titleDiv.appendChild(icon);
+                titleDiv.appendChild(document.createTextNode(' PL sans ' + plAlt.nom));
+                wrapperDiv.appendChild(titleDiv);
+                
+                // Config key section
+                const configDiv = document.createElement('div');
+                configDiv.style.cssText = 'font-size: 0.8em; color: #999; margin-bottom: 5px;';
+                configDiv.textContent = '🔑 Config key: ' + configKey;
+                wrapperDiv.appendChild(configDiv);
+                
+                // Comptes exclus section
+                const comptesDiv = document.createElement('div');
+                comptesDiv.style.cssText = 'font-size: 0.9em; color: #666; margin-bottom: 5px;';
+                comptesDiv.textContent = '🚫 Comptes exclus: ' + plAlt.comptesExclus.join(', ');
+                wrapperDiv.appendChild(comptesDiv);
+                
+                // Cash Burn section
+                const cashBurnDiv = document.createElement('div');
+                cashBurnDiv.style.cssText = 'font-size: 0.9em; color: #666; margin-bottom: 5px;';
+                cashBurnDiv.textContent = '💸 Cash Burn excluant: ' + formatCurrency(plAlt.cashBurn);
+                wrapperDiv.appendChild(cashBurnDiv);
+                
+                // Dépenses exclues section
+                const depensesDiv = document.createElement('div');
+                depensesDiv.style.cssText = 'font-size: 0.9em; color: #dc3545; margin-bottom: 5px;';
+                depensesDiv.textContent = '➖ Dépenses exclues: ' + formatCurrency(plAlt.depensesExclues);
+                wrapperDiv.appendChild(depensesDiv);
+                
+                // PL Final section
+                const plFinalDiv = document.createElement('div');
+                plFinalDiv.style.cssText = 'font-size: 1.1em; font-weight: bold; color: #28a745; margin-top: 8px;';
+                plFinalDiv.textContent = '🎯 PL Final: ' + formatCurrency(plAlt.plFinal);
+                wrapperDiv.appendChild(plFinalDiv);
+                
+                itemDiv.appendChild(wrapperDiv);
                 alternatifContent.appendChild(itemDiv);
             }
             

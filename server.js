@@ -4,6 +4,9 @@ require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
+const http = require('http');
+const querystring = require('querystring');
 const { Pool } = require('pg');
 const bodyParser = require('body-parser');
 const path = require('path');
@@ -1259,6 +1262,37 @@ app.use(session({
 
 // Middleware d'authentification
 const requireAuth = (req, res, next) => {
+    // Vérifier d'abord si une clé API est fournie (from headers only, not query string)
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+    
+    if (apiKey) {
+        // Authentification par clé API avec timing-safe comparison
+        if (!process.env.API_KEY) {
+            return res.status(500).json({ error: 'Configuration serveur invalide: API_KEY manquante' });
+        }
+        
+        try {
+            const apiKeyBuffer = Buffer.from(apiKey, 'utf8');
+            const envKeyBuffer = Buffer.from(process.env.API_KEY, 'utf8');
+            
+            // Check length first to avoid timingSafeEqual error
+            if (apiKeyBuffer.length !== envKeyBuffer.length) {
+                return res.status(403).json({ error: 'Clé API invalide' });
+            }
+            
+            if (crypto.timingSafeEqual(apiKeyBuffer, envKeyBuffer)) {
+                // Créer un objet user factice pour les routes qui en ont besoin
+                req.user = { username: 'API', role: 'admin' };
+                return next();
+            }
+        } catch (error) {
+            console.error('Erreur comparaison API key:', error);
+            return res.status(403).json({ error: 'Clé API invalide' });
+        }
+        return res.status(403).json({ error: 'Clé API invalide' });
+    }
+    
+    // Sinon, vérifier la session
     if (req.session.user) {
         next();
     } else {
@@ -2728,8 +2762,9 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
     console.log(`🚚 ===== ROUTE STATS-CARDS DÉMARRÉE =====`);
     try {
         const { start_date, end_date, cutoff_date } = req.query;
-        const isDirector = req.session.user.role === 'directeur';
-        const userId = req.session.user.id;
+        const user = req.session?.user || req.user;
+        const isDirector = user?.role === 'directeur';
+        const userId = user?.id || null;
         
         console.log(`🚚 ===== ROUTE /api/dashboard/stats-cards APPELÉE =====`);
         console.log(`🚚 DEBUG - Paramètres reçus: start_date=${start_date}, end_date=${end_date}, cutoff_date=${cutoff_date}`);
@@ -3018,8 +3053,8 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             
             // Récupérer Créances du Mois DIRECTEMENT (sans appel API interne)
             try {
-                const userRole = req.session.user.role;
-                const userId = req.session.user.id;
+                const userRole = user?.role;
+                const userId = user?.id;
 
                 let accountFilter = '';
                 let creancesParams = [];
@@ -3081,8 +3116,8 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             console.log(`🔍 cutoff_date: ${cutoff_date}`);
             remboursementsMoisValue = 0;
             try {
-                const userRole = req.session.user.role;
-                const userId = req.session.user.id;
+                const userRole = user?.role;
+                const userId = user?.id;
                 console.log(`🔍 User role: ${userRole}, User ID: ${userId}`);
 
                 let accountFilter = '';
@@ -3831,6 +3866,17 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
             plBrut: Math.round(plBrut),
             plCalculationDetails,
             plAlternatifs,
+            // Summary fields for easy access
+            summary: {
+                cash_bictorys: plCalculationDetails.cashBictorys,
+                creances: plCalculationDetails.creances,
+                stock_pv: plCalculationDetails.stockPointVente,
+                ecart_stock_vivant: plCalculationDetails.stockVivantVariation,
+                livraisons_partenaires: plCalculationDetails.livraisonsPartenaires,
+                cash_burn: plCalculationDetails.cashBurn,
+                charges_estimees: plCalculationDetails.chargesProrata,
+                pl_final: Math.round(plCalculationDetails.plFinal)
+            },
             previousMonthsExpenses: previousMonthsResult.rows.map(row => ({
                 account_id: row.account_id,
                 account_name: row.account_name,
@@ -13672,8 +13718,8 @@ app.post('/api/external/cash-bictorys', requireCashBictorysAuth, async (req, res
 
 // Middleware pour vérifier les permissions Virement Mensuel (Tous les utilisateurs connectés)
 const requireVirementMensuelAuth = (req, res, next) => {
-    // Check for API key first
-    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '') || req.query.api_key;
+    // Check for API key from secure headers only (not query string)
+    const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
     
     if (apiKey) {
         // API key authentication
@@ -13681,15 +13727,29 @@ const requireVirementMensuelAuth = (req, res, next) => {
             return res.status(500).json({ error: 'Configuration serveur invalide: API_KEY manquante' });
         }
         
-        if (apiKey === process.env.API_KEY) {
-            req.session = req.session || {};
-            req.session.user = {
-                id: 1,
-                username: 'api_user',
-                role: 'admin',
-                full_name: 'API User'
-            };
-            return next();
+        // Use timing-safe comparison to prevent timing attacks
+        try {
+            const apiKeyBuffer = Buffer.from(apiKey, 'utf8');
+            const envKeyBuffer = Buffer.from(process.env.API_KEY, 'utf8');
+            
+            // Check length first to avoid timingSafeEqual error
+            if (apiKeyBuffer.length !== envKeyBuffer.length) {
+                return res.status(401).json({ error: 'Clé API invalide' });
+            }
+            
+            if (crypto.timingSafeEqual(apiKeyBuffer, envKeyBuffer)) {
+                req.session = req.session || {};
+                req.session.user = {
+                    id: 1,
+                    username: 'api_user',
+                    role: 'admin',
+                    full_name: 'API User'
+                };
+                return next();
+            }
+        } catch (error) {
+            console.error('Erreur comparaison API key:', error);
+            return res.status(401).json({ error: 'Clé API invalide' });
         }
         return res.status(401).json({ error: 'Clé API invalide' });
     }
@@ -14643,25 +14703,26 @@ async function createDashboardSnapshotsTable() {
 // Route pour sauvegarder un snapshot du tableau de bord
 app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
     try {
+        // Tous les champs sont optionnels sauf snapshot_date
         const {
             snapshot_date,
-            total_spent_amount,
-            total_remaining_amount,
-            total_credited_with_expenses,
-            total_credited_general,
-            cash_bictorys_amount,
-            creances_total,
-            creances_mois,
-            stock_point_vente,
-            stock_vivant_total,
-            stock_vivant_variation,
-            daily_burn,
-            weekly_burn,
-            monthly_burn,
-            solde_depot,
-            solde_partner,
-            solde_general,
-            notes
+            total_spent_amount = 0,
+            total_remaining_amount = 0,
+            total_credited_with_expenses = 0,
+            total_credited_general = 0,
+            cash_bictorys_amount = 0,
+            creances_total = 0,
+            creances_mois = 0,
+            stock_point_vente = 0,
+            stock_vivant_total = 0,
+            stock_vivant_variation = 0,
+            daily_burn = 0,
+            weekly_burn = 0,
+            monthly_burn = 0,
+            solde_depot = 0,
+            solde_partner = 0,
+            solde_general = 0,
+            notes = ''
         } = req.body;
         
         if (!snapshot_date) {
@@ -14672,7 +14733,8 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
         let correctedSnapshotDate = snapshot_date;
         console.log(`📅 Date snapshot reçue: ${snapshot_date} (utilisée directement)`);
         
-        const username = req.session.user.username;
+        // Gérer le nom d'utilisateur (session ou API)
+        const username = req.session?.user?.username || req.user?.username || 'API';
         
         // Calculer automatiquement les livraisons partenaires validées du mois
         let livraisons_partenaires = 0;
@@ -14726,8 +14788,8 @@ app.post('/api/dashboard/save-snapshot', requireAdminAuth, async (req, res) => {
             console.log(`   Créé le: ${existingSnapshot.created_at}`);
         }
         
-        // Récupérer virements du mois depuis plDetails
-        const virements_mois = plDetails.virementsMois || 0;
+        // Récupérer virements du mois (peut être envoyé par le frontend ou calculé)
+        const virements_mois = req.body.virements_mois || 0;
         console.log(`💸 Virements du mois pour snapshot ${correctedSnapshotDate}: ${virements_mois} FCFA`);
         
         // Préparer les valeurs pour le logging
@@ -14881,6 +14943,159 @@ app.get('/api/dashboard/snapshots/:date', requireAdminAuth, async (req, res) => 
     } catch (error) {
         console.error('❌ Erreur vérification snapshot:', error);
         res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Route simplifiée pour sauvegarder un snapshot en ne donnant que la date
+// Calcule automatiquement toutes les valeurs du dashboard pour cette date
+app.post('/api/dashboard/save-snapshot-auto', requireAdminAuth, async (req, res) => {
+    try {
+        const { snapshot_date, notes } = req.body;
+        
+        if (!snapshot_date) {
+            return res.status(400).json({ error: 'La date du snapshot est requise' });
+        }
+        
+        console.log(`📅 AUTO SNAPSHOT: Création snapshot automatique pour ${snapshot_date}`);
+        
+        // Créer un objet request simulé pour réutiliser la logique du handler stats-cards
+        const mockReq = {
+            query: {
+                start_date: snapshot_date,
+                end_date: snapshot_date,
+                cutoff_date: snapshot_date
+            },
+            session: req.session,
+            user: req.user
+        };
+        
+        let stats;
+        const mockRes = {
+            json: (data) => { stats = data; },
+            status: (code) => ({
+                json: (data) => { throw new Error(data.error || 'Erreur calcul stats'); }
+            })
+        };
+        
+        console.log(`📡 AUTO SNAPSHOT: Appel direct au handler stats-cards`);
+        
+        // Appeler le handler GET /api/dashboard/stats-cards directement
+        // On copie la logique principale ici pour éviter la dépendance circulaire
+        try {
+            const { start_date, end_date, cutoff_date } = mockReq.query;
+            const user = mockReq.session?.user || mockReq.user;
+            const isDirector = user?.role === 'directeur';
+            const userId = user?.id || null;
+            
+            const referenceDate = cutoff_date ? new Date(cutoff_date) : new Date();
+            const referenceDateStr = cutoff_date || new Date().toISOString().split('T')[0];
+            
+            // Note: Pour éviter de dupliquer 1000+ lignes de code, nous faisons un appel simplifié
+            // Une vraie refactorisation extrairait toute la logique dans une fonction partagée
+            // Pour l'instant, nous créons un endpoint interne qui peut être appelé sans HTTP
+            
+            // Créer une requête interne via le routeur Express plutôt que via HTTP
+            const axios = require('axios').create({
+                baseURL: `http://localhost:${process.env.PORT || 3000}`,
+                headers: {
+                    'Cookie': req.headers.cookie || '',
+                    'x-api-key': req.headers['x-api-key'] || ''
+                },
+                timeout: 120000 // 120 secondes (2 minutes) de timeout pour les calculs complexes
+            });
+            
+            const response = await axios.get('/api/dashboard/stats-cards', {
+                params: {
+                    start_date: snapshot_date,
+                    end_date: snapshot_date,
+                    cutoff_date: snapshot_date
+                }
+            });
+            
+            stats = response.data;
+        } catch (error) {
+            console.error('❌ Erreur lors du calcul des stats:', error);
+            throw new Error('Impossible de récupérer les statistiques');
+        }
+        
+        if (!stats || stats.error) {
+            throw new Error('Impossible de récupérer les statistiques');
+        }
+        
+        console.log(`✅ AUTO SNAPSHOT: Stats récupérées, préparation des données`);
+        
+        // Préparer les données du snapshot
+        // Map des propriétés de l'API stats-cards vers le format snapshot
+        const details = stats.plCalculationDetails || {};
+        const snapshotData = {
+            snapshot_date: snapshot_date,
+            notes: notes || `Snapshot automatique créé via API le ${new Date().toLocaleString('fr-FR')}`,
+            total_spent_amount: stats.totalSpent || 0,
+            total_remaining_amount: stats.totalRemaining || 0,
+            cash_bictorys_amount: details.cashBictorys || 0,
+            creances_total: details.creances || 0,
+            creances_mois: details.creances || 0,
+            stock_point_vente: details.stockPointVente || 0,
+            stock_vivant_total: details.stockVivantVariation || 0,
+            stock_vivant_variation: details.stockVivantVariation || 0,
+            virements_mois: details.virementsMois || 0,
+            daily_burn: 0,
+            weekly_burn: 0,
+            monthly_burn: details.cashBurn || 0,
+            solde_general: stats.totalRemaining || 0,
+            solde_depot: stats.totalDepotBalance || 0,
+            solde_partner: stats.totalPartnerBalance || 0,
+            pl_final: stats.plEstimCharges || 0,
+            total_credited_with_expenses: stats.totalCreditedWithExpenses || 0,
+            total_credited_general: stats.totalCreditedGeneral || 0
+        };
+        
+        console.log(`📊 AUTO SNAPSHOT: Données préparées:`, snapshotData);
+        
+        // Faire un appel POST interne à /api/dashboard/save-snapshot
+        const saveOptions = {
+            hostname: 'localhost',
+            port: process.env.PORT || 3000,
+            path: '/api/dashboard/save-snapshot',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': req.headers.cookie || '',
+                'x-api-key': req.headers['x-api-key'] || ''
+            }
+        };
+        
+        const savePromise = new Promise((resolve, reject) => {
+            const request = http.request(saveOptions, (response) => {
+                let data = '';
+                response.on('data', (chunk) => { data += chunk; });
+                response.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (e) {
+                        reject(new Error('Erreur parsing réponse save'));
+                    }
+                });
+            });
+            request.on('error', reject);
+            request.write(JSON.stringify(snapshotData));
+            request.end();
+        });
+        
+        const result = await savePromise;
+        
+        console.log(`✅ AUTO SNAPSHOT: Snapshot sauvegardé avec succès`);
+        
+        res.json({
+            success: true,
+            message: `Snapshot automatique créé pour ${snapshot_date}`,
+            snapshot: result.snapshot,
+            auto_calculated: true
+        });
+        
+    } catch (error) {
+        console.error('❌ Erreur création snapshot auto:', error);
+        res.status(500).json({ error: 'Erreur serveur', details: error.message });
     }
 });
 
