@@ -1435,7 +1435,7 @@ async function updateStatsCards(startDate, endDate, cutoffDate) {
                 // Create details small
                 const detailsSmall = document.createElement('small');
                 detailsSmall.className = 'stat-period';
-                detailsSmall.style.cssText = 'font-size: 0.75em; color: #666;';
+                detailsSmall.style.cssText = 'font-size: 0.75em; color: #666; white-space: pre-line;';
                 detailsSmall.textContent = 'Excluant: ' + plAlt.comptesExclus.join(', ') + '\nCash Burn: ' + formatCurrency(plAlt.cashBurn) + ' | Exclus: ' + formatCurrency(plAlt.depensesExclues);
                 contentDiv.appendChild(detailsSmall);
                 
@@ -8616,7 +8616,7 @@ function toggleDesktopMenu() {
         
         // Update ARIA attribute for screen readers
         if (desktopMenuToggle) {
-            desktopMenuToggle.setAttribute('aria-expanded', !isCollapsed);
+            desktopMenuToggle.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
         }
         
         // Save state to localStorage
@@ -15507,7 +15507,7 @@ function initCreanceAccordions() {
             const content = document.getElementById('creance-operations-content');
             if (content) content.classList.toggle('collapsed');
             // Update ARIA attribute for accessibility
-            this.setAttribute('aria-expanded', !isCollapsed);
+            this.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
         });
     }
     
@@ -15519,7 +15519,7 @@ function initCreanceAccordions() {
             const content = document.getElementById('creance-clients-content');
             if (content) content.classList.toggle('collapsed');
             // Update ARIA attribute for accessibility
-            this.setAttribute('aria-expanded', !isCollapsed);
+            this.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
         });
     }
     
@@ -15531,7 +15531,7 @@ function initCreanceAccordions() {
             const content = document.getElementById('creance-summary-content');
             if (content) content.classList.toggle('collapsed');
             // Update ARIA attribute for accessibility
-            this.setAttribute('aria-expanded', !isCollapsed);
+            this.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
         });
     }
 }
