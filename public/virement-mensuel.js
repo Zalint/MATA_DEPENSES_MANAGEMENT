@@ -62,6 +62,19 @@ async function loadVirementMensuel() {
         
         // Récupérer les données du mois
         const response = await fetch(`/api/virement-mensuel/${monthYear}`);
+        
+        if (!response.ok) {
+            let errorMsg = 'Erreur lors du chargement des données';
+            try {
+                const errorData = await response.json();
+                errorMsg = errorData.error || errorMsg;
+            } catch (e) {
+                errorMsg = await response.text() || errorMsg;
+            }
+            console.error('❌ Erreur chargement:', errorMsg);
+            throw new Error(errorMsg);
+        }
+        
         const data = await response.json();
         
         console.log(`💸 Données reçues:`, data);
@@ -235,10 +248,17 @@ function renderClientsBadges() {
     clientsArray.forEach(client => {
         const badge = document.createElement('div');
         badge.className = 'client-badge';
-        badge.innerHTML = `
-            <span>${client}</span>
-            <i class="fas fa-times-circle remove-icon"></i>
-        `;
+        
+        // Create client name span
+        const clientSpan = document.createElement('span');
+        clientSpan.textContent = client;
+        badge.appendChild(clientSpan);
+        
+        // Create remove icon
+        const removeIcon = document.createElement('i');
+        removeIcon.className = 'fas fa-times-circle remove-icon';
+        badge.appendChild(removeIcon);
+        
         badge.onclick = () => removeClient(client);
         container.appendChild(badge);
     });
@@ -457,46 +477,43 @@ function renderVirementTable() {
             
             // Afficher la date et le jour seulement pour le premier client
             if (clientIndex === 0) {
-                tr.innerHTML = `
-                    <td rowspan="${clientsToDisplay.length}">${dateStr}</td>
-                    <td rowspan="${clientsToDisplay.length}" class="${isWeekend ? 'day-name weekend' : 'day-name'}">${dayName}</td>
-                    <td>
-                        <input type="number" 
-                               class="virement-input" 
-                               value="${valeur || ''}" 
-                               data-date="${dateStr}"
-                               data-client="${client}"
-                               placeholder="0">
-                    </td>
-                    <td>
-                        <input type="text" 
-                               class="client-input" 
-                               value="${client}" 
-                               data-date="${dateStr}"
-                               data-old-client="${client}"
-                               readonly>
-                    </td>
-                `;
-            } else {
-                tr.innerHTML = `
-                    <td>
-                        <input type="number" 
-                               class="virement-input" 
-                               value="${valeur || ''}" 
-                               data-date="${dateStr}"
-                               data-client="${client}"
-                               placeholder="0">
-                    </td>
-                    <td>
-                        <input type="text" 
-                               class="client-input" 
-                               value="${client}" 
-                               data-date="${dateStr}"
-                               data-old-client="${client}"
-                               readonly>
-                    </td>
-                `;
+                // Create date cell
+                const dateTd = document.createElement('td');
+                dateTd.setAttribute('rowspan', clientsToDisplay.length.toString());
+                dateTd.textContent = dateStr;
+                tr.appendChild(dateTd);
+                
+                // Create day name cell
+                const dayTd = document.createElement('td');
+                dayTd.setAttribute('rowspan', clientsToDisplay.length.toString());
+                dayTd.className = isWeekend ? 'day-name weekend' : 'day-name';
+                dayTd.textContent = dayName;
+                tr.appendChild(dayTd);
             }
+            
+            // Create virement input cell
+            const virementTd = document.createElement('td');
+            const virementInput = document.createElement('input');
+            virementInput.type = 'number';
+            virementInput.className = 'virement-input';
+            virementInput.value = valeur || '';
+            virementInput.setAttribute('data-date', dateStr);
+            virementInput.setAttribute('data-client', client);
+            virementInput.placeholder = '0';
+            virementTd.appendChild(virementInput);
+            tr.appendChild(virementTd);
+            
+            // Create client input cell
+            const clientTd = document.createElement('td');
+            const clientInput = document.createElement('input');
+            clientInput.type = 'text';
+            clientInput.className = 'client-input';
+            clientInput.value = client;
+            clientInput.setAttribute('data-date', dateStr);
+            clientInput.setAttribute('data-old-client', client);
+            clientInput.readOnly = true;
+            clientTd.appendChild(clientInput);
+            tr.appendChild(clientTd);
             
             tbody.appendChild(tr);
         });
@@ -612,6 +629,18 @@ async function saveVirementMensuel() {
             },
             body: JSON.stringify({ data: dataToSend })
         });
+        
+        if (!response.ok) {
+            let errorMsg = 'Erreur lors de la sauvegarde';
+            try {
+                const errorData = await response.json();
+                errorMsg = errorData.error || errorMsg;
+            } catch (e) {
+                errorMsg = await response.text() || errorMsg;
+            }
+            console.error('❌ Erreur sauvegarde:', errorMsg);
+            throw new Error(errorMsg);
+        }
         
         const result = await response.json();
         

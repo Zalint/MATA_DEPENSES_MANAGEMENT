@@ -2059,8 +2059,8 @@ tr:hover {
     }
 }
 
-/* Desktop (1024px and up) */
-@media (min-width: 1024px) {
+/* Desktop and tablets (768px and up) */
+@media (min-width: 768px) {
     .content {
         padding: 40px;
     }
@@ -2121,7 +2121,7 @@ tr:hover {
         max-width: 800px;
     }
     
-    /* Show desktop menu toggle, hide mobile toggle */
+    /* Show desktop menu toggle starting at 768px for tablets */
     .desktop-menu-toggle {
         display: block;
     }
