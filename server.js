@@ -14999,7 +14999,8 @@ app.post('/api/dashboard/save-snapshot-auto', requireAdminAuth, async (req, res)
                 baseURL: `http://localhost:${process.env.PORT || 3000}`,
                 headers: {
                     'Cookie': req.headers.cookie || '',
-                    'x-api-key': req.headers['x-api-key'] || ''
+                    'x-api-key': req.headers['x-api-key'] || '',
+                    'authorization': req.headers['authorization'] || ''
                 },
                 timeout: 120000 // 120 secondes (2 minutes) de timeout pour les calculs complexes
             });
@@ -15061,7 +15062,8 @@ app.post('/api/dashboard/save-snapshot-auto', requireAdminAuth, async (req, res)
             headers: {
                 'Content-Type': 'application/json',
                 'Cookie': req.headers.cookie || '',
-                'x-api-key': req.headers['x-api-key'] || ''
+                'x-api-key': req.headers['x-api-key'] || '',
+                'authorization': req.headers['authorization'] || ''
             }
         };
         
@@ -15071,12 +15073,28 @@ app.post('/api/dashboard/save-snapshot-auto', requireAdminAuth, async (req, res)
                 response.on('data', (chunk) => { data += chunk; });
                 response.on('end', () => {
                     try {
-                        resolve(JSON.parse(data));
+                        const parsedData = JSON.parse(data);
+                        
+                        // Check if the response status is successful (2xx)
+                        if (response.statusCode >= 200 && response.statusCode < 300) {
+                            resolve(parsedData);
+                        } else {
+                            // Non-2xx status code, reject with error details
+                            const errorMsg = parsedData.error || parsedData.message || `HTTP ${response.statusCode}`;
+                            reject(new Error(`Échec sauvegarde snapshot: ${errorMsg}`));
+                        }
                     } catch (e) {
-                        reject(new Error('Erreur parsing réponse save'));
+                        reject(new Error('Erreur parsing réponse save: ' + e.message));
                     }
                 });
             });
+            
+            // Add timeout (60 seconds)
+            request.setTimeout(60000, () => {
+                request.abort();
+                reject(new Error('Timeout: La sauvegarde du snapshot a pris trop de temps'));
+            });
+            
             request.on('error', reject);
             request.write(JSON.stringify(snapshotData));
             request.end();
@@ -15090,7 +15108,28 @@ app.post('/api/dashboard/save-snapshot-auto', requireAdminAuth, async (req, res)
             success: true,
             message: `Snapshot automatique créé pour ${snapshot_date}`,
             snapshot: result.snapshot,
-            auto_calculated: true
+            auto_calculated: true,
+            calculated_data: {
+                total_spent_amount: snapshotData.total_spent_amount,
+                total_remaining_amount: snapshotData.total_remaining_amount,
+                total_credited_with_expenses: snapshotData.total_credited_with_expenses,
+                total_credited_general: snapshotData.total_credited_general,
+                cash_bictorys_amount: snapshotData.cash_bictorys_amount,
+                creances_total: snapshotData.creances_total,
+                creances_mois: snapshotData.creances_mois,
+                stock_point_vente: snapshotData.stock_point_vente,
+                stock_vivant_total: snapshotData.stock_vivant_total,
+                stock_vivant_variation: snapshotData.stock_vivant_variation,
+                livraisons_partenaires: stats.plCalculationDetails?.livraisonsPartenaires || 0,
+                virements_mois: snapshotData.virements_mois,
+                daily_burn: snapshotData.daily_burn,
+                weekly_burn: snapshotData.weekly_burn,
+                monthly_burn: snapshotData.monthly_burn,
+                solde_depot: snapshotData.solde_depot,
+                solde_partner: snapshotData.solde_partner,
+                solde_general: snapshotData.solde_general,
+                pl_final: snapshotData.pl_final
+            }
         });
         
     } catch (error) {
