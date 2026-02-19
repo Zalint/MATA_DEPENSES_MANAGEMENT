@@ -227,6 +227,7 @@ async function showApp() {
         document.getElementById('admin-menu').style.display = 'block';
         document.getElementById('admin-users-menu').style.display = 'block';
         document.getElementById('admin-config-menu').style.display = 'block';
+        document.getElementById('sql-query-menu').style.display = 'block';
         document.getElementById('visualisation-menu').style.display = 'block';
         document.getElementById('stock-menu').style.display = 'block';
         document.getElementById('stock-vivant-menu').style.display = 'block';

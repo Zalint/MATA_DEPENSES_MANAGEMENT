@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Requêtes SQL - MataBanq</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .sql-page {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .sql-page h1 {
+            color: #333;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .sql-page .subtitle {
+            color: #666;
+            margin-bottom: 1.5rem;
+            font-size: 0.95rem;
+        }
+        .sql-editor-section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .sql-editor-section label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 0.5rem;
+        }
+        #sql-input {
+            width: 100%;
+            min-height: 120px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            resize: vertical;
+        }
+        #sql-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+        }
+        .sql-actions {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        .sql-actions .btn {
+            padding: 0.6rem 1.2rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn-execute {
+            background: #667eea;
+            color: white;
+        }
+        .btn-execute:hover {
+            background: #5568d3;
+        }
+        .btn-clear {
+            background: #e0e0e0;
+            color: #333;
+        }
+        .btn-clear:hover {
+            background: #d0d0d0;
+        }
+        .btn-back {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-back:hover {
+            background: #5a6268;
+        }
+        .sql-results-section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+            overflow: hidden;
+            margin-top: 1.5rem;
+        }
+        .sql-results-section .results-header {
+            padding: 1rem 1.5rem;
+            background: #f8f9fa;
+        }
+        .sql-results-section .results-header h3 {
+            margin: 0;
+            font-size: 1rem;
+        }
+        .sql-results-table-wrapper {
+            overflow-x: auto;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .sql-results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        .sql-results-table th {
+            background: #667eea;
+            color: white;
+            padding: 0.75rem 1rem;
+            text-align: left;
+            position: sticky;
+            top: 0;
+        }
+        .sql-results-table td {
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid #eee;
+        }
+        .sql-results-table tr:hover {
+            background: #f8f9fa;
+        }
+        .sql-error {
+            background: #fee;
+            color: #c00;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+        .sql-info {
+            color: #666;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+        .btn-export-csv {
+            background: #28a745;
+            color: white;
+        }
+        .btn-export-csv:hover {
+            background: #218838;
+        }
+        .access-denied {
+            text-align: center;
+            padding: 3rem 2rem;
+        }
+        .access-denied i {
+            font-size: 4rem;
+            color: #dc3545;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="sql-page">
+        <div id="loading-state">
+            <p><i class="fas fa-spinner fa-spin"></i> Vérification de l'authentification...</p>
+        </div>
+        <div id="access-denied" class="access-denied" style="display: none;">
+            <i class="fas fa-lock"></i>
+            <h2>Accès refusé</h2>
+            <p>Cette page est réservée aux administrateurs (DG, PCA, Admin).</p>
+            <a href="/" class="btn btn-back" style="margin-top: 1rem; display: inline-flex; text-decoration: none;">
+                <i class="fas fa-arrow-left"></i> Retour à l'application
+            </a>
+        </div>
+        <div id="sql-content" style="display: none;">
+            <h1><i class="fas fa-database"></i> Requêtes SQL</h1>
+            <p class="subtitle">Exécutez des requêtes SELECT uniquement (lecture seule). Les requêtes INSERT, UPDATE, DELETE sont refusées.</p>
+            <div class="sql-editor-section">
+                <label for="sql-input">Requête SQL</label>
+                <textarea id="sql-input" placeholder="Exemple: SELECT * FROM users LIMIT 10"></textarea>
+                <div class="sql-actions">
+                    <button type="button" id="btn-execute" class="btn btn-execute">
+                        <i class="fas fa-play"></i> Exécuter
+                    </button>
+                    <button type="button" id="btn-clear" class="btn btn-clear">
+                        <i class="fas fa-eraser"></i> Effacer
+                    </button>
+                    <a href="/" class="btn btn-back" style="text-decoration: none;">
+                        <i class="fas fa-arrow-left"></i> Retour
+                    </a>
+                </div>
+            </div>
+            <div id="sql-results-area" style="display: none;">
+                <div class="sql-results-section">
+                    <div class="results-header">
+                        <h3 id="results-title">Résultats</h3>
+                        <button type="button" id="btn-export-csv" class="btn btn-export-csv" style="display: none;">
+                            <i class="fas fa-file-csv"></i> Exporter en CSV
+                        </button>
+                    </div>
+                    <div class="sql-results-table-wrapper">
+                        <table class="sql-results-table" id="sql-results-table">
+                        </table>
+                    </div>
+                    <p class="sql-info" id="results-info"></p>
+                </div>
+            </div>
+            <div id="sql-error-area" style="display: none;">
+                <div class="sql-error" id="sql-error-message"></div>
+            </div>
+        </div>
+    </div>
+    <script>
+        const ALLOWED_ROLES = ['admin', 'directeur_general', 'pca'];
+        let lastResultRows = [];
+
+        async function checkAccess() {
+            try {
+                const res = await fetch('/api/user', { credentials: 'include' });
+                if (!res.ok) {
+                    window.location.href = '/';
+                    return;
+                }
+                const user = await res.json();
+                if (!ALLOWED_ROLES.includes(user.role)) {
+                    document.getElementById('loading-state').style.display = 'none';
+                    document.getElementById('access-denied').style.display = 'block';
+                    return;
+                }
+                document.getElementById('loading-state').style.display = 'none';
+                document.getElementById('sql-content').style.display = 'block';
+                initSqlEditor();
+            } catch (e) {
+                window.location.href = '/';
+            }
+        }
+
+        function initSqlEditor() {
+            const btnExecute = document.getElementById('btn-execute');
+            const btnClear = document.getElementById('btn-clear');
+            const sqlInput = document.getElementById('sql-input');
+
+            btnExecute.addEventListener('click', executeQuery);
+            document.getElementById('btn-export-csv').addEventListener('click', exportToCsv);
+            btnClear.addEventListener('click', () => {
+                sqlInput.value = '';
+                document.getElementById('sql-results-area').style.display = 'none';
+                document.getElementById('sql-error-area').style.display = 'none';
+            });
+
+            sqlInput.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'Enter') {
+                    e.preventDefault();
+                    executeQuery();
+                }
+            });
+        }
+
+        async function executeQuery() {
+            const sqlInput = document.getElementById('sql-input');
+            const query = sqlInput.value.trim();
+            const resultsArea = document.getElementById('sql-results-area');
+            const errorArea = document.getElementById('sql-error-area');
+
+            resultsArea.style.display = 'none';
+            errorArea.style.display = 'none';
+
+            if (!query) {
+                showError('Veuillez saisir une requête SQL.');
+                return;
+            }
+
+            const btnExecute = document.getElementById('btn-execute');
+            btnExecute.disabled = true;
+            btnExecute.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Exécution...';
+
+            try {
+                const res = await fetch('/api/sql/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include',
+                    body: JSON.stringify({ query })
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    showError(data.error || 'Erreur lors de l\'exécution');
+                    return;
+                }
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+
+                displayResults(data.rows, data.rowCount);
+            } catch (e) {
+                showError('Erreur réseau: ' + e.message);
+            } finally {
+                btnExecute.disabled = false;
+                btnExecute.innerHTML = '<i class="fas fa-play"></i> Exécuter';
+            }
+        }
+
+        function showError(msg) {
+            document.getElementById('sql-error-message').textContent = msg;
+            document.getElementById('sql-error-area').style.display = 'block';
+        }
+
+        function displayResults(rows, rowCount) {
+            const table = document.getElementById('sql-results-table');
+            const info = document.getElementById('results-info');
+            const btnExport = document.getElementById('btn-export-csv');
+            table.innerHTML = '';
+            lastResultRows = rows || [];
+
+            if (!rows || rows.length === 0) {
+                table.innerHTML = '<tr><td colspan="1" style="padding: 2rem; text-align: center; color: #666;">Aucun résultat</td></tr>';
+                info.textContent = '0 ligne(s)';
+                btnExport.style.display = 'none';
+            } else {
+                const cols = Object.keys(rows[0]);
+                let headerRow = '<tr>';
+                cols.forEach(c => { headerRow += `<th>${escapeHtml(c)}</th>`; });
+                headerRow += '</tr>';
+                table.innerHTML = headerRow;
+
+                rows.forEach(row => {
+                    let tr = '<tr>';
+                    cols.forEach(col => {
+                        let val = row[col];
+                        if (val === null) val = '<em>NULL</em>';
+                        else if (typeof val === 'object') val = escapeHtml(JSON.stringify(val));
+                        else val = escapeHtml(String(val));
+                        tr += `<td>${val}</td>`;
+                    });
+                    tr += '</tr>';
+                    table.innerHTML += tr;
+                });
+                info.textContent = `${rowCount} ligne(s)`;
+                btnExport.style.display = 'inline-flex';
+            }
+
+            document.getElementById('sql-results-area').style.display = 'block';
+        }
+
+        function exportToCsv() {
+            if (!lastResultRows || lastResultRows.length === 0) return;
+
+            const cols = Object.keys(lastResultRows[0]);
+            const escapeCsv = (v) => {
+                if (v === null || v === undefined) return '';
+                const s = typeof v === 'object' ? JSON.stringify(v) : String(v);
+                if (/[",;\n\r]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+                return s;
+            };
+
+            const lines = [
+                cols.map(escapeCsv).join(';'),
+                ...lastResultRows.map(row => cols.map(c => escapeCsv(row[c])).join(';'))
+            ];
+            const csv = '\uFEFF' + lines.join('\r\n'); // BOM UTF-8 pour Excel
+
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `requete_sql_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function escapeHtml(s) {
+            const div = document.createElement('div');
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        checkAccess();
+    </script>
+</body>
+</html>
