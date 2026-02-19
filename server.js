@@ -6096,6 +6096,60 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Route pour la page de réconciliation Mata (alias /migrate-to-skills)
+app.get('/migrate-to-skills', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'reconciliation_mata.html'));
+});
+
+// Route pour la page SQL (requêtes SELECT uniquement)
+app.get('/sql-query', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'sql_query.html'));
+});
+
+// API : Exécuter une requête SQL SELECT uniquement (lecture seule)
+app.post('/api/sql/execute', requireAdminAuth, async (req, res) => {
+    try {
+        const { query } = req.body;
+        if (!query || typeof query !== 'string') {
+            return res.status(400).json({ error: 'Requête SQL manquante' });
+        }
+
+        // Validation : requêtes SELECT uniquement
+        const forbidden = ['INSERT', 'UPDATE', 'DELETE', 'DROP', 'CREATE', 'ALTER', 'TRUNCATE', 'GRANT', 'REVOKE', 'EXECUTE', 'EXEC'];
+        let normalized = query
+            .replace(/--[^\n]*/g, ' ')           // supprimer commentaires --
+            .replace(/\/\*[\s\S]*?\*\//g, ' ')    // supprimer commentaires /* */
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toUpperCase();
+
+        if (!normalized) {
+            return res.status(400).json({ error: 'Requête vide' });
+        }
+
+        const startsWithSelect = normalized.startsWith('SELECT ') || normalized.startsWith('WITH ');
+        if (!startsWithSelect) {
+            return res.status(400).json({ error: 'Seules les requêtes SELECT (ou WITH) sont autorisées' });
+        }
+
+        for (const kw of forbidden) {
+            const regex = new RegExp(`\\b${kw}\\b`, 'i');
+            if (regex.test(query)) {
+                return res.status(400).json({ error: `Mot-clé interdit: ${kw}` });
+            }
+        }
+
+        const result = await pool.query(query);
+        res.json({
+            rows: result.rows,
+            rowCount: result.rowCount
+        });
+    } catch (err) {
+        console.error('Erreur SQL:', err.message);
+        res.status(500).json({ error: err.message || 'Erreur lors de l\'exécution de la requête' });
+    }
+});
+
 // Route pour créer/assigner un compte à un directeur
 app.post('/api/accounts/create', requireAdminAuth, async (req, res) => {
     try {
