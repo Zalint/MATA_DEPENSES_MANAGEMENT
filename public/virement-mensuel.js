@@ -28,6 +28,7 @@ function initVirementMensuel() {
     document.getElementById('add-client-btn').addEventListener('click', addNewClient);
     document.getElementById('virement-apply-filters-btn').addEventListener('click', applyFilters);
     document.getElementById('virement-reset-filters-btn').addEventListener('click', resetFilters);
+    document.getElementById('virement-export-excel-btn').addEventListener('click', exportVirementsToExcel);
     document.getElementById('virement-exclude-zero').addEventListener('change', handleExcludeZeroChange);
     
     // Accordéon pour "Gérer les Clients"
@@ -369,6 +370,82 @@ function resetFilters() {
     initializeFilters();
     renderVirementTable();
     showNotification('Filtres réinitialisés', 'info');
+}
+
+// Exporter les virements en Excel (respecte date début, date fin et filtre client)
+function exportVirementsToExcel() {
+    if (!currentVirementMonth || Object.keys(virementData).length === 0) {
+        showNotification('Aucune donnée à exporter. Chargez d\'abord un mois.', 'warning');
+        return;
+    }
+
+    const dateStart = document.getElementById('virement-filter-date-start').value;
+    const dateEnd = document.getElementById('virement-filter-date-end').value;
+
+    if (!dateStart || !dateEnd) {
+        showNotification('Veuillez définir les dates de début et de fin avant l\'export', 'warning');
+        return;
+    }
+
+    if (dateStart > dateEnd) {
+        showNotification('La date de début doit être avant la date de fin', 'error');
+        return;
+    }
+
+    let clientsArray = Array.from(clientsList).sort();
+    const clientFilter = document.getElementById('virement-filter-client').value;
+    if (clientFilter) {
+        clientsArray = clientsArray.filter(c => c === clientFilter);
+    }
+
+    const excludeZero = document.getElementById('virement-exclude-zero').checked;
+
+    const dates = Object.keys(virementData).sort().filter(dateStr => {
+        if (dateStr < dateStart) return false;
+        if (dateStr > dateEnd) return false;
+        return true;
+    });
+
+    const exportRows = [['Date', 'Jour', 'Client', 'Valeur (FCFA)']];
+
+    dates.forEach(dateStr => {
+        const date = new Date(dateStr + 'T00:00:00');
+        const dayName = date.toLocaleDateString('fr-FR', { weekday: 'long' });
+
+        clientsArray.forEach(client => {
+            const valeur = virementData[dateStr][client] || 0;
+            if (excludeZero && valeur === 0) return;
+
+            exportRows.push([dateStr, dayName, client, valeur]);
+        });
+    });
+
+    if (exportRows.length <= 1) {
+        showNotification('Aucune donnée à exporter pour la période sélectionnée', 'warning');
+        return;
+    }
+
+    try {
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.aoa_to_sheet(exportRows);
+        ws['!cols'] = [
+            { wch: 12 },
+            { wch: 12 },
+            { wch: 20 },
+            { wch: 15 }
+        ];
+        XLSX.utils.book_append_sheet(wb, ws, 'Virements');
+
+        const dateStartFormatted = dateStart.replace(/-/g, '');
+        const dateEndFormatted = dateEnd.replace(/-/g, '');
+        const fileName = `Virements_${dateStartFormatted}_${dateEndFormatted}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+
+        showNotification(`Export Excel réussi (${exportRows.length - 1} lignes)`, 'success');
+    } catch (error) {
+        console.error('❌ Erreur export Excel:', error);
+        showNotification('Erreur lors de l\'export Excel', 'error');
+    }
 }
 
 // Mettre à jour le statut des filtres
