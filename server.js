@@ -3236,8 +3236,9 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
 
                 // 4. Appliquer l'abattement (configurable dans financial_settings.json)
                 const plFinancialConfig = getFinancialConfig();
-                const stockMataAbattement = typeof plFinancialConfig.stock_mata_abattement === 'number'
-                    ? plFinancialConfig.stock_mata_abattement
+                const _rawAbattement = plFinancialConfig.stock_mata_abattement;
+                const stockMataAbattement = (typeof _rawAbattement === 'number' && isFinite(_rawAbattement))
+                    ? Math.min(1, Math.max(0, _rawAbattement))
                     : 0.10;
                 const currentStockMata = Math.round(currentStockMataRaw * (1 - stockMataAbattement));
                 const previousStockMataAdjusted = Math.round(previousStockMata * (1 - stockMataAbattement));
@@ -3984,8 +3985,9 @@ app.get('/api/dashboard/stock-summary', requireAuth, async (req, res) => {
 
             // 4. Appliquer l'abattement (configurable dans financial_settings.json)
             const cardFinancialConfig = getFinancialConfig();
-            const cardStockMataAbattement = typeof cardFinancialConfig.stock_mata_abattement === 'number'
-                ? cardFinancialConfig.stock_mata_abattement
+            const _rawCardAbattement = cardFinancialConfig.stock_mata_abattement;
+            const cardStockMataAbattement = (typeof _rawCardAbattement === 'number' && isFinite(_rawCardAbattement))
+                ? Math.min(1, Math.max(0, _rawCardAbattement))
                 : 0.10;
             const currentStockMata = Math.round(currentStockMataRaw * (1 - cardStockMataAbattement));
             const previousStockMataAdjusted = Math.round(previousStockMata * (1 - cardStockMataAbattement));
@@ -10797,7 +10799,7 @@ app.post('/api/stock-mata/upload', requireAdminAuth, upload.single('reconciliati
         };
 
         const getProductsToSkip = (pointData, pointVenteName = '') => {
-            const toSkip = new Set(['Bovin', 'Non spécifié']);
+            const toSkip = new Set(['Bovin']);
             for (const [aggregate, subProducts] of Object.entries(AGGREGATE_PRODUCTS)) {
                 if (aggregate in pointData) {
                     const hasSubProducts = subProducts.some(sub =>
@@ -15315,7 +15317,7 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                     AVG(weekly_burn) as cash_burn_weekly,
                     AVG(monthly_burn) as cash_burn_monthly,
                     AVG(COALESCE(virements_mois, 0)) as virements_mois,
-                    0 as remboursements_mois
+                    AVG(COALESCE(remboursements_mois, 0)) as remboursements_mois
                 FROM dashboard_snapshots
                 WHERE snapshot_date >= $1 AND snapshot_date <= $2
                 GROUP BY DATE_TRUNC('week', snapshot_date)

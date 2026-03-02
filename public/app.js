@@ -10337,6 +10337,7 @@ async function resetAccountAdmin(accountId) {
 // =====================================================
 
 let currentStockData = [];
+let stockRequestId = 0;
 let stockFilters = {
     date: '',
     pointDeVente: ''
@@ -10484,6 +10485,8 @@ async function loadStockFilters() {
 }
 
 async function loadStockData() {
+    const thisRequestId = ++stockRequestId;
+
     const pointFilter = document.getElementById('stock-point-filter').value;
     const dateFilterEl = document.getElementById('stock-date-filter');
     const dateFilter = dateFilterEl ? dateFilterEl.value : '';
@@ -10518,6 +10521,11 @@ async function loadStockData() {
             throw new Error(`Erreur HTTP: ${response.status}`);
         }
         const data = await response.json();
+
+        if (thisRequestId !== stockRequestId) {
+            console.log('⏭️ Réponse obsolète ignorée (requestId', thisRequestId, '< actuel', stockRequestId, ')');
+            return;
+        }
         
         console.log('📊 Données reçues:', data.length, 'enregistrements');
         
@@ -10525,6 +10533,7 @@ async function loadStockData() {
         displayStockData(data); // displayStockData appellera applyStockFilters
         updateStockPointFilter(data);
     } catch (error) {
+        if (thisRequestId !== stockRequestId) return;
         console.error('❌ Erreur lors du chargement des données de stock:', error);
         showStockNotification(`Erreur chargement des données: ${error.message}`, 'error');
     }
@@ -10627,7 +10636,7 @@ function exportStockToExcel() {
 
     // Construire les lignes avec en-têtes lisibles
     const rows = data.map(item => ({
-        'Date': new Date(item.date).toLocaleDateString('fr-FR'),
+        'Date': formatDate(item.date),
         'Point de Vente': item.point_de_vente,
         'Produit': item.produit,
         'Stock Matin (FCFA)': parseFloat(item.stock_matin || 0),
@@ -10669,7 +10678,9 @@ function exportStockToExcel() {
     const fileParts = ['Stock_Soir'];
     if (dateFilter) fileParts.push(dateFilter);
     if (pointFilter) fileParts.push(pointFilter.replace(/\s+/g, '_'));
-    fileParts.push(new Date().toISOString().slice(0, 10));
+    const _today = new Date();
+    const _localDate = `${_today.getFullYear()}-${String(_today.getMonth() + 1).padStart(2, '0')}-${String(_today.getDate()).padStart(2, '0')}`;
+    fileParts.push(_localDate);
     const fileName = fileParts.join('_') + '.xlsx';
 
     XLSX.writeFile(wb, fileName);
