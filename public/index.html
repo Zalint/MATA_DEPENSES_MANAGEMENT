@@ -2818,6 +2818,9 @@
                             <button id="view-stats-btn" class="btn btn-info">
                                 <i class="fas fa-chart-bar"></i> Statistiques
                             </button>
+                            <button onclick="exportStockToExcel()" class="btn" style="background:#217346;color:#fff;">
+                                <i class="fas fa-file-excel"></i> Exporter Excel
+                            </button>
                             <button id="delete-by-date-btn" class="btn btn-danger" onclick="openDeleteByDateModal()">
                                 <i class="fas fa-trash-alt"></i> Supprimer par Date
                             </button>
@@ -3360,6 +3363,8 @@
                                                 <th>Livraisons Partenaires</th>
                                                 <th>Cash Burn</th>
                                                 <th>Charges Estimées</th>
+                                                <th>Virements du Mois</th>
+                                                <th>Remboursements du Mois</th>
                                                 <th>PL Final</th>
                                             </tr>
                                         </thead>
@@ -4574,12 +4579,18 @@
                                 <span class="value" id="pl-stock-mata">0 FCFA</span>
                             </div>
                             <div class="formula-details" id="pl-stock-mata-details" style="display: none;">
+                                <div class="detail-line" style="background:#fff8e1;border-radius:4px;padding:3px 6px;">
+                                    <span class="detail-label">✂️ Abattement appliqué:</span>
+                                    <span class="detail-value" id="pl-stock-mata-abattement" style="font-weight:600;color:#e65100;">10%</span>
+                                </div>
                                 <div class="detail-line">
                                     <span class="detail-label">📅 Stock actuel (<span id="pl-stock-mata-current-date">DATE</span>):</span>
+                                    <span class="detail-value" id="pl-stock-mata-current-raw" style="color:#888;text-decoration:line-through;font-size:0.9em;margin-right:4px;display:none;"></span>
                                     <span class="detail-value" id="pl-stock-mata-current">0 FCFA</span>
                                 </div>
                                 <div class="detail-line">
                                     <span class="detail-label">📅 Stock précédent (<span id="pl-stock-mata-previous-date">DATE</span>):</span>
+                                    <span class="detail-value" id="pl-stock-mata-previous-raw" style="color:#888;text-decoration:line-through;font-size:0.9em;margin-right:4px;display:none;"></span>
                                     <span class="detail-value" id="pl-stock-mata-previous">0 FCFA</span>
                                 </div>
                                 <div class="detail-line calculation">

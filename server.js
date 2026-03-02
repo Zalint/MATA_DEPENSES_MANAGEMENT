@@ -66,6 +66,7 @@ function getFinancialConfig() {
     return {
         charges_fixes_estimation: 5320000,
         validate_expense_balance: true,
+        stock_mata_abattement: 0.10,
         description: "Paramètres financiers et estimations pour les calculs du système"
     };
 }
@@ -2960,6 +2961,7 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         // Variables pour stocker les détails des calculs
         let stockMataCurrentValue = 0, stockMataCurrentDate = null;
         let stockMataPreviousValue = 0, stockMataPreviousDate = null;
+        let stockMataCurrentRawValue = 0, stockMataPreviousRawValue = 0, stockMataAbattementRate = 0.10;
         let stockVivantCurrentValue = 0, stockVivantCurrentDate = null;
         let stockVivantPreviousValue = 0, stockVivantPreviousDate = null;
         let livraisonsPeriodStart = null, livraisonsPeriodEnd = null;
@@ -3229,22 +3231,35 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 `;
                 const currentStockMataResult = await pool.query(currentStockMataQuery, [effectiveDate]);
                 
-                const currentStockMata = Math.round(currentStockMataResult.rows[0]?.total_stock || 0);
+                const currentStockMataRaw = Math.round(currentStockMataResult.rows[0]?.total_stock || 0);
                 const currentStockMataDate = currentStockMataResult.rows[0]?.latest_date;
-                
-                // Stocker les valeurs pour les détails
+
+                // 4. Appliquer l'abattement (configurable dans financial_settings.json)
+                const plFinancialConfig = getFinancialConfig();
+                const _rawAbattement = plFinancialConfig.stock_mata_abattement;
+                const stockMataAbattement = (typeof _rawAbattement === 'number' && isFinite(_rawAbattement))
+                    ? Math.min(1, Math.max(0, _rawAbattement))
+                    : 0.10;
+                const currentStockMata = Math.round(currentStockMataRaw * (1 - stockMataAbattement));
+                const previousStockMataAdjusted = Math.round(previousStockMata * (1 - stockMataAbattement));
+
+                // Stocker les valeurs pour les détails (brut + ajusté)
                 stockMataCurrentValue = currentStockMata;
                 stockMataCurrentDate = currentStockMataDate;
-                stockMataPreviousValue = previousStockMata;
+                stockMataPreviousValue = previousStockMataAdjusted;
                 stockMataPreviousDate = previousStockMataDate;
-                
-                // 4. Calculer l'écart : stock actuel - stock précédent
-                stockMataVariation = currentStockMata - previousStockMata;
-                
+                stockMataCurrentRawValue = currentStockMataRaw;
+                stockMataPreviousRawValue = previousStockMata;
+                stockMataAbattementRate = stockMataAbattement;
+
+                // 5. Calculer l'écart : stock actuel ajusté - stock précédent ajusté
+                stockMataVariation = currentStockMata - previousStockMataAdjusted;
+
+                console.log(`📦 Abattement stock Mata: ${(stockMataAbattement * 100).toFixed(0)}%`);
+                console.log(`   📅 Stock actuel brut (${currentStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStockMataRaw.toLocaleString()} FCFA → ajusté: ${currentStockMata.toLocaleString()} FCFA`);
+                console.log(`   📅 Stock précédent brut (${previousStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStockMata.toLocaleString()} FCFA → ajusté: ${previousStockMataAdjusted.toLocaleString()} FCFA`);
                 console.log(`📦 Écart Stock Mata Mensuel PL: ${stockMataVariation.toLocaleString()} FCFA`);
-                console.log(`   📅 Stock actuel (${currentStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStockMata.toLocaleString()} FCFA`);
-                console.log(`   📅 Stock précédent (${previousStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStockMata.toLocaleString()} FCFA`);
-                console.log(`   ➡️  Écart: ${currentStockMata.toLocaleString()} - ${previousStockMata.toLocaleString()} = ${stockMataVariation.toLocaleString()} FCFA`);
+                console.log(`   ➡️  Écart: ${currentStockMata.toLocaleString()} - ${previousStockMataAdjusted.toLocaleString()} = ${stockMataVariation.toLocaleString()} FCFA`);
                 
                 // Utiliser l'écart au lieu de la valeur brute
                 stockPointVenteValue = stockMataVariation;
@@ -3678,9 +3693,12 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 // Détails supplémentaires pour l'affichage enrichi
                 stockMataDetails: {
                     currentStock: stockMataCurrentValue,
+                    currentStockRaw: stockMataCurrentRawValue,
                     currentStockDate: stockMataCurrentDate ? stockMataCurrentDate.toISOString().split('T')[0] : null,
                     previousStock: stockMataPreviousValue,
-                    previousStockDate: stockMataPreviousDate ? stockMataPreviousDate.toISOString().split('T')[0] : null
+                    previousStockRaw: stockMataPreviousRawValue,
+                    previousStockDate: stockMataPreviousDate ? stockMataPreviousDate.toISOString().split('T')[0] : null,
+                    abattement: stockMataAbattementRate
                 },
                 stockVivantDetails: {
                     currentStock: stockVivantCurrentValue,
@@ -3732,9 +3750,12 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 // Détails supplémentaires même en cas d'erreur
                 stockMataDetails: {
                     currentStock: stockMataCurrentValue,
+                    currentStockRaw: stockMataCurrentRawValue,
                     currentStockDate: stockMataCurrentDate ? stockMataCurrentDate.toISOString().split('T')[0] : null,
                     previousStock: stockMataPreviousValue,
-                    previousStockDate: stockMataPreviousDate ? stockMataPreviousDate.toISOString().split('T')[0] : null
+                    previousStockRaw: stockMataPreviousRawValue,
+                    previousStockDate: stockMataPreviousDate ? stockMataPreviousDate.toISOString().split('T')[0] : null,
+                    abattement: stockMataAbattementRate
                 },
                 stockVivantDetails: {
                     currentStock: stockVivantCurrentValue,
@@ -3959,29 +3980,42 @@ app.get('/api/dashboard/stock-summary', requireAuth, async (req, res) => {
             `;
             const currentStockMataResult = await pool.query(currentStockMataQuery, [effectiveDate]);
             
-            const currentStockMata = Math.round(currentStockMataResult.rows[0]?.total_stock || 0);
+            const currentStockMataRaw = Math.round(currentStockMataResult.rows[0]?.total_stock || 0);
             const currentStockMataDate = currentStockMataResult.rows[0]?.latest_date;
-            
-            // 4. Calculer l'écart : stock actuel - stock précédent
-            const stockMataVariation = currentStockMata - previousStockMata;
-            
+
+            // 4. Appliquer l'abattement (configurable dans financial_settings.json)
+            const cardFinancialConfig = getFinancialConfig();
+            const _rawCardAbattement = cardFinancialConfig.stock_mata_abattement;
+            const cardStockMataAbattement = (typeof _rawCardAbattement === 'number' && isFinite(_rawCardAbattement))
+                ? Math.min(1, Math.max(0, _rawCardAbattement))
+                : 0.10;
+            const currentStockMata = Math.round(currentStockMataRaw * (1 - cardStockMataAbattement));
+            const previousStockMataAdjusted = Math.round(previousStockMata * (1 - cardStockMataAbattement));
+
+            // 5. Calculer l'écart : stock actuel ajusté - stock précédent ajusté
+            const stockMataVariation = currentStockMata - previousStockMataAdjusted;
+
+            console.log(`📦 CARD Abattement stock Mata: ${(cardStockMataAbattement * 100).toFixed(0)}%`);
+            console.log(`   📅 Stock actuel brut (${currentStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStockMataRaw.toLocaleString()} FCFA → ajusté: ${currentStockMata.toLocaleString()} FCFA`);
+            console.log(`   📅 Stock précédent brut (${previousStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStockMata.toLocaleString()} FCFA → ajusté: ${previousStockMataAdjusted.toLocaleString()} FCFA`);
             console.log(`📦 CARD Écart Stock Mata Mensuel: ${stockMataVariation.toLocaleString()} FCFA`);
-            console.log(`   📅 Stock actuel (${currentStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStockMata.toLocaleString()} FCFA`);
-            console.log(`   📅 Stock précédent (${previousStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStockMata.toLocaleString()} FCFA`);
-            console.log(`   ➡️  Écart: ${currentStockMata.toLocaleString()} - ${previousStockMata.toLocaleString()} = ${stockMataVariation.toLocaleString()} FCFA`);
-            
+            console.log(`   ➡️  Écart: ${currentStockMata.toLocaleString()} - ${previousStockMataAdjusted.toLocaleString()} = ${stockMataVariation.toLocaleString()} FCFA`);
+
             // Retourner l'écart au lieu de la valeur brute
             return res.json({
                 totalStock: stockMataVariation,
                 latestDate: currentStockMataDate,
                 formattedDate: currentStockMataDate ? currentStockMataDate.toISOString().split('T')[0] : null,
                 cutoff_date: effectiveDate,
-                isVariation: true, // Indicateur pour le frontend
+                isVariation: true,
                 currentStock: currentStockMata,
-                previousStock: previousStockMata,
+                currentStockRaw: currentStockMataRaw,
+                previousStock: previousStockMataAdjusted,
+                previousStockRaw: previousStockMata,
+                abattement: cardStockMataAbattement,
                 currentStockDate: currentStockMataDate ? currentStockMataDate.toISOString().split('T')[0] : null,
                 previousStockDate: previousStockMataDate ? previousStockMataDate.toISOString().split('T')[0] : null,
-                details: `Stock actuel (${currentStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStockMata.toLocaleString()} FCFA | Stock précédent (${previousStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStockMata.toLocaleString()} FCFA`,
+                details: `Stock actuel (${currentStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${currentStockMataRaw.toLocaleString()} FCFA × ${(1 - cardStockMataAbattement) * 100}% = ${currentStockMata.toLocaleString()} FCFA | Stock précédent (${previousStockMataDate?.toISOString().split('T')[0] || 'N/A'}): ${previousStockMata.toLocaleString()} FCFA × ${(1 - cardStockMataAbattement) * 100}% = ${previousStockMataAdjusted.toLocaleString()} FCFA`,
                 message: 'Écart Stock Mata mensuel calculé avec succès'
             });
         } else {
@@ -10758,12 +10792,39 @@ app.post('/api/stock-mata/upload', requireAdminAuth, upload.single('reconciliati
 
         const existingRecords = existingDataQuery.rows;
         
+        // Produits agrégés dont les sous-produits doivent être comptés à la place
+        // Si un point de vente a à la fois l'agrégat ET ses sous-produits, on ignore l'agrégat
+        const AGGREGATE_PRODUCTS = {
+            'Poisson': ['Dorade', 'Beurre', 'Sompote', 'Seud (barracuda)', 'Crevettes', 'Tilapia']
+        };
+
+        const getProductsToSkip = (pointData, pointVenteName = '') => {
+            const toSkip = new Set(['Bovin']);
+            for (const [aggregate, subProducts] of Object.entries(AGGREGATE_PRODUCTS)) {
+                if (aggregate in pointData) {
+                    const hasSubProducts = subProducts.some(sub =>
+                        sub in pointData && (
+                            (pointData[sub].stockMatin || 0) > 0 ||
+                            (pointData[sub].stockSoir || 0) > 0 ||
+                            (pointData[sub].transferts || 0) > 0
+                        )
+                    );
+                    if (hasSubProducts) {
+                        console.log(`⚠️ SKIP agrégat doublon: "${aggregate}" ignoré pour ${pointVenteName} (sous-produits détaillés présents)`);
+                        toSkip.add(aggregate);
+                    }
+                }
+            }
+            return toSkip;
+        };
+
         // Préparer la liste des nouveaux enregistrements
         const newRecords = [];
         for (const pointVente in details) {
             const pointData = details[pointVente];
+            const productsToSkip = getProductsToSkip(pointData, pointVente);
             for (const produit in pointData) {
-                if (produit === 'Bovin' || produit === 'Non spécifié') {
+                if (productsToSkip.has(produit)) {
                     continue;
                 }
                 const productData = pointData[produit];
@@ -10798,11 +10859,11 @@ app.post('/api/stock-mata/upload', requireAdminAuth, upload.single('reconciliati
         // Parcourir chaque point de vente
         for (const pointVente in details) {
             const pointData = details[pointVente];
+            const productsToSkip = getProductsToSkip(pointData);
 
             // Parcourir chaque produit du point de vente
             for (const produit in pointData) {
-                // Exclure "Bovin" et "Non spécifié"
-                if (produit === 'Bovin' || produit === 'Non spécifié') {
+                if (productsToSkip.has(produit)) {
                     continue;
                 }
 
@@ -10905,14 +10966,40 @@ app.post('/api/stock-mata/force-upload', requireAdminAuth, upload.single('reconc
         const deleteResult = await pool.query('DELETE FROM stock_mata WHERE date = $1', [formattedDate]);
         console.log(`🗑️ ${deleteResult.rowCount} enregistrements supprimés`);
 
+        // Produits agrégés dont les sous-produits doivent être comptés à la place
+        const AGGREGATE_PRODUCTS_FORCE = {
+            'Poisson': ['Dorade', 'Beurre', 'Sompote', 'Seud (barracuda)', 'Crevettes', 'Tilapia']
+        };
+
+        const getProductsToSkipForce = (pointData, pointVenteName = '') => {
+            const toSkip = new Set(['Bovin', 'Non spécifié']);
+            for (const [aggregate, subProducts] of Object.entries(AGGREGATE_PRODUCTS_FORCE)) {
+                if (aggregate in pointData) {
+                    const hasSubProducts = subProducts.some(sub =>
+                        sub in pointData && (
+                            (pointData[sub].stockMatin || 0) > 0 ||
+                            (pointData[sub].stockSoir || 0) > 0 ||
+                            (pointData[sub].transferts || 0) > 0
+                        )
+                    );
+                    if (hasSubProducts) {
+                        console.log(`⚠️ FORCE-SKIP agrégat doublon: "${aggregate}" ignoré pour ${pointVenteName} (sous-produits détaillés présents)`);
+                        toSkip.add(aggregate);
+                    }
+                }
+            }
+            return toSkip;
+        };
+
         let insertedRecords = 0;
 
         // Parcourir chaque point de vente et insérer les nouvelles données
         for (const pointVente in details) {
             const pointData = details[pointVente];
+            const productsToSkip = getProductsToSkipForce(pointData, pointVente);
 
             for (const produit in pointData) {
-                if (produit === 'Bovin' || produit === 'Non spécifié') {
+                if (productsToSkip.has(produit)) {
                     continue;
                 }
 
@@ -10959,14 +11046,22 @@ app.post('/api/stock-mata/force-upload', requireAdminAuth, upload.single('reconc
 // Route pour récupérer les données de stock par date
 app.get('/api/stock-mata', requireAdminAuth, async (req, res) => {
     try {
-        const { date } = req.query;
+        const { date, point_de_vente } = req.query;
         
         let query = 'SELECT * FROM stock_mata';
         let params = [];
-        
+        const conditions = [];
+
         if (date) {
-            query += ' WHERE date = $1';
+            conditions.push(`date = $${params.length + 1}`);
             params.push(date);
+        }
+        if (point_de_vente) {
+            conditions.push(`point_de_vente = $${params.length + 1}`);
+            params.push(point_de_vente);
+        }
+        if (conditions.length > 0) {
+            query += ' WHERE ' + conditions.join(' AND ');
         }
         
         query += ' ORDER BY point_de_vente, produit';
@@ -15220,7 +15315,9 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                     AVG(stock_point_vente) as stock_pv,
                     AVG(stock_vivant_variation) as ecart_stock_vivant,
                     AVG(weekly_burn) as cash_burn_weekly,
-                    AVG(monthly_burn) as cash_burn_monthly
+                    AVG(monthly_burn) as cash_burn_monthly,
+                    AVG(COALESCE(virements_mois, 0)) as virements_mois,
+                    AVG(COALESCE(remboursements_mois, 0)) as remboursements_mois
                 FROM dashboard_snapshots
                 WHERE snapshot_date >= $1 AND snapshot_date <= $2
                 GROUP BY DATE_TRUNC('week', snapshot_date)
@@ -15230,19 +15327,32 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
             // Données journalières avec calcul du prorata correct
             query = `
                 SELECT 
-                    snapshot_date as period,
-                    cash_bictorys_amount as cash_bictorys,
-                    creances_mois as creances,
-                    stock_point_vente as stock_pv,
-                    stock_vivant_variation as ecart_stock_vivant,
-                    COALESCE(livraisons_partenaires, 0) as livraisons_partenaires,
-                    monthly_burn as cash_burn,
-                    monthly_burn as cash_burn_monthly,
-                    weekly_burn as cash_burn_weekly,
-                    COALESCE(pl_final, 0) as pl_final
-                FROM dashboard_snapshots
-                WHERE snapshot_date::date >= $1::date AND snapshot_date::date <= $2::date
-                ORDER BY snapshot_date
+                    ds.snapshot_date as period,
+                    ds.cash_bictorys_amount as cash_bictorys,
+                    ds.creances_mois as creances,
+                    ds.stock_point_vente as stock_pv,
+                    ds.stock_vivant_variation as ecart_stock_vivant,
+                    COALESCE(ds.livraisons_partenaires, 0) as livraisons_partenaires,
+                    ds.monthly_burn as cash_burn,
+                    ds.monthly_burn as cash_burn_monthly,
+                    ds.weekly_burn as cash_burn_weekly,
+                    COALESCE(ds.pl_final, 0) as pl_final,
+                    COALESCE(ds.virements_mois, 0) as virements_mois,
+                    (
+                        SELECT COALESCE(SUM(co.amount), 0)
+                        FROM creance_operations co
+                        JOIN creance_clients cc ON co.client_id = cc.id
+                        JOIN accounts a ON cc.account_id = a.id
+                        WHERE co.operation_type = 'debit'
+                        AND co.operation_date >= DATE_TRUNC('month', ds.snapshot_date)
+                        AND co.operation_date <= ds.snapshot_date::date + INTERVAL '1 day' - INTERVAL '1 second'
+                        AND a.account_type = 'creance'
+                        AND a.is_active = true
+                        AND cc.is_active = true
+                    ) as remboursements_mois
+                FROM dashboard_snapshots ds
+                WHERE ds.snapshot_date::date >= $1::date AND ds.snapshot_date::date <= $2::date
+                ORDER BY ds.snapshot_date
             `;
         }
 
@@ -15352,6 +15462,8 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
                 livraisons_partenaires: livraisonsPartenaires,
                 cash_burn: cashBurn,
                 charges_estimees: Math.round(chargesProrata),
+                virements_mois: Math.round(parseFloat(row.virements_mois) || 0),
+                remboursements_mois: Math.round(parseFloat(row.remboursements_mois) || 0),
                 pl_final: Math.round(plFinal)
             };
             
