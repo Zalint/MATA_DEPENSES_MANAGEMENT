@@ -10383,6 +10383,13 @@ async function initStockModule() {
     }
     
     try {
+        // Default to today's date to avoid loading the entire table
+        const dateFilter = document.getElementById('stock-date-filter');
+        if (dateFilter && !dateFilter.value) {
+            const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
+            dateFilter.value = today;
+        }
+
         console.log('🏭 CLIENT: Chargement des données...');
         await loadStockData();
         
@@ -10417,24 +10424,24 @@ function setupStockEventListeners() {
     // Boutons de contrôle
     const filterBtn = document.getElementById('filter-stock');
     if (filterBtn && !filterBtn.dataset.listenerAttached) {
-        filterBtn.addEventListener('click', applyStockFilters);
+        filterBtn.addEventListener('click', () => loadStockData());
         filterBtn.dataset.listenerAttached = 'true';
     }
 
-    // Filtrage automatique lors du changement de date
+    // Re-fetch from server when date changes (date filtering is server-side)
     const dateFilter = document.getElementById('stock-date-filter');
     if (dateFilter && !dateFilter.dataset.listenerAttached) {
         dateFilter.addEventListener('change', () => {
-            applyStockFilters();
+            loadStockData();
         });
         dateFilter.dataset.listenerAttached = 'true';
     }
 
-    // Filtrage automatique lors du changement de point de vente
+    // Re-fetch from server when point de vente changes (filtering is server-side)
     const pointFilter = document.getElementById('stock-point-filter');
     if (pointFilter && !pointFilter.dataset.listenerAttached) {
         pointFilter.addEventListener('change', () => {
-            applyStockFilters();
+            loadStockData();
         });
         pointFilter.dataset.listenerAttached = 'true';
     }
@@ -10478,14 +10485,20 @@ async function loadStockFilters() {
 
 async function loadStockData() {
     const pointFilter = document.getElementById('stock-point-filter').value;
+    const dateFilterEl = document.getElementById('stock-date-filter');
+    const dateFilter = dateFilterEl ? dateFilterEl.value : '';
 
     console.log('📅 Chargement des données stock...');
+    console.log('📅 Date sélectionnée:', dateFilter || 'Toutes');
     console.log('📍 Point sélectionné:', pointFilter || 'Tous');
 
     let url = apiUrl('/api/stock-mata');
     const params = new URLSearchParams();
 
-    // On ne filtre plus par date côté serveur, on le fait côté client
+    // Filter by date on the server to avoid loading the entire table
+    if (dateFilter) {
+        params.append('date', dateFilter);
+    }
     if (pointFilter) {
         console.log('📍 Filtrage par point:', pointFilter);
         params.append('point_de_vente', pointFilter);
@@ -10605,6 +10618,64 @@ function sortStockData(data) {
     return data;
 }
 
+function exportStockToExcel() {
+    const data = applyStockFilters(true);
+    if (!data || data.length === 0) {
+        showStockNotification('Aucune donnée à exporter.', 'warning');
+        return;
+    }
+
+    // Construire les lignes avec en-têtes lisibles
+    const rows = data.map(item => ({
+        'Date': new Date(item.date).toLocaleDateString('fr-FR'),
+        'Point de Vente': item.point_de_vente,
+        'Produit': item.produit,
+        'Stock Matin (FCFA)': parseFloat(item.stock_matin || 0),
+        'Stock Soir (FCFA)': parseFloat(item.stock_soir || 0),
+        'Transfert (FCFA)': parseFloat(item.transfert || 0)
+    }));
+
+    // Ajouter une ligne de total en bas
+    const totalSoir = data.reduce((s, i) => s + parseFloat(i.stock_soir || 0), 0);
+    const totalMatin = data.reduce((s, i) => s + parseFloat(i.stock_matin || 0), 0);
+    const totalTransfert = data.reduce((s, i) => s + parseFloat(i.transfert || 0), 0);
+    rows.push({
+        'Date': '',
+        'Point de Vente': '',
+        'Produit': 'TOTAL',
+        'Stock Matin (FCFA)': totalMatin,
+        'Stock Soir (FCFA)': totalSoir,
+        'Transfert (FCFA)': totalTransfert
+    });
+
+    const ws = XLSX.utils.json_to_sheet(rows);
+
+    // Largeurs de colonnes
+    ws['!cols'] = [
+        { wch: 12 }, // Date
+        { wch: 18 }, // Point de vente
+        { wch: 22 }, // Produit
+        { wch: 20 }, // Stock Matin
+        { wch: 20 }, // Stock Soir
+        { wch: 20 }  // Transfert
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Stock Soir');
+
+    // Nom du fichier avec la date filtrée si disponible
+    const dateFilter = document.getElementById('stock-date-filter')?.value;
+    const pointFilter = document.getElementById('stock-point-filter')?.value;
+    const fileParts = ['Stock_Soir'];
+    if (dateFilter) fileParts.push(dateFilter);
+    if (pointFilter) fileParts.push(pointFilter.replace(/\s+/g, '_'));
+    fileParts.push(new Date().toISOString().slice(0, 10));
+    const fileName = fileParts.join('_') + '.xlsx';
+
+    XLSX.writeFile(wb, fileName);
+    showStockNotification(`Export Excel téléchargé : ${fileName}`, 'success');
+}
+
 // Fonction pour mettre à jour l'affichage du total des stocks soir
 function updateStockTotal(total, isLatestValue = false) {
     const totalDisplay = document.getElementById('stock-total-display');
@@ -10637,19 +10708,9 @@ function updateStockTotal(total, isLatestValue = false) {
 }
 
 function applyStockFilters(calledFromDisplay = false) {
-    const dateFilter = document.getElementById('stock-date-filter').value;
-    const pointFilter = document.getElementById('stock-point-filter').value;
-    
-    const filteredData = window.currentStockData.filter(item => {
-        // Convertir la date de l'item en date locale pour comparaison
-        const itemDate = new Date(item.date);
-        const localDateStr = itemDate.toLocaleDateString('en-CA'); // Format YYYY-MM-DD en local
-        
-        const dateMatch = !dateFilter || localDateStr === dateFilter;
-        const pointMatch = !pointFilter || item.point_de_vente === pointFilter;
-        
-        return dateMatch && pointMatch;
-    });
+    // Filtering is now done server-side in loadStockData().
+    // This function just returns the already-fetched data.
+    const filteredData = window.currentStockData || [];
 
     if (!calledFromDisplay) {
         displayStockData(filteredData);
@@ -10659,9 +10720,10 @@ function applyStockFilters(calledFromDisplay = false) {
 }
 
 function resetStockFilters() {
-    document.getElementById('stock-date-filter').value = '';
+    const today = new Date().toLocaleDateString('en-CA');
+    document.getElementById('stock-date-filter').value = today;
     document.getElementById('stock-point-filter').value = '';
-    displayStockData(window.currentStockData);
+    loadStockData();
 }
 
 async function handleStockUpload(e) {
@@ -16689,6 +16751,8 @@ function updateVisualisationTable(tab, data) {
                     <td>${formatCurrency(row.livraisons_partenaires || 0)}</td>
                     <td>${formatCurrency(row.cash_burn)}</td>
                     <td>${formatCurrency(row.charges_estimees)}</td>
+                    <td>${formatCurrency(row.virements_mois || 0)}</td>
+                    <td>${formatCurrency(row.remboursements_mois || 0)}</td>
                     <td><strong>${formatCurrency(row.pl_final)}</strong></td>
                 `;
                 break;
@@ -18817,15 +18881,46 @@ function fillPLDetailsModal(details) {
         if (stockMataDetails) {
             // Vérifier si on a des données valides
             if (details.stockMataDetails.currentStock !== undefined && details.stockMataDetails.previousStock !== undefined) {
-                // Remplir les données
+                // Abattement
+                const abattement = details.stockMataDetails.abattement ?? 0.10;
+                const abattementPct = `${Math.round(abattement * 100)}%`;
+                document.getElementById('pl-stock-mata-abattement').textContent = abattementPct;
+
+                // Stock actuel
                 document.getElementById('pl-stock-mata-current-date').textContent = 
                     details.stockMataDetails.currentStockDate ? formatDate(details.stockMataDetails.currentStockDate) : 'N/A';
+                const rawCurrentEl = document.getElementById('pl-stock-mata-current-raw');
+                if (rawCurrentEl) {
+                    const rawCurrent = details.stockMataDetails.currentStockRaw;
+                    const adjCurrent = details.stockMataDetails.currentStock;
+                    if (rawCurrent && rawCurrent !== adjCurrent) {
+                        rawCurrentEl.textContent = formatCurrency(rawCurrent);
+                        rawCurrentEl.style.display = '';
+                    } else {
+                        rawCurrentEl.style.display = 'none';
+                    }
+                }
                 document.getElementById('pl-stock-mata-current').textContent = 
                     formatCurrency(details.stockMataDetails.currentStock);
+
+                // Stock précédent
                 document.getElementById('pl-stock-mata-previous-date').textContent = 
                     details.stockMataDetails.previousStockDate ? formatDate(details.stockMataDetails.previousStockDate) : 'N/A';
+                const rawPreviousEl = document.getElementById('pl-stock-mata-previous-raw');
+                if (rawPreviousEl) {
+                    const rawPrevious = details.stockMataDetails.previousStockRaw;
+                    const adjPrevious = details.stockMataDetails.previousStock;
+                    if (rawPrevious && rawPrevious !== adjPrevious) {
+                        rawPreviousEl.textContent = formatCurrency(rawPrevious);
+                        rawPreviousEl.style.display = '';
+                    } else {
+                        rawPreviousEl.style.display = 'none';
+                    }
+                }
                 document.getElementById('pl-stock-mata-previous').textContent = 
                     formatCurrency(details.stockMataDetails.previousStock);
+
+                // Calcul final
                 document.getElementById('pl-stock-mata-calculation').textContent = 
                     `${formatCurrency(details.stockMataDetails.currentStock)} - ${formatCurrency(details.stockMataDetails.previousStock)} = ${formatCurrency(details.stockPointVente)}`;
                 

@@ -242,15 +242,46 @@
             }
         }
 
+        function getDefaultQuery() {
+            const now = new Date();
+            const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            const pad = (n) => String(n).padStart(2, '0');
+            const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            const startDate = fmt(firstOfMonth);
+            const endDate = fmt(now);
+
+            return `SELECT
+    co.id,
+    co.operation_date AS date_operation,
+    co.operation_type AS type_operation,
+    co.amount AS montant,
+    co.description,
+    cc.client_name AS client,
+    a.account_name AS portfolio,
+    u.full_name AS cree_par,
+    co.created_at
+FROM creance_operations co
+JOIN creance_clients cc ON co.client_id = cc.id
+LEFT JOIN accounts a ON co.account_id = a.id
+LEFT JOIN users u ON co.created_by = u.id
+WHERE co.operation_date >= '${startDate}'
+  AND co.operation_date <= '${endDate}'
+  AND co.operation_type IN ('credit', 'debit')
+ORDER BY co.operation_date, co.created_at;`;
+        }
+
         function initSqlEditor() {
             const btnExecute = document.getElementById('btn-execute');
             const btnClear = document.getElementById('btn-clear');
             const sqlInput = document.getElementById('sql-input');
 
+            // Pre-fill with the default query and auto-execute
+            sqlInput.value = getDefaultQuery();
+
             btnExecute.addEventListener('click', executeQuery);
             document.getElementById('btn-export-csv').addEventListener('click', exportToCsv);
             btnClear.addEventListener('click', () => {
-                sqlInput.value = '';
+                sqlInput.value = getDefaultQuery();
                 document.getElementById('sql-results-area').style.display = 'none';
                 document.getElementById('sql-error-area').style.display = 'none';
             });
@@ -261,6 +292,9 @@
                     executeQuery();
                 }
             });
+
+            // Auto-execute on load
+            executeQuery();
         }
 
         async function executeQuery() {

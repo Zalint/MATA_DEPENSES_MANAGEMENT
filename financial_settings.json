@@ -1,6 +1,7 @@
 {
   "charges_fixes_estimation": 5900000,
   "validate_expense_balance": false,
+  "stock_mata_abattement": 0.10,
   "comptes_amortissement_investissement": [
     "EXCEPTIONNEL",
     "EQUIPEMENT"
@@ -8,5 +9,5 @@
   "comptes_investissement": [
     "EXCEPTIONNEL"
   ],
-  "description": "Paramètres financiers et estimations pour les calculs du système. comptes_amortissement_investissement et comptes_investissement définissent les comptes à exclure pour les calculs PL alternatifs"
+  "description": "Paramètres financiers et estimations pour les calculs du système. comptes_amortissement_investissement et comptes_investissement définissent les comptes à exclure pour les calculs PL alternatifs. stock_mata_abattement : taux d'abattement appliqué au stock actuel et précédent pour le calcul de l'écart stock Mata Mensuel (défaut : 0.10 = 10%)"
 }
