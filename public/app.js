@@ -769,21 +769,35 @@ function handleSubcategoryChange(subcategoryId) {
 
 // Charger les points de vente depuis l'API
 async function loadPointsVente() {
+    const selects = [
+        document.getElementById('expense-point-vente'),
+        document.getElementById('edit-expense-point-vente')
+    ].filter(Boolean);
+
     try {
         const response = await fetch('/api/points-vente');
-        if (!response.ok) return;
+        if (!response.ok) {
+            console.error('Erreur chargement points de vente: réponse non-OK', response.status);
+            selects.forEach(s => {
+                s.innerHTML = '<option value="" disabled>— Erreur de chargement —</option>';
+            });
+            return;
+        }
         const pointsVente = await response.json();
-        const select = document.getElementById('expense-point-vente');
-        if (!select) return;
-        select.innerHTML = '<option value="">— Aucun —</option>';
-        pointsVente.forEach(pv => {
-            const option = document.createElement('option');
-            option.value = pv;
-            option.textContent = pv;
-            select.appendChild(option);
+        selects.forEach(s => {
+            s.innerHTML = '<option value="">— Aucun —</option>';
+            pointsVente.forEach(pv => {
+                const option = document.createElement('option');
+                option.value = pv;
+                option.textContent = pv;
+                s.appendChild(option);
+            });
         });
     } catch (error) {
         console.error('Erreur chargement points de vente:', error);
+        selects.forEach(s => {
+            s.innerHTML = '<option value="" disabled>— Erreur de chargement —</option>';
+        });
     }
 }
 
@@ -5115,6 +5129,8 @@ async function openEditModal(expenseId) {
         }
         document.getElementById('edit-expense-designation').value = expense.designation || '';
         document.getElementById('edit-expense-supplier').value = expense.supplier || '';
+        const editPointVente = document.getElementById('edit-expense-point-vente');
+        if (editPointVente) editPointVente.value = expense.point_de_vente || '';
         document.getElementById('edit-expense-quantity').value = expense.quantity || '';
         document.getElementById('edit-expense-unit-price').value = expense.unit_price || '';
         document.getElementById('edit-expense-total').value = expense.total || expense.amount || '';
@@ -5649,6 +5665,7 @@ function setupEditModalEventListeners() {
             expenseData.append('expense_date', document.getElementById('edit-expense-date').value);
             expenseData.append('supplier', document.getElementById('edit-expense-supplier').value || '');
             expenseData.append('designation', document.getElementById('edit-expense-designation').value || '');
+            expenseData.append('point_de_vente', document.getElementById('edit-expense-point-vente')?.value || '');
           
             // Lit la valeur du champ texte pour "Prévisible"
             const predictableField = document.getElementById('edit-expense-predictable');

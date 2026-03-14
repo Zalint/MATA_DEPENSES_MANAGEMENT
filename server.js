@@ -6024,10 +6024,10 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
 });
 
 // Route pour les points de vente
-app.get('/api/points-vente', requireAuth, (req, res) => {
+app.get('/api/points-vente', requireAuth, async (req, res) => {
     try {
-        const pointsVente = JSON.parse(fs.readFileSync(path.join(__dirname, 'points_vente.json'), 'utf8'));
-        res.json(pointsVente);
+        const data = await fs.promises.readFile(path.join(__dirname, 'points_vente.json'), 'utf8');
+        res.json(JSON.parse(data));
     } catch (error) {
         console.error('Erreur lecture points_vente.json:', error);
         res.status(500).json({ error: 'Erreur serveur' });
@@ -16351,9 +16351,9 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
             });
         }
 
-        // Convertir en objets Date pour validation
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        // Convertir en objets Date pour validation (forcer minuit local, éviter les décalages TZ)
+        const start = new Date(`${startDate}T00:00:00`);
+        const end = new Date(`${endDate}T00:00:00`);
         
         // Vérifier que les dates sont valides
         if (isNaN(start.getTime()) || isNaN(end.getTime())) {
