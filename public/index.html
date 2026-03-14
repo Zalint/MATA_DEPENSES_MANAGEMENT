@@ -751,9 +751,7 @@
                                     <th class="sortable" data-sort="username">
                                         Username <i class="fas fa-sort"></i>
                                     </th>
-                                    <th id="user-column" style="display: none;" class="sortable" data-sort="user_name">
-                                        Directeur <i class="fas fa-sort"></i>
-                                    </th>
+                                    <th>Point de Vente</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -868,6 +866,15 @@
                             </div>
                         </div>
                         
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expense-point-vente">Point de Vente <span style="font-weight:normal;color:#888;">(Optionnel)</span></label>
+                                <select id="expense-point-vente" name="point_de_vente">
+                                    <option value="">— Aucun —</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="expense-quantity">Quantité</label>
@@ -4108,6 +4115,10 @@
                         <div class="summary-row">
                             <span class="summary-label">Fournisseur :</span>
                             <span class="summary-value" id="confirm-supplier"></span>
+                        </div>
+                        <div class="summary-row" id="confirm-point-vente-row" style="display: none;">
+                            <span class="summary-label">Point de Vente :</span>
+                            <span class="summary-value" id="confirm-point-vente"></span>
                         </div>
                         <div class="summary-row">
                             <span class="summary-label">Quantité :</span>
