@@ -751,9 +751,7 @@
                                     <th class="sortable" data-sort="username">
                                         Username <i class="fas fa-sort"></i>
                                     </th>
-                                    <th id="user-column" style="display: none;" class="sortable" data-sort="user_name">
-                                        Directeur <i class="fas fa-sort"></i>
-                                    </th>
+                                    <th>Point de Vente</th>
                                     <th>Actions</th>
                                 </tr>
                             </thead>
@@ -868,6 +866,15 @@
                             </div>
                         </div>
                         
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="expense-point-vente">Point de Vente <span style="font-weight:normal;color:#888;">(Optionnel)</span></label>
+                                <select id="expense-point-vente" name="point_de_vente">
+                                    <option value="">— Aucun —</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <div class="form-row">
                             <div class="form-group">
                                 <label for="expense-quantity">Quantité</label>
@@ -1591,23 +1598,23 @@
                                 <!-- Filtres pour l'historique -->
                                 <div class="filters-container" style="margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap;">
                                     <div class="filter-group" style="flex: 1; min-width: 150px;">
-                                        <input type="date" id="history-filter-date" class="form-control" placeholder="Filtrer par date">
+                                        <input type="date" id="history-filter-date" class="form-control" aria-label="Filtrer par date" placeholder="Filtrer par date">
                                     </div>
                                     <div class="filter-group" style="flex: 1; min-width: 150px;">
-                                        <input type="text" id="history-filter-client" class="form-control" placeholder="Filtrer par client">
+                                        <input type="text" id="history-filter-client" class="form-control" aria-label="Filtrer par client" placeholder="Filtrer par client">
                                     </div>
                                     <div class="filter-group" style="flex: 1; min-width: 120px;">
-                                        <select id="history-filter-type" class="form-control">
+                                        <select id="history-filter-type" class="form-control" aria-label="Filtrer par type">
                                             <option value="">Tous</option>
                                             <option value="credit">Avance (+)</option>
                                             <option value="debit">Remboursement (-)</option>
                                         </select>
                                     </div>
                                     <div class="filter-group" style="flex: 1; min-width: 150px;">
-                                        <input type="number" id="history-filter-amount" class="form-control" placeholder="Montant exact">
+                                        <input type="number" id="history-filter-amount" class="form-control" aria-label="Filtrer par montant" placeholder="Montant exact">
                                     </div>
                                     <div class="filter-group" style="flex: 1; min-width: 150px;">
-                                        <input type="text" id="history-filter-description" class="form-control" placeholder="Filtrer par description">
+                                        <input type="text" id="history-filter-description" class="form-control" aria-label="Filtrer par description" placeholder="Filtrer par description">
                                     </div>
                                     <div class="filter-group" style="display: flex; align-items: center;">
                                         <button id="history-reset-filters" class="btn btn-secondary" style="white-space: nowrap;">
@@ -2151,31 +2158,31 @@
                     margin-bottom: 20px;
                 }
                 
-                .filters-row {
+                .virement-filters .filters-row {
                     display: flex;
                     gap: 15px;
                     align-items: end;
                     flex-wrap: wrap;
                 }
-                
-                .filter-group {
+
+                .virement-filters .filter-group {
                     display: flex;
                     flex-direction: column;
                     gap: 5px;
                 }
-                
-                .filter-group label {
+
+                .virement-filters .filter-group label {
                     font-size: 0.875rem;
                     font-weight: 600;
                     color: #495057;
                 }
-                
-                .filter-group input[type="date"],
-                .filter-group select {
+
+                .virement-filters .filter-group input[type="date"],
+                .virement-filters .filter-group select {
                     min-width: 150px;
                 }
                 
-                .filter-group button {
+                .virement-filters .filter-group button {
                     margin-top: 0;
                 }
                 
@@ -4109,6 +4116,10 @@
                             <span class="summary-label">Fournisseur :</span>
                             <span class="summary-value" id="confirm-supplier"></span>
                         </div>
+                        <div class="summary-row" id="confirm-point-vente-row" style="display: none;">
+                            <span class="summary-label">Point de Vente :</span>
+                            <span class="summary-value" id="confirm-point-vente"></span>
+                        </div>
                         <div class="summary-row">
                             <span class="summary-label">Quantité :</span>
                             <span class="summary-value" id="confirm-quantity"></span>
@@ -4223,6 +4234,15 @@
                     </div>
                 </div>
                 
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="edit-expense-point-vente">Point de Vente <span style="font-weight:normal;color:#888;">(Optionnel)</span></label>
+                        <select id="edit-expense-point-vente" name="point_de_vente">
+                            <option value="">— Aucun —</option>
+                        </select>
+                    </div>
+                </div>
+
                 <div class="form-row">
                     <div class="form-group">
                         <label for="edit-expense-quantity">Quantité</label>

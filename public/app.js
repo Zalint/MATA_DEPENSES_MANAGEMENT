@@ -231,7 +231,6 @@ async function showApp() {
         document.getElementById('visualisation-menu').style.display = 'block';
         document.getElementById('stock-menu').style.display = 'block';
         document.getElementById('stock-vivant-menu').style.display = 'block';
-        document.getElementById('user-column').style.display = 'table-cell';
         
         // Afficher les cartes de dashboard réservées
         document.getElementById('pl-estim-charges-card').style.display = 'block';
@@ -491,7 +490,8 @@ async function loadInitialData() {
     initMenuCollapse();
     
     await loadCategories();
-    
+    await loadPointsVente();
+
     // Charger les types de comptes pour le formulaire de création
     await loadAccountTypes();
     
@@ -764,6 +764,40 @@ function handleSubcategoryChange(subcategoryId) {
         socialNetworkRow.style.display = 'block';
     } else {
         socialNetworkRow.style.display = 'none';
+    }
+}
+
+// Charger les points de vente depuis l'API
+async function loadPointsVente() {
+    const selects = [
+        document.getElementById('expense-point-vente'),
+        document.getElementById('edit-expense-point-vente')
+    ].filter(Boolean);
+
+    try {
+        const response = await fetch('/api/points-vente');
+        if (!response.ok) {
+            console.error('Erreur chargement points de vente: réponse non-OK', response.status);
+            selects.forEach(s => {
+                s.innerHTML = '<option value="" disabled>— Erreur de chargement —</option>';
+            });
+            return;
+        }
+        const pointsVente = await response.json();
+        selects.forEach(s => {
+            s.innerHTML = '<option value="">— Aucun —</option>';
+            pointsVente.forEach(pv => {
+                const option = document.createElement('option');
+                option.value = pv;
+                option.textContent = pv;
+                s.appendChild(option);
+            });
+        });
+    } catch (error) {
+        console.error('Erreur chargement points de vente:', error);
+        selects.forEach(s => {
+            s.innerHTML = '<option value="" disabled>— Erreur de chargement —</option>';
+        });
     }
 }
 
@@ -1700,7 +1734,7 @@ function displayExpenses(expenses) {
     const tbody = document.getElementById('expenses-tbody');
     tbody.innerHTML = '';
     
-    const colSpan = ['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) ? '17' : '16';
+    const colSpan = '16';
     
     if (expenses.length === 0) {
         tbody.innerHTML = `<tr><td colspan="${colSpan}" style="text-align: center;">Aucune dépense trouvée</td></tr>`;
@@ -1843,7 +1877,7 @@ function displayExpenses(expenses) {
             <td>${justificationButton}</td>
             <td title="${expense.account_name || ''}">${expense.account_name ? (expense.account_name.length > 15 ? expense.account_name.substring(0, 15) + '...' : expense.account_name) : '-'}</td>
             <td>${expense.username || '-'}${isDGExpenseOnDirectorAccount ? ` <small style="color: #007bff;">(${expense.user_role})</small>` : ''}</td>
-            ${['directeur', 'directeur_general', 'pca', 'admin'].includes(currentUser.role) ? `<td>${expense.user_name}</td>` : ''}
+            <td>${expense.point_de_vente || '-'}</td>
             <td>
                 <div class="action-buttons">
                     ${viewDetailsButton}
@@ -2530,9 +2564,9 @@ function exportExpensesToCSV() {
     
     // Créer le CSV
     const headers = [
-        'Date', 'Catégorie', 'Désignation', 'Fournisseur', 'Quantité', 
-        'Prix Unitaire', 'Montant Total', 'Description', 'Prévisible', 
-        'Compte', 'Utilisateur', 'Directeur'
+        'Date', 'Catégorie', 'Désignation', 'Fournisseur', 'Quantité',
+        'Prix Unitaire', 'Montant Total', 'Description', 'Prévisible',
+        'Compte', 'Utilisateur', 'Point de Vente'
     ];
     
     let csvContent = headers.join(',') + '\n';
@@ -2550,7 +2584,7 @@ function exportExpensesToCSV() {
             expense.predictable || '',
             `"${expense.account_name || ''}"`,
             expense.username || '',
-            expense.user_name || ''
+            expense.point_de_vente || ''
         ];
         csvContent += row.join(',') + '\n';
     });
@@ -4233,7 +4267,8 @@ document.addEventListener('DOMContentLoaded', function() {
         formData.append('amount', document.getElementById('expense-total').value); // Le montant est le total calculé
         formData.append('description', document.getElementById('expense-description').value);
         formData.append('expense_date', document.getElementById('expense-date').value);
-        
+        formData.append('point_de_vente', document.getElementById('expense-point-vente').value);
+
         // Ajouter le fichier s'il existe
         const fileInput = document.getElementById('expense-justification');
         if (fileInput.files[0]) {
@@ -4890,11 +4925,11 @@ async function loadUserAccounts() {
             console.error('Élément expense-account non trouvé');
             return;
         }
-        
+
         accountSelect.innerHTML = '<option value="">Sélectionner un compte</option>';
-        
-        // Filtrer les comptes partenaires (ils sont gérés séparément)
-        const filteredAccounts = accounts.filter(account => account.account_type !== 'partenaire');
+
+        // Filtrer les comptes partenaires et inactifs (ils sont gérés séparément)
+        const filteredAccounts = accounts.filter(account => account.account_type !== 'partenaire' && account.is_active !== false);
         
         if (filteredAccounts.length === 0) {
             console.log('Aucun compte (non-partenaire) trouvé pour cet utilisateur');
@@ -5094,6 +5129,8 @@ async function openEditModal(expenseId) {
         }
         document.getElementById('edit-expense-designation').value = expense.designation || '';
         document.getElementById('edit-expense-supplier').value = expense.supplier || '';
+        const editPointVente = document.getElementById('edit-expense-point-vente');
+        if (editPointVente) editPointVente.value = expense.point_de_vente || '';
         document.getElementById('edit-expense-quantity').value = expense.quantity || '';
         document.getElementById('edit-expense-unit-price').value = expense.unit_price || '';
         document.getElementById('edit-expense-total').value = expense.total || expense.amount || '';
@@ -5628,6 +5665,7 @@ function setupEditModalEventListeners() {
             expenseData.append('expense_date', document.getElementById('edit-expense-date').value);
             expenseData.append('supplier', document.getElementById('edit-expense-supplier').value || '');
             expenseData.append('designation', document.getElementById('edit-expense-designation').value || '');
+            expenseData.append('point_de_vente', document.getElementById('edit-expense-point-vente')?.value || '');
           
             // Lit la valeur du champ texte pour "Prévisible"
             const predictableField = document.getElementById('edit-expense-predictable');
@@ -13452,9 +13490,19 @@ function populateExpenseConfirmationSummary() {
     document.getElementById('confirm-designation').textContent = 
         formData.get('designation') || '—';
     
-    document.getElementById('confirm-supplier').textContent = 
+    document.getElementById('confirm-supplier').textContent =
         formData.get('supplier') || '—';
-    
+
+    // Point de vente (si fourni)
+    const pointVente = formData.get('point_de_vente');
+    const pointVenteRow = document.getElementById('confirm-point-vente-row');
+    if (pointVente) {
+        pointVenteRow.style.display = 'flex';
+        document.getElementById('confirm-point-vente').textContent = pointVente;
+    } else {
+        pointVenteRow.style.display = 'none';
+    }
+
     document.getElementById('confirm-quantity').textContent = 
         formData.get('quantity') || '—';
     

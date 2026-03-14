@@ -1584,10 +1584,10 @@ app.post('/api/expenses', requireAuth, requireWriteAccess, upload.single('justif
         console.log('📝 Body reçu:', JSON.stringify(req.body, null, 2));
         console.log('📎 Fichier uploadé:', req.file ? req.file.originalname : 'Aucun');
         
-        const { 
-            account_id, expense_type, category, subcategory, social_network_detail, 
+        const {
+            account_id, expense_type, category, subcategory, social_network_detail,
             designation, supplier, quantity, unit_price, total, predictable,
-            amount, description, expense_date 
+            amount, description, expense_date, point_de_vente
         } = req.body;
         const user_id = req.session.user.id;
         
@@ -1727,7 +1727,8 @@ app.post('/api/expenses', requireAuth, requireWriteAccess, upload.single('justif
             designation, supplier, parseFloat(quantity) || null, parseInt(unit_price) || null, parseInt(total) || null, predictable,
             justificationFilename, justificationPath,
             finalAmount, description, expense_date, false, // selected_for_invoice
-            requiresValidation, validationStatus // Ajoutez ces deux à la fin
+            requiresValidation, validationStatus,
+            point_de_vente || null
         ];
         console.log('📋 Paramètres d\'insertion:', insertParams);
         
@@ -1738,8 +1739,8 @@ app.post('/api/expenses', requireAuth, requireWriteAccess, upload.single('justif
         designation, supplier, quantity, unit_price, total, predictable,
         justification_filename, justification_path,
         amount, description, expense_date, selected_for_invoice,
-        requires_validation, validation_status  -- Ajoutez ces deux
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) -- Le dernier paramètre va jusqu'à $20
+        requires_validation, validation_status, point_de_vente
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
     RETURNING *`,
             insertParams
         );
@@ -6019,6 +6020,17 @@ app.delete('/api/director/credit-history/:id', requireAuth, async (req, res) => 
     } catch (error) {
         console.error('Erreur suppression crédit (directeur):', error);
         res.status(500).json({ error: 'Erreur serveur lors de la suppression' });
+    }
+});
+
+// Route pour les points de vente
+app.get('/api/points-vente', requireAuth, async (req, res) => {
+    try {
+        const data = await fs.promises.readFile(path.join(__dirname, 'points_vente.json'), 'utf8');
+        res.json(JSON.parse(data));
+    } catch (error) {
+        console.error('Erreur lecture points_vente.json:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 
@@ -16339,9 +16351,9 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
             });
         }
 
-        // Convertir en objets Date pour validation
-        const start = new Date(startDate);
-        const end = new Date(endDate);
+        // Convertir en objets Date pour validation (forcer minuit local, éviter les décalages TZ)
+        const start = new Date(`${startDate}T00:00:00`);
+        const end = new Date(`${endDate}T00:00:00`);
         
         // Vérifier que les dates sont valides
         if (isNaN(start.getTime()) || isNaN(end.getTime())) {
