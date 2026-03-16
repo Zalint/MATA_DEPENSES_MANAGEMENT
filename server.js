@@ -16530,6 +16530,53 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
     }
 });
 
+// Endpoint externe pour les données virement-mensuel par plage de dates
+app.get('/external/api/virement-mensuel', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API virement-mensuel avec params:', req.query);
+
+    const { date_debut, date_fin } = req.query;
+
+    if (!date_debut || !date_fin) {
+        return res.status(400).json({ error: 'Les paramètres date_debut et date_fin sont requis (format YYYY-MM-DD).' });
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date_debut) || !dateRegex.test(date_fin)) {
+        return res.status(400).json({ error: 'Format de date invalide. Utilisez YYYY-MM-DD.' });
+    }
+
+    if (date_debut > date_fin) {
+        return res.status(400).json({ error: 'date_debut doit être antérieure ou égale à date_fin.' });
+    }
+
+    try {
+        const result = await pool.query(`
+            SELECT
+                TO_CHAR(date, 'YYYY-MM-DD') AS date,
+                valeur,
+                client,
+                month_year
+            FROM virement_mensuel
+            WHERE date >= $1 AND date <= $2
+            ORDER BY date, client
+        `, [date_debut, date_fin]);
+
+        return res.json({
+            success: true,
+            period: { date_debut, date_fin },
+            total: result.rows.length,
+            operations: result.rows,
+            metadata: {
+                generated_at: new Date().toISOString(),
+                api_version: '1.0'
+            }
+        });
+    } catch (error) {
+        console.error('❌ EXTERNAL virement-mensuel error:', error);
+        return res.status(500).json({ error: 'Erreur serveur', details: process.env.NODE_ENV !== 'production' ? error.message : undefined });
+    }
+});
+
 // ===== ENDPOINTS AUDIT DE COHÉRENCE =====
 
 // ROUTE SUPPRIMÉE - Dupliquée plus bas avec la nouvelle logique
