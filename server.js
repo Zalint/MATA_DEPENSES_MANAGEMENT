@@ -15980,6 +15980,59 @@ app.get('/api/audit/account-flux/:accountId', requireAuth, async (req, res) => {
 // EXTERNAL API FOR CREANCE PORTFOLIOS
 // =====================================================
 
+// Endpoint pour récupérer les opérations créance/remboursement par plage de dates
+app.get('/external/api/creance/operations', requireAdminAuth, async (req, res) => {
+    console.log('🌐 EXTERNAL: Appel API créance/operations avec params:', req.query);
+
+    const { date_debut, date_fin } = req.query;
+
+    if (!date_debut || !date_fin) {
+        return res.status(400).json({ error: 'Les paramètres date_debut et date_fin sont requis (format YYYY-MM-DD).' });
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(date_debut) || !dateRegex.test(date_fin)) {
+        return res.status(400).json({ error: 'Format de date invalide. Utilisez YYYY-MM-DD.' });
+    }
+
+    try {
+        const result = await pool.query(`
+            SELECT
+                co.id,
+                co.operation_date AS date_operation,
+                co.operation_type AS type_operation,
+                co.amount AS montant,
+                co.description,
+                cc.client_name AS client,
+                a.account_name AS portfolio,
+                u.full_name AS cree_par,
+                co.created_at
+            FROM creance_operations co
+            JOIN creance_clients cc ON co.client_id = cc.id
+            LEFT JOIN accounts a ON co.account_id = a.id
+            LEFT JOIN users u ON co.created_by = u.id
+            WHERE co.operation_date >= $1
+              AND co.operation_date <= $2
+              AND co.operation_type IN ('credit', 'debit')
+            ORDER BY co.operation_date, co.created_at
+        `, [date_debut, date_fin]);
+
+        return res.json({
+            success: true,
+            period: { date_debut, date_fin },
+            total: result.rows.length,
+            operations: result.rows,
+            metadata: {
+                generated_at: new Date().toISOString(),
+                api_version: '1.0'
+            }
+        });
+    } catch (error) {
+        console.error('❌ EXTERNAL créance/operations error:', error);
+        return res.status(500).json({ error: 'Erreur serveur', details: process.env.NODE_ENV !== 'production' ? error.message : undefined });
+    }
+});
+
 // Endpoint pour l'API externe des créances avec intégration OpenAI
 app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
     console.log('🌐 EXTERNAL: Appel API créance avec params:', req.query);
