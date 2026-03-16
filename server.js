@@ -16552,13 +16552,17 @@ app.get('/external/api/virement-mensuel', requireAdminAuth, async (req, res) => 
     try {
         const result = await pool.query(`
             SELECT
-                TO_CHAR(date, 'YYYY-MM-DD') AS date,
-                valeur,
-                client,
-                month_year
-            FROM virement_mensuel
-            WHERE date >= $1 AND date <= $2
-            ORDER BY date, client
+                TO_CHAR(vm.date, 'YYYY-MM-DD') AS date,
+                vm.valeur,
+                vm.client,
+                vm.month_year,
+                TO_CHAR(vm.updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
+                TO_CHAR(vm.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                u.username AS saisi_par
+            FROM virement_mensuel vm
+            LEFT JOIN users u ON u.id = vm.updated_by
+            WHERE vm.date >= $1 AND vm.date <= $2
+            ORDER BY vm.date, vm.client
         `, [date_debut, date_fin]);
 
         return res.json({
