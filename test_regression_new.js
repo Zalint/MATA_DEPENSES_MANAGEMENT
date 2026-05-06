@@ -2233,7 +2233,16 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
                 100000  // Total crédité de 100 000 FCFA
             ]);
             testAccountId_budget = accountResult.rows[0].id;
-            
+
+            // Backfill credit_history pour que le trigger calculate_expected_balance retourne 100 000.
+            // Sans cette ligne, les triggers AFTER INSERT/DELETE sur expenses recalculent le solde
+            // à partir de credit_history (qui serait vide) et le rendent négatif au premier expense.
+            await pool.query(
+                `INSERT INTO credit_history (account_id, amount, description, credited_by)
+                 VALUES ($1, $2, $3, $4)`,
+                [testAccountId_budget, 100000, 'Test 17 - seed initial balance', testUserId_budget]
+            );
+
             console.log(`✅ Compte de test créé: ID ${testAccountId_budget} avec solde 100 000 FCFA`);
         });
 
@@ -2361,18 +2370,20 @@ describe('Tests de non-régression - Comptes (Version corrigée)', () => {
                 const expenseId = result.rows[0].id;
                 console.log(`✅ Dépense ajoutée avec succès en mode libre: ID ${expenseId}`);
                 
-                // Vérifier que le solde est devenu négatif
+                // Vérifier que le solde est devenu négatif.
+                // Postgres renvoie current_balance en NUMERIC -> parsé en string par node-postgres,
+                // donc on convertit en Number avant la comparaison stricte.
                 const accountQuery = `SELECT current_balance FROM accounts WHERE id = $1`;
                 const accountResult = await pool.query(accountQuery, [testAccountId_budget]);
-                const newBalance = accountResult.rows[0].current_balance;
-                
+                const newBalance = parseFloat(accountResult.rows[0].current_balance);
+
                 console.log(`💰 Nouveau solde du compte: ${newBalance.toLocaleString()} FCFA`);
                 assert.strictEqual(newBalance, -50000, 'Le solde devrait être -50 000 FCFA (100 000 - 150 000)');
                 console.log('✅ Solde négatif autorisé en mode libre');
-                
-                // Nettoyer la dépense
+
+                // Nettoyer la dépense — le trigger AFTER DELETE recalcule automatiquement le solde
+                // à partir de credit_history (100 000) et expenses (0 après delete) = 100 000.
                 await pool.query('DELETE FROM expenses WHERE id = $1', [expenseId]);
-                await pool.query('UPDATE accounts SET current_balance = 100000 WHERE id = $1', [testAccountId_budget]);
             }
         });
 
