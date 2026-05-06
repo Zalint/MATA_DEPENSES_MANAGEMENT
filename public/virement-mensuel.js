@@ -6,6 +6,10 @@
 let currentVirementMonth = null;
 let virementData = {};
 let clientsList = new Set();
+// Métadonnées par client : Map<client_name, {point_de_vente: string|null, is_internal: boolean}>
+let virementClientsMap = new Map();
+// Liste des points de vente disponibles (chargée depuis /api/points-de-vente)
+let pointsDeVente = [];
 let currentFilters = {
     dateStart: null,
     dateEnd: null,
@@ -16,12 +20,12 @@ let currentFilters = {
 // Initialiser le module Virement Mensuel
 function initVirementMensuel() {
     console.log('💸 Initialisation module Virement Mensuel');
-    
+
     // Définir le mois par défaut (mois en cours)
     const today = new Date();
     const currentMonth = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}`;
     document.getElementById('virement-mensuel-month').value = currentMonth;
-    
+
     // Attacher les événements
     document.getElementById('load-virement-mensuel-btn').addEventListener('click', loadVirementMensuel);
     document.getElementById('save-virement-mensuel-btn').addEventListener('click', saveVirementMensuel);
@@ -30,14 +34,66 @@ function initVirementMensuel() {
     document.getElementById('virement-reset-filters-btn').addEventListener('click', resetFilters);
     document.getElementById('virement-export-excel-btn').addEventListener('click', exportVirementsToExcel);
     document.getElementById('virement-exclude-zero').addEventListener('change', handleExcludeZeroChange);
-    
+
     // Accordéon pour "Gérer les Clients"
     const accordionHeader = document.getElementById('clients-accordion-header');
     if (accordionHeader) {
         accordionHeader.addEventListener('click', toggleClientsAccordion);
     }
-    
+
+    // Charger en arrière-plan les métadonnées clients et la liste des points de vente
+    loadPointsDeVente();
+    loadVirementClientsMeta();
+
     console.log('✅ Module Virement Mensuel initialisé');
+}
+
+// Charge la liste des points de vente actifs et peuple le <select>
+async function loadPointsDeVente() {
+    try {
+        const response = await fetch('/api/points-de-vente');
+        if (!response.ok) {
+            console.warn('⚠️ Impossible de charger /api/points-de-vente:', response.status);
+            return;
+        }
+        pointsDeVente = await response.json();
+
+        const select = document.getElementById('new-client-pdv');
+        if (!select) return;
+        // On garde la première option ("Aucun point de vente") et on remplace le reste
+        const placeholder = select.querySelector('option[value=""]');
+        select.innerHTML = '';
+        if (placeholder) select.appendChild(placeholder);
+        for (const pdv of pointsDeVente) {
+            const opt = document.createElement('option');
+            opt.value = pdv;
+            opt.textContent = pdv; // textContent : pas d'injection HTML
+            select.appendChild(opt);
+        }
+    } catch (error) {
+        console.warn('⚠️ Erreur chargement points de vente:', error);
+    }
+}
+
+// Charge les métadonnées clients (point_de_vente + is_internal) depuis la DB
+async function loadVirementClientsMeta() {
+    try {
+        const response = await fetch('/api/virement-clients');
+        if (!response.ok) {
+            console.warn('⚠️ Impossible de charger /api/virement-clients:', response.status);
+            return;
+        }
+        const rows = await response.json();
+        virementClientsMap = new Map(
+            rows.map(r => [r.client_name, { point_de_vente: r.point_de_vente, is_internal: r.is_internal === true }])
+        );
+        // Si des badges sont déjà affichés, les rafraîchir pour faire apparaître les POS
+        if (clientsList.size > 0) {
+            renderClientsBadges();
+        }
+    } catch (error) {
+        console.warn('⚠️ Erreur chargement metadata clients:', error);
+    }
 }
 
 // Charger les données d'un mois
@@ -105,16 +161,33 @@ async function loadVirementMensuel() {
                 const dateStr = row.date;
                 const client = row.client;
                 const valeur = parseInt(row.valeur) || 0;
-                
+
                 if (!virementData[dateStr]) {
                     virementData[dateStr] = {};
                 }
-                
+
                 virementData[dateStr][client] = valeur;
                 clientsList.add(client);
             });
         }
-        
+
+        // S'assurer que les clients déclarés dans virement_clients (métadonnées en DB)
+        // apparaissent même s'ils n'ont aucune ligne dans virement_mensuel pour ce mois.
+        // Sinon un client créé via le formulaire mais sauvegardé avec uniquement des 0
+        // disparaît au rechargement (la sauvegarde ne persiste pas les valeurs nulles).
+        // On rafraîchit d'abord la map au cas où d'autres onglets auraient ajouté un client.
+        await loadVirementClientsMeta();
+        for (const clientName of virementClientsMap.keys()) {
+            if (!clientsList.has(clientName)) {
+                clientsList.add(clientName);
+                Object.keys(virementData).forEach(dateStr => {
+                    if (virementData[dateStr][clientName] === undefined) {
+                        virementData[dateStr][clientName] = 0;
+                    }
+                });
+            }
+        }
+
         // Afficher les badges des clients
         renderClientsBadges();
         
@@ -160,110 +233,387 @@ async function loadVirementMensuel() {
     }
 }
 
-// Ajouter un nouveau client
-function addNewClient() {
+// Ajouter un nouveau client (persiste en DB via /api/virement-clients)
+async function addNewClient() {
     const input = document.getElementById('new-client-name');
+    const pdvSelect = document.getElementById('new-client-pdv');
+    const internalCheckbox = document.getElementById('new-client-internal');
+
     const clientName = input.value.trim();
-    
+    const pointDeVente = pdvSelect ? pdvSelect.value || null : null;
+    const isInternal = internalCheckbox ? internalCheckbox.checked : false;
+
     if (!clientName) {
         showNotification('Veuillez entrer un nom de client', 'error');
         return;
     }
-    
-    if (clientsList.has(clientName)) {
-        showNotification('Ce client existe déjà', 'error');
+    // Validation côté client : caractères dangereux
+    if (/[<>{}]/.test(clientName)) {
+        showNotification('Le nom du client contient des caractères interdits (<, >, {, })', 'error');
         return;
     }
-    
-    // Ajouter le client
+
+    // Vérification de doublon insensible à la casse : "ABC" et "abc" sont considérés
+    // comme le même client. On compare contre les badges affichés ET contre les
+    // métadonnées DB (qui peuvent contenir des clients sans virement saisi).
+    const lowerName = clientName.toLowerCase();
+    const dupFromBadges = Array.from(clientsList).find(c => c.toLowerCase() === lowerName);
+    const dupFromMeta = Array.from(virementClientsMap.keys()).find(c => c.toLowerCase() === lowerName);
+    const existing = dupFromBadges || dupFromMeta;
+    if (existing) {
+        showNotification(`Ce client existe déjà sous le nom "${existing}" (insensible à la casse)`, 'error');
+        return;
+    }
+
+    // Persister la métadonnée en DB (point de vente + is_internal)
+    try {
+        const response = await fetch('/api/virement-clients', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                client_name: clientName,
+                point_de_vente: pointDeVente,
+                is_internal: isInternal
+            })
+        });
+        if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Erreur HTTP ${response.status}`);
+        }
+        const saved = await response.json();
+        virementClientsMap.set(saved.client_name, {
+            point_de_vente: saved.point_de_vente,
+            is_internal: saved.is_internal === true
+        });
+    } catch (error) {
+        console.error('❌ Erreur création client:', error);
+        showNotification(`Erreur création client: ${error.message}`, 'error');
+        return;
+    }
+
+    // Ajouter le client à l'UI
     clientsList.add(clientName);
-    
+
     // Initialiser les données pour ce client
     Object.keys(virementData).forEach(date => {
         if (!virementData[date][clientName]) {
             virementData[date][clientName] = 0;
         }
     });
-    
+
     // Réafficher
     renderClientsBadges();
     renderVirementTable();
     calculateAndDisplayTotals();
-    
-    // Vider l'input
+
+    // Vider les inputs
     input.value = '';
-    
+    if (pdvSelect) pdvSelect.value = '';
+    if (internalCheckbox) internalCheckbox.checked = false;
+
     showNotification(`Client "${clientName}" ajouté`, 'success');
+}
+
+// Modale d'édition de métadonnées client (remplace prompt + confirm natifs).
+// Affiche un <select> de points de vente connus + une checkbox "interne", retourne
+// une Promise<{ point_de_vente: string|null, is_internal: boolean } | null>.
+// `null` = utilisateur a annulé. Tous les textes sont insérés via textContent (pas d'XSS).
+function editClientMetaModal({ clientName, currentPointDeVente, currentIsInternal, pointsDeVenteList }) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+
+        const dialog = document.createElement('div');
+        dialog.className = 'confirm-modal-dialog edit-client-modal';
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'confirm-modal-title';
+        titleEl.textContent = `Modifier "${clientName}"`;
+        dialog.appendChild(titleEl);
+
+        // Select Point de vente
+        const pdvFieldId = 'edit-client-pdv-' + Date.now();
+        const pdvLabel = document.createElement('label');
+        pdvLabel.className = 'edit-client-field-label';
+        pdvLabel.htmlFor = pdvFieldId;
+        pdvLabel.textContent = 'Point de vente';
+        dialog.appendChild(pdvLabel);
+
+        const select = document.createElement('select');
+        select.id = pdvFieldId;
+        select.className = 'form-control edit-client-pdv-select';
+
+        const noneOpt = document.createElement('option');
+        noneOpt.value = '';
+        noneOpt.textContent = 'Aucun point de vente';
+        select.appendChild(noneOpt);
+
+        // Construire la liste des choix : la liste connue + la valeur actuelle si elle est inconnue
+        const choices = Array.isArray(pointsDeVenteList) ? pointsDeVenteList.slice() : [];
+        if (currentPointDeVente && !choices.includes(currentPointDeVente)) {
+            choices.unshift(currentPointDeVente);
+        }
+        for (const pdv of choices) {
+            const opt = document.createElement('option');
+            opt.value = pdv;
+            opt.textContent = pdv;
+            if (pdv === currentPointDeVente) opt.selected = true;
+            select.appendChild(opt);
+        }
+        dialog.appendChild(select);
+
+        // Checkbox is_internal
+        const internalLabel = document.createElement('label');
+        internalLabel.className = 'edit-client-internal';
+        const internalCb = document.createElement('input');
+        internalCb.type = 'checkbox';
+        internalCb.checked = currentIsInternal === true;
+        internalLabel.appendChild(internalCb);
+        const internalText = document.createElement('span');
+        internalText.textContent = ' Virement interne (exclu de l\'API externe)';
+        internalLabel.appendChild(internalText);
+        dialog.appendChild(internalLabel);
+
+        // Boutons
+        const actions = document.createElement('div');
+        actions.className = 'confirm-modal-actions';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-secondary confirm-modal-cancel';
+        cancelBtn.textContent = 'Annuler';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'btn btn-primary confirm-modal-ok';
+        saveBtn.textContent = 'Enregistrer';
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(saveBtn);
+        dialog.appendChild(actions);
+        overlay.appendChild(dialog);
+
+        const previouslyFocused = document.activeElement;
+        const close = (result) => {
+            overlay.removeEventListener('click', onOverlayClick);
+            document.removeEventListener('keydown', onKey);
+            overlay.classList.add('confirm-modal-closing');
+            setTimeout(() => overlay.remove(), 120);
+            if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+                previouslyFocused.focus();
+            }
+            resolve(result);
+        };
+
+        const onOverlayClick = (event) => { if (event.target === overlay) close(null); };
+        const onKey = (event) => {
+            if (event.key === 'Escape') { event.preventDefault(); close(null); }
+            // Pas de Enter→submit ici : un select ouvert capture Enter, et on évite
+            // un submit accidentel en cours d'édition de la checkbox.
+        };
+
+        cancelBtn.addEventListener('click', () => close(null));
+        saveBtn.addEventListener('click', () => {
+            const chosenPdv = select.value || null;
+            // Validation : si l'utilisateur a sélectionné un PdV, il doit faire partie des choix proposés
+            // (impossible normalement avec un <select>, mais on défend en profondeur).
+            if (chosenPdv !== null && !choices.includes(chosenPdv)) {
+                showNotification('Point de vente invalide', 'error');
+                return;
+            }
+            close({ point_de_vente: chosenPdv, is_internal: internalCb.checked });
+        });
+        overlay.addEventListener('click', onOverlayClick);
+        document.addEventListener('keydown', onKey);
+
+        document.body.appendChild(overlay);
+        select.focus();
+    });
+}
+
+// Modifier les métadonnées d'un client existant (point de vente + is_internal)
+async function editClientMeta(clientName) {
+    const meta = virementClientsMap.get(clientName) || { point_de_vente: null, is_internal: false };
+
+    const result = await editClientMetaModal({
+        clientName,
+        currentPointDeVente: meta.point_de_vente,
+        currentIsInternal: meta.is_internal,
+        pointsDeVenteList: pointsDeVente
+    });
+    if (result === null) return; // utilisateur a annulé : aucun appel réseau
+
+    const { point_de_vente: newPdv, is_internal: newInternal } = result;
+
+    try {
+        const response = await fetch(`/api/virement-clients/${encodeURIComponent(clientName)}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ point_de_vente: newPdv, is_internal: newInternal })
+        });
+
+        if (response.ok) {
+            const updated = await response.json();
+            virementClientsMap.set(updated.client_name, {
+                point_de_vente: updated.point_de_vente,
+                is_internal: updated.is_internal === true
+            });
+        } else if (response.status === 404) {
+            // Client connu uniquement via virement_mensuel, pas encore de métadonnée → on crée
+            const createRes = await fetch('/api/virement-clients', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_name: clientName,
+                    point_de_vente: newPdv,
+                    is_internal: newInternal
+                })
+            });
+            if (!createRes.ok) {
+                const e2 = await createRes.json().catch(() => ({}));
+                throw new Error(e2.error || `Erreur HTTP ${createRes.status}`);
+            }
+            const created = await createRes.json();
+            virementClientsMap.set(created.client_name, {
+                point_de_vente: created.point_de_vente,
+                is_internal: created.is_internal === true
+            });
+        } else {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Erreur HTTP ${response.status}`);
+        }
+
+        renderClientsBadges();
+        showNotification(`Client "${clientName}" mis à jour`, 'success');
+    } catch (error) {
+        console.error('❌ Erreur mise à jour client:', error);
+        showNotification(`Erreur mise à jour: ${error.message}`, 'error');
+    }
 }
 
 // Supprimer un client
 async function removeClient(clientName) {
-    if (!confirm(`Voulez-vous vraiment supprimer le client "${clientName}" ?\n\nToutes ses données seront supprimées immédiatement.`)) {
-        return;
-    }
-    
+    const confirmed = await confirmModal({
+        title: 'Supprimer le client',
+        message: `Voulez-vous vraiment supprimer le client "${clientName}" ?\n\nToutes ses lignes de virement pour ce mois ainsi que ses métadonnées (point de vente, flag interne) seront supprimées définitivement.`,
+        okLabel: 'Supprimer',
+        cancelLabel: 'Annuler',
+        danger: true
+    });
+    if (!confirmed) return;
+
     try {
-        // Appeler l'API pour supprimer le client de la base de données
+        // 1. Supprimer les lignes de virement_mensuel pour le mois courant
         if (currentVirementMonth) {
             const response = await fetch(`/api/virement-mensuel/${currentVirementMonth}/client/${encodeURIComponent(clientName)}`, {
                 method: 'DELETE'
             });
-            
             const result = await response.json();
-            
             if (!result.success) {
-                throw new Error(result.error || 'Erreur lors de la suppression');
+                throw new Error(result.error || 'Erreur suppression virements du mois');
             }
-            
-            console.log(`💸 Client supprimé en base:`, result);
+            console.log(`💸 Virements du mois supprimés:`, result);
         }
-        
-        // Retirer le client de l'UI
+
+        // 2. Supprimer la métadonnée du client dans virement_clients.
+        // Sinon le client réapparaît au prochain rechargement (loadVirementMensuel le récupère
+        // depuis virementClientsMap pour les clients qui ont une métadonnée mais pas encore de virement).
+        // 404 = pas de métadonnée → on ignore silencieusement (le client n'avait que des virements).
+        const metaResponse = await fetch(`/api/virement-clients/${encodeURIComponent(clientName)}`, {
+            method: 'DELETE'
+        });
+        if (metaResponse.ok) {
+            console.log(`💸 Métadonnée client supprimée: ${clientName}`);
+        } else if (metaResponse.status !== 404) {
+            // Erreur réelle — on log mais on continue le nettoyage UI pour ne pas laisser un état incohérent
+            const metaErr = await metaResponse.json().catch(() => ({}));
+            console.warn(`⚠️ Échec suppression métadonnée client "${clientName}":`, metaErr.error || metaResponse.status);
+        }
+
+        // 3. Retirer du state local
         clientsList.delete(clientName);
-        
-        // Supprimer les données de ce client
+        virementClientsMap.delete(clientName);
         Object.keys(virementData).forEach(date => {
             delete virementData[date][clientName];
         });
-        
-        // Réafficher
+
+        // 4. Réafficher
         renderClientsBadges();
         renderVirementTable();
         calculateAndDisplayTotals();
-        
+
         showNotification(`Client "${clientName}" supprimé avec succès`, 'success');
-        
+
     } catch (error) {
         console.error('❌ Erreur suppression client:', error);
         showNotification('Erreur lors de la suppression: ' + error.message, 'error');
     }
 }
 
-// Afficher les badges des clients
+// Afficher les badges des clients (avec point de vente et flag interne)
 function renderClientsBadges() {
     const container = document.getElementById('active-clients-badges');
     container.innerHTML = '';
-    
+
     const clientsArray = Array.from(clientsList).sort();
-    
+
     clientsArray.forEach(client => {
+        const meta = virementClientsMap.get(client) || { point_de_vente: null, is_internal: false };
+
         const badge = document.createElement('div');
-        badge.className = 'client-badge';
-        
-        // Create client name span
+        badge.className = meta.is_internal ? 'client-badge is-internal' : 'client-badge';
+        if (meta.is_internal) {
+            badge.title = 'Virement interne — exclu de l\'API externe';
+        }
+
+        // Nom du client (textContent, jamais innerHTML)
         const clientSpan = document.createElement('span');
         clientSpan.textContent = client;
         badge.appendChild(clientSpan);
-        
-        // Create remove icon
-        const removeIcon = document.createElement('i');
-        removeIcon.className = 'fas fa-times-circle remove-icon';
-        badge.appendChild(removeIcon);
-        
-        badge.onclick = () => removeClient(client);
+
+        // Pastille point de vente (vide affiche un tiret en italique)
+        const pdvSpan = document.createElement('span');
+        pdvSpan.className = meta.point_de_vente ? 'client-badge-pdv' : 'client-badge-pdv empty';
+        pdvSpan.textContent = meta.point_de_vente || '—';
+        badge.appendChild(pdvSpan);
+
+        // Crayon d'édition (button focusable au clavier, accessible aux lecteurs d'écran)
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'client-badge-action edit-icon';
+        editBtn.title = 'Modifier le point de vente / flag interne';
+        editBtn.setAttribute('aria-label', `Modifier le client ${client}`);
+        const editIconEl = document.createElement('i');
+        editIconEl.className = 'fas fa-pencil-alt';
+        editIconEl.setAttribute('aria-hidden', 'true');
+        editBtn.appendChild(editIconEl);
+        editBtn.onclick = (event) => {
+            event.stopPropagation();
+            editClientMeta(client);
+        };
+        badge.appendChild(editBtn);
+
+        // Croix de suppression (idem)
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'client-badge-action remove-icon';
+        removeBtn.title = 'Supprimer le client';
+        removeBtn.setAttribute('aria-label', `Supprimer le client ${client}`);
+        const removeIconEl = document.createElement('i');
+        removeIconEl.className = 'fas fa-times-circle';
+        removeIconEl.setAttribute('aria-hidden', 'true');
+        removeBtn.appendChild(removeIconEl);
+        removeBtn.onclick = (event) => {
+            event.stopPropagation();
+            removeClient(client);
+        };
+        badge.appendChild(removeBtn);
+
         container.appendChild(badge);
     });
-    
+
     // Mettre à jour le select des filtres
     updateClientFilterSelect();
 }
@@ -648,14 +998,22 @@ async function calculateAndDisplayTotals() {
     
     Object.keys(totalsByClient).sort().forEach(client => {
         const total = totalsByClient[client];
-        
+
         if (total > 0) {
+            // Construction DOM via textContent pour éviter toute injection HTML via le nom du client
             const card = document.createElement('div');
             card.className = 'client-total-card';
-            card.innerHTML = `
-                <div class="client-name">${client}</div>
-                <div class="client-amount">${formatCurrency(total)}</div>
-            `;
+
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'client-name';
+            nameDiv.textContent = client;
+            card.appendChild(nameDiv);
+
+            const amountDiv = document.createElement('div');
+            amountDiv.className = 'client-amount';
+            amountDiv.textContent = formatCurrency(total);
+            card.appendChild(amountDiv);
+
             clientsContainer.appendChild(card);
         }
     });

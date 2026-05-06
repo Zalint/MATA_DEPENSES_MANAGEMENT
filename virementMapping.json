@@ -1,12 +1,12 @@
 {
-  "Keur Bali": "SACRE COEUR",
-  "Sacré Coeur": "SACRE COEUR",
-  "Keur Massar": "KEUR MASSAR",
-  "Sene Visa Sa": "O.FOIRE",
-  "Sos Village d'enfants": "O.FOIRE",
+  "MaasAlmadie2": "Centre de Découpe Banlieue",
+  "MaaSMbao": "Centre de Découpe Banlieue",
+  "MaaSKeurMassar": "Centre de Découpe Banlieue",
+  "MaasSac": "Centre de Découpe Dakar",
+  "Keur baly": "Centre de Découpe Dakar",
+  "Abats": "Abattage",
   "virementPointDeVenteInterneToExclude": [
     "Sacré Coeur",
     "Keur Massar"
   ]
 }
-
