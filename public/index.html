@@ -1770,15 +1770,23 @@
                                 <div class="client-management-section accordion-content" id="clients-accordion-content">
                                     <div class="add-client-form">
                                         <label>Ajouter un nouveau client</label>
-                                        <div class="input-with-btn">
-                                            <input type="text" id="new-client-name" class="form-control" placeholder="Nom du nouveau client">
-                                            <button id="add-client-btn" class="btn btn-primary">
+                                        <div class="input-with-btn add-client-row">
+                                            <input type="text" id="new-client-name" class="form-control add-client-name" placeholder="Nom du nouveau client">
+                                            <select id="new-client-pdv" class="form-control add-client-pdv">
+                                                <option value="">Aucun point de vente</option>
+                                            </select>
+                                            <label class="add-client-internal-label">
+                                                <input type="checkbox" id="new-client-internal">
+                                                <span>Virement interne</span>
+                                            </label>
+                                            <button id="add-client-btn" class="btn btn-primary add-client-btn">
                                                 <i class="fas fa-plus"></i> Ajouter
                                             </button>
                                         </div>
+                                        <small class="form-help">Le point de vente est facultatif. Cocher "Virement interne" pour exclure ce client de l'API externe.</small>
                                     </div>
                                     <div class="clients-list-section">
-                                        <label>Clients actifs (cliquer pour supprimer)</label>
+                                        <label>Clients actifs (cliquer le crayon pour modifier, le X pour supprimer)</label>
                                         <div id="active-clients-badges" class="clients-badges">
                                             <!-- Les clients seront affichés ici -->
                                         </div>
@@ -2025,17 +2033,51 @@
                     gap: 10px;
                     align-items: center;
                 }
-                
+
+                /* Ligne d'ajout client : wrap propre, tailles explicites pour éviter la compression du placeholder */
+                .add-client-row {
+                    flex-wrap: wrap;
+                }
+                .add-client-row .add-client-name {
+                    flex: 1 1 220px;
+                    min-width: 220px;
+                }
+                .add-client-row .add-client-pdv {
+                    flex: 0 1 240px;
+                    min-width: 200px;
+                }
+                .add-client-internal-label {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 6px;
+                    white-space: nowrap;
+                    font-weight: 500;
+                    color: #495057;
+                    background: #fff;
+                    padding: 6px 12px;
+                    border: 1px solid #dee2e6;
+                    border-radius: 6px;
+                    cursor: pointer;
+                }
+                .add-client-internal-label input[type="checkbox"] {
+                    margin: 0;
+                    cursor: pointer;
+                }
+                .add-client-row .add-client-btn {
+                    flex: 0 0 auto;
+                    white-space: nowrap;
+                }
+
                 .clients-list-section {
                     margin-top: 20px;
                 }
-                
+
                 .clients-list-section label {
                     display: block;
                     margin-bottom: 10px;
                     font-weight: 600;
                 }
-                
+
                 .clients-badges {
                     display: flex;
                     flex-wrap: wrap;
@@ -2045,7 +2087,7 @@
                     border-radius: 8px;
                     min-height: 60px;
                 }
-                
+
                 .client-badge {
                     display: inline-flex;
                     align-items: center;
@@ -2055,25 +2097,51 @@
                     color: white;
                     border-radius: 20px;
                     font-size: 0.95em;
-                    cursor: pointer;
-                    transition: all 0.3s ease;
+                    transition: all 0.25s ease;
                     font-weight: 500;
+                    cursor: default;
                 }
-                
+
                 .client-badge:hover {
                     transform: translateY(-2px);
                     box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-                    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
                 }
-                
+
+                /* Badge de virement interne : visuellement distinct (sans cliquer) */
+                .client-badge.is-internal {
+                    background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+                    border: 1px dashed rgba(255,255,255,0.5);
+                }
+
+                .client-badge .client-badge-pdv {
+                    font-size: 0.82em;
+                    font-weight: 400;
+                    opacity: 0.88;
+                    background: rgba(255,255,255,0.18);
+                    padding: 2px 8px;
+                    border-radius: 10px;
+                }
+
+                .client-badge .client-badge-pdv.empty {
+                    background: rgba(255,255,255,0.08);
+                    font-style: italic;
+                }
+
+                .client-badge .edit-icon,
+                .client-badge .remove-icon {
+                    font-size: 1em;
+                    opacity: 0.75;
+                    cursor: pointer;
+                    padding: 2px;
+                    transition: opacity 0.2s ease, transform 0.2s ease;
+                }
+                .client-badge .edit-icon:hover,
+                .client-badge .remove-icon:hover {
+                    opacity: 1;
+                    transform: scale(1.15);
+                }
                 .client-badge .remove-icon {
                     font-size: 1.1em;
-                    opacity: 0.7;
-                    margin-left: 4px;
-                }
-                
-                .client-badge:hover .remove-icon {
-                    opacity: 1;
                 }
                 </style>
 

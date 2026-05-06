@@ -51,24 +51,52 @@ function cleanEncoding(obj) {
     return obj;
 }
 
-// Fonction utilitaire pour lire la configuration financière
-function getFinancialConfig() {
-    try {
-        const configPath = path.join(__dirname, 'financial_settings.json');
-        if (fs.existsSync(configPath)) {
-            const configData = fs.readFileSync(configPath, 'utf8');
-            return JSON.parse(configData);
-        }
-    } catch (error) {
-        console.error('Erreur lecture configuration financière:', error);
-    }
-    // Configuration par défaut si le fichier n'existe pas ou est corrompu
-    return {
+// Fonction utilitaire pour lire la configuration financière (async).
+// Source de vérité : table app_settings. Fallback : financial_settings.json. Defaults hardcodés en dernier recours.
+// Précédence : defaults < JSON file < DB (DB écrase tout)
+async function getFinancialConfig() {
+    const defaults = {
         charges_fixes_estimation: 5320000,
         validate_expense_balance: true,
         stock_mata_abattement: 0.10,
         description: "Paramètres financiers et estimations pour les calculs du système"
     };
+
+    let jsonConfig = {};
+    try {
+        const configPath = path.join(__dirname, 'financial_settings.json');
+        if (fs.existsSync(configPath)) {
+            jsonConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        }
+    } catch (error) {
+        console.error('Erreur lecture financial_settings.json (fallback):', error.message);
+    }
+
+    let dbConfig = {};
+    try {
+        const r = await pool.query('SELECT key, value FROM app_settings');
+        dbConfig = Object.fromEntries(r.rows.map(row => [row.key, row.value]));
+    } catch (error) {
+        // Table absente ou DB inaccessible : on tombe en fallback JSON sans bruit excessif
+        if (error.code !== '42P01') {
+            console.error('Erreur lecture app_settings (fallback JSON):', error.message);
+        }
+    }
+
+    return { ...defaults, ...jsonConfig, ...dbConfig };
+}
+
+// UPSERT d'une clé dans app_settings. La valeur est sérialisée en JSONB côté Postgres.
+async function setFinancialSetting(key, value, userId = null) {
+    await pool.query(
+        `INSERT INTO app_settings (key, value, updated_by, updated_at)
+         VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
+         ON CONFLICT (key) DO UPDATE SET
+             value = EXCLUDED.value,
+             updated_at = CURRENT_TIMESTAMP,
+             updated_by = EXCLUDED.updated_by`,
+        [key, JSON.stringify(value), userId]
+    );
 }
 
 // Fonction helper pour forcer la synchronisation de tous les comptes après modifications de crédit
@@ -1657,7 +1685,7 @@ app.post('/api/expenses', requireAuth, requireWriteAccess, upload.single('justif
             console.log('✅ COMPTE STATUT: Validation du solde désactivée pour compte:', account.account_name);
         } else {
             // Lire la configuration pour savoir si la validation est activée
-            const financialConfig = getFinancialConfig();
+            const financialConfig = await getFinancialConfig();
             const validateBalance = financialConfig.validate_expense_balance;
             
             console.log('💰 Vérification du solde pour compte classique');
@@ -3235,8 +3263,8 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
                 const currentStockMataRaw = Math.round(currentStockMataResult.rows[0]?.total_stock || 0);
                 const currentStockMataDate = currentStockMataResult.rows[0]?.latest_date;
 
-                // 4. Appliquer l'abattement (configurable dans financial_settings.json)
-                const plFinancialConfig = getFinancialConfig();
+                // 4. Appliquer l'abattement (configurable dans app_settings)
+                const plFinancialConfig = await getFinancialConfig();
                 const _rawAbattement = plFinancialConfig.stock_mata_abattement;
                 const stockMataAbattement = (typeof _rawAbattement === 'number' && isFinite(_rawAbattement))
                     ? Math.min(1, Math.max(0, _rawAbattement))
@@ -3587,22 +3615,16 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         let plCalculationDetails = {};
         
         try {
-            // Lire l'estimation des charges fixes depuis le fichier JSON
+            // Lire l'estimation des charges fixes depuis app_settings (fallback JSON via le helper)
             try {
-                const configPath = path.join(__dirname, 'financial_settings.json');
-                if (fs.existsSync(configPath)) {
-                    const configData = fs.readFileSync(configPath, 'utf8');
-                    const financialConfig = JSON.parse(configData);
-                    chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 0;
-                    console.log(`💰 Estimation charges fixes lue: ${chargesFixesEstimation} FCFA`);
-                } else {
-                    console.log('⚠️ Fichier financial_settings.json non trouvé, estimation = 0');
-                }
+                const financialConfig = await getFinancialConfig();
+                chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 0;
+                console.log(`💰 Estimation charges fixes lue: ${chargesFixesEstimation} FCFA`);
             } catch (configError) {
                 console.error('Erreur lecture config financière:', configError);
                 chargesFixesEstimation = 0;
             }
-            
+
             // Calculer le prorata des charges fixes basé sur les jours écoulés (hors dimanche)
             chargesProrata = 0;
             if (chargesFixesEstimation > 0) {
@@ -3780,98 +3802,94 @@ app.get('/api/dashboard/stats-cards', requireAuth, async (req, res) => {
         // Calculer dynamiquement les PL alternatifs en fonction des configurations comptes_*
         const plAlternatifs = {};
         try {
-            // Lire la configuration financière
-            const configPath = path.join(__dirname, 'financial_settings.json');
-            if (fs.existsSync(configPath)) {
-                const configData = fs.readFileSync(configPath, 'utf8');
-                const financialConfig = JSON.parse(configData);
-                
-                // Extraire tous les noeuds commençant par 'comptes_'
-                const comptesConfigs = Object.keys(financialConfig)
-                    .filter(key => key.startsWith('comptes_'))
-                    .reduce((acc, key) => {
-                        acc[key] = financialConfig[key];
-                        return acc;
-                    }, {});
-                
-                console.log(`\n📊 ===== CALCUL PL ALTERNATIFS =====`);
-                console.log(`📊 Configurations trouvées: ${Object.keys(comptesConfigs).length}`);
-                
-                // Pour chaque configuration, calculer un PL alternatif
-                for (const [configKey, comptesAExclure] of Object.entries(comptesConfigs)) {
-                    if (!Array.isArray(comptesAExclure) || comptesAExclure.length === 0) {
-                        console.log(`⚠️ Configuration ${configKey} invalide ou vide, ignorée`);
-                        continue;
-                    }
-                    
-                    // Générer un nom lisible pour la carte PL
-                    const plName = configKey
-                        .replace('comptes_', '')
-                        .replace(/_/g, ' ')
-                        .replace(/\b\w/g, l => l.toUpperCase());
-                    
-                    console.log(`\n📊 Calcul PL sans: ${plName}`);
-                    console.log(`📊 Config key: ${configKey}`);
-                    console.log(`📊 Comptes exclus: ${comptesAExclure.join(', ')}`);
-                    
-                    // Calculer le Cash Burn en excluant les comptes spécifiés
-                    let cashBurnExclusQuery = `
-                        SELECT COALESCE(SUM(e.total), 0) as total 
-                        FROM expenses e
-                        JOIN accounts a ON e.account_id = a.id
-                        WHERE a.account_name NOT IN (${comptesAExclure.map((_, i) => `$${i + 1}`).join(', ')})
-                    `;
-                    let exclusParams = [...comptesAExclure];
-                    
-                    // Ajouter les filtres de date
-                    if (cutoff_date) {
-                        const cutoffMonth = referenceDateStr.substring(0, 7) + '-01';
-                        cashBurnExclusQuery += ` AND e.expense_date >= $${exclusParams.length + 1} AND e.expense_date <= $${exclusParams.length + 2}`;
-                        exclusParams.push(cutoffMonth, referenceDateStr);
-                    } else if (start_date && end_date) {
-                        cashBurnExclusQuery += ` AND e.expense_date >= $${exclusParams.length + 1} AND e.expense_date <= $${exclusParams.length + 2}`;
-                        exclusParams.push(start_date, end_date);
-                    }
-                    
-                    // Ajouter filtre directeur si nécessaire
-                    if (isDirector) {
-                        cashBurnExclusQuery += ` AND (e.user_id = $${exclusParams.length + 1} OR (EXISTS (
-                            SELECT 1 FROM accounts a2 WHERE a2.id = e.account_id AND a2.user_id = $${exclusParams.length + 1}
-                        ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin'))))`;
-                        exclusParams.push(userId);
-                    }
-                    
-                    const cashBurnExclusResult = await pool.query(cashBurnExclusQuery, exclusParams);
-                    const cashBurnExclus = parseInt(cashBurnExclusResult.rows[0].total);
-                    
-                    // Calculer les montants exclus (pour affichage)
-                    const depensesExclues = totalSpent - cashBurnExclus;
-                    
-                    // Recalculer les PL avec le Cash Burn alternatif (virements inclus dans PL de base)
-                    const plBaseAlt = cashBictorysValue + creancesMoisValue - remboursementsMoisValue + totalVirementsMois + stockPointVenteValue - cashBurnExclus;
-                    const plBrutAlt = plBaseAlt + stockVivantVariation - livraisonsPartenaires;
-                    const plFinalAlt = plBrutAlt - chargesProrata;
-                    
-                    console.log(`📊 Cash Burn excluant ${comptesAExclure.join(', ')}: ${cashBurnExclus.toLocaleString()} FCFA`);
-                    console.log(`📊 Dépenses exclues: ${depensesExclues.toLocaleString()} FCFA`);
-                    console.log(`📊 PL Base alternatif: ${plBaseAlt.toLocaleString()} FCFA`);
-                    console.log(`📊 PL Final alternatif: ${Math.round(plFinalAlt).toLocaleString()} FCFA`);
-                    
-                    // Stocker le résultat
-                    plAlternatifs[configKey] = {
-                        configKey: configKey,
-                        nom: plName,
-                        comptesExclus: comptesAExclure,
-                        cashBurn: cashBurnExclus,
-                        depensesExclues: depensesExclues,
-                        plBase: plBaseAlt,
-                        plBrut: Math.round(plBrutAlt),
-                        plFinal: Math.round(plFinalAlt)
-                    };
+            // Lire la configuration depuis app_settings (helper async, fallback JSON)
+            const financialConfig = await getFinancialConfig();
+
+            // Extraire tous les noeuds commençant par 'comptes_'
+            const comptesConfigs = Object.keys(financialConfig)
+                .filter(key => key.startsWith('comptes_'))
+                .reduce((acc, key) => {
+                    acc[key] = financialConfig[key];
+                    return acc;
+                }, {});
+
+            console.log(`\n📊 ===== CALCUL PL ALTERNATIFS =====`);
+            console.log(`📊 Configurations trouvées: ${Object.keys(comptesConfigs).length}`);
+
+            // Pour chaque configuration, calculer un PL alternatif
+            for (const [configKey, comptesAExclure] of Object.entries(comptesConfigs)) {
+                if (!Array.isArray(comptesAExclure) || comptesAExclure.length === 0) {
+                    console.log(`⚠️ Configuration ${configKey} invalide ou vide, ignorée`);
+                    continue;
                 }
-                
-                console.log(`📊 ===== FIN CALCUL PL ALTERNATIFS =====\n`);
+
+                // Générer un nom lisible pour la carte PL
+                const plName = configKey
+                    .replace('comptes_', '')
+                    .replace(/_/g, ' ')
+                    .replace(/\b\w/g, l => l.toUpperCase());
+
+                console.log(`\n📊 Calcul PL sans: ${plName}`);
+                console.log(`📊 Config key: ${configKey}`);
+                console.log(`📊 Comptes exclus: ${comptesAExclure.join(', ')}`);
+
+                // Calculer le Cash Burn en excluant les comptes spécifiés
+                let cashBurnExclusQuery = `
+                    SELECT COALESCE(SUM(e.total), 0) as total
+                    FROM expenses e
+                    JOIN accounts a ON e.account_id = a.id
+                    WHERE a.account_name NOT IN (${comptesAExclure.map((_, i) => `$${i + 1}`).join(', ')})
+                `;
+                let exclusParams = [...comptesAExclure];
+
+                // Ajouter les filtres de date
+                if (cutoff_date) {
+                    const cutoffMonth = referenceDateStr.substring(0, 7) + '-01';
+                    cashBurnExclusQuery += ` AND e.expense_date >= $${exclusParams.length + 1} AND e.expense_date <= $${exclusParams.length + 2}`;
+                    exclusParams.push(cutoffMonth, referenceDateStr);
+                } else if (start_date && end_date) {
+                    cashBurnExclusQuery += ` AND e.expense_date >= $${exclusParams.length + 1} AND e.expense_date <= $${exclusParams.length + 2}`;
+                    exclusParams.push(start_date, end_date);
+                }
+
+                // Ajouter filtre directeur si nécessaire
+                if (isDirector) {
+                    cashBurnExclusQuery += ` AND (e.user_id = $${exclusParams.length + 1} OR (EXISTS (
+                        SELECT 1 FROM accounts a2 WHERE a2.id = e.account_id AND a2.user_id = $${exclusParams.length + 1}
+                    ) AND e.user_id IN (SELECT id FROM users WHERE role IN ('directeur_general', 'pca', 'admin'))))`;
+                    exclusParams.push(userId);
+                }
+
+                const cashBurnExclusResult = await pool.query(cashBurnExclusQuery, exclusParams);
+                const cashBurnExclus = parseInt(cashBurnExclusResult.rows[0].total);
+
+                // Calculer les montants exclus (pour affichage)
+                const depensesExclues = totalSpent - cashBurnExclus;
+
+                // Recalculer les PL avec le Cash Burn alternatif (virements inclus dans PL de base)
+                const plBaseAlt = cashBictorysValue + creancesMoisValue - remboursementsMoisValue + totalVirementsMois + stockPointVenteValue - cashBurnExclus;
+                const plBrutAlt = plBaseAlt + stockVivantVariation - livraisonsPartenaires;
+                const plFinalAlt = plBrutAlt - chargesProrata;
+
+                console.log(`📊 Cash Burn excluant ${comptesAExclure.join(', ')}: ${cashBurnExclus.toLocaleString()} FCFA`);
+                console.log(`📊 Dépenses exclues: ${depensesExclues.toLocaleString()} FCFA`);
+                console.log(`📊 PL Base alternatif: ${plBaseAlt.toLocaleString()} FCFA`);
+                console.log(`📊 PL Final alternatif: ${Math.round(plFinalAlt).toLocaleString()} FCFA`);
+
+                // Stocker le résultat
+                plAlternatifs[configKey] = {
+                    configKey: configKey,
+                    nom: plName,
+                    comptesExclus: comptesAExclure,
+                    cashBurn: cashBurnExclus,
+                    depensesExclues: depensesExclues,
+                    plBase: plBaseAlt,
+                    plBrut: Math.round(plBrutAlt),
+                    plFinal: Math.round(plFinalAlt)
+                };
             }
+
+            console.log(`📊 ===== FIN CALCUL PL ALTERNATIFS =====\n`);
         } catch (error) {
             console.error('❌ Erreur calcul PL alternatifs:', error);
         }
@@ -3984,8 +4002,8 @@ app.get('/api/dashboard/stock-summary', requireAuth, async (req, res) => {
             const currentStockMataRaw = Math.round(currentStockMataResult.rows[0]?.total_stock || 0);
             const currentStockMataDate = currentStockMataResult.rows[0]?.latest_date;
 
-            // 4. Appliquer l'abattement (configurable dans financial_settings.json)
-            const cardFinancialConfig = getFinancialConfig();
+            // 4. Appliquer l'abattement (configurable dans app_settings)
+            const cardFinancialConfig = await getFinancialConfig();
             const _rawCardAbattement = cardFinancialConfig.stock_mata_abattement;
             const cardStockMataAbattement = (typeof _rawCardAbattement === 'number' && isFinite(_rawCardAbattement))
                 ? Math.min(1, Math.max(0, _rawCardAbattement))
@@ -7997,33 +8015,65 @@ app.put('/api/admin/config/stock-vivant', requireAdminAuth, (req, res) => {
     }
 });
 
-app.get('/api/admin/config/financial', requireAdminAuth, (req, res) => {
+app.get('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
     try {
-        const configPath = path.join(__dirname, 'financial_settings.json');
-        const configData = fs.readFileSync(configPath, 'utf8');
-        res.json(JSON.parse(configData));
+        // Lecture via le helper async (DB > JSON > defaults)
+        const config = await getFinancialConfig();
+        res.json(config);
     } catch (error) {
         console.error('Error reading financial settings:', error);
         res.status(500).json({ error: 'Error reading financial settings configuration' });
     }
 });
 
-app.put('/api/admin/config/financial', requireAdminAuth, (req, res) => {
+app.put('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
     try {
-        const configPath = path.join(__dirname, 'financial_settings.json');
-        const configData = JSON.stringify(req.body, null, 2);
-        fs.writeFileSync(configPath, configData, 'utf8');
+        if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+            return res.status(400).json({ error: 'Body must be a JSON object of settings' });
+        }
+
+        const userId = req.session?.user?.id || null;
+        // 'description' est de la documentation et n'est pas persistée en base
+        const skipKeys = new Set(['description']);
+
+        // UPSERT clé par clé. Une transaction garde l'opération atomique.
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            for (const [key, value] of Object.entries(req.body)) {
+                if (skipKeys.has(key)) continue;
+                if (typeof key !== 'string' || key.length === 0 || key.length > 100) {
+                    throw new Error(`Invalid setting key: ${key}`);
+                }
+                await client.query(
+                    `INSERT INTO app_settings (key, value, updated_by, updated_at)
+                     VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
+                     ON CONFLICT (key) DO UPDATE SET
+                         value = EXCLUDED.value,
+                         updated_at = CURRENT_TIMESTAMP,
+                         updated_by = EXCLUDED.updated_by`,
+                    [key, JSON.stringify(value), userId]
+                );
+            }
+            await client.query('COMMIT');
+        } catch (txError) {
+            await client.query('ROLLBACK');
+            throw txError;
+        } finally {
+            client.release();
+        }
+
         res.json({ message: 'Financial settings configuration updated successfully' });
     } catch (error) {
         console.error('Error updating financial settings:', error);
-        res.status(500).json({ error: 'Error updating financial settings configuration' });
+        res.status(500).json({ error: 'Error updating financial settings configuration', details: error.message });
     }
 });
 
 // Endpoint public pour récupérer le statut de validation des dépenses
-app.get('/api/validation-status', requireAuth, (req, res) => {
+app.get('/api/validation-status', requireAuth, async (req, res) => {
     try {
-        const financialConfig = getFinancialConfig();
+        const financialConfig = await getFinancialConfig();
         const validateBalance = financialConfig.validate_expense_balance !== false; // défaut à true
         
         res.json({
@@ -9011,20 +9061,11 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
             totalStockSoir = 0;
         }
 
-        // Lire l'estimation des charges fixes depuis le fichier JSON (même logique que l'interface)
+        // Lire l'estimation des charges fixes depuis app_settings (helper async, fallback JSON)
         let estimatedMonthlyFixedCharges = 0;
         try {
-            const configPath = path.join(__dirname, 'financial_settings.json');
-            const configExists = await fs.promises.access(configPath).then(() => true).catch(() => false);
-            
-            if (configExists) {
-                const configData = await fs.promises.readFile(configPath, 'utf8');
-                const financialConfig = JSON.parse(configData);
-                estimatedMonthlyFixedCharges = parseFloat(financialConfig.charges_fixes_estimation) || 0;
-            } else {
-                console.log('⚠️ Fichier financial_settings.json non trouvé, estimation = 0');
-                estimatedMonthlyFixedCharges = 0;
-            }
+            const financialConfig = await getFinancialConfig();
+            estimatedMonthlyFixedCharges = parseFloat(financialConfig.charges_fixes_estimation) || 0;
         } catch (configError) {
             console.error('Erreur lecture config financière:', configError);
             estimatedMonthlyFixedCharges = 0;
@@ -9093,86 +9134,80 @@ app.get('/external/api/status', requireAdminAuth, async (req, res) => {
         // Calculer dynamiquement les PL alternatifs en fonction des configurations comptes_*
         const plAlternatifs = {};
         try {
-            // Lire la configuration financière de manière asynchrone
-            const configPath = path.join(__dirname, 'financial_settings.json');
-            const configExists = await fs.promises.access(configPath).then(() => true).catch(() => false);
-            
-            if (configExists) {
-                const configData = await fs.promises.readFile(configPath, 'utf8');
-                const financialConfig = JSON.parse(configData);
-                
-                // Extraire tous les noeuds commençant par 'comptes_'
-                const comptesConfigs = Object.keys(financialConfig)
-                    .filter(key => key.startsWith('comptes_'))
-                    .reduce((acc, key) => {
-                        acc[key] = financialConfig[key];
-                        return acc;
-                    }, {});
-                
-                console.log(`\n📊 EXTERNAL API: CALCUL PL ALTERNATIFS`);
-                console.log(`📊 Configurations trouvées: ${Object.keys(comptesConfigs).length}`);
-                
-                // Pour chaque configuration, calculer un PL alternatif
-                for (const [configKey, comptesAExclure] of Object.entries(comptesConfigs)) {
-                    if (!Array.isArray(comptesAExclure) || comptesAExclure.length === 0) {
-                        console.log(`⚠️ Configuration ${configKey} invalide ou vide, ignorée`);
-                        continue;
-                    }
-                    
-                    // Générer un nom lisible pour la carte PL
-                    const plName = configKey
-                        .replace('comptes_', '')
-                        .replace(/_/g, ' ')
-                        .replace(/\b\w/g, l => l.toUpperCase());
-                    
-                    console.log(`\n📊 Calcul PL sans: ${plName}`);
-                    console.log(`📊 Config key: ${configKey}`);
-                    console.log(`📊 Comptes exclus: ${comptesAExclure.join(', ')}`);
-                    
-                    // Calculer le Cash Burn en excluant les comptes spécifiés
-                    const cashBurnExclusQuery = `
-                        SELECT COALESCE(SUM(e.total), 0) as total 
-                        FROM expenses e
-                        JOIN accounts a ON e.account_id = a.id
-                        WHERE a.account_name NOT IN (${comptesAExclure.map((_, i) => `$${i + 1}`).join(', ')})
-                        AND a.is_active = true 
-                        AND a.account_type IN ('classique', 'statut')
-                        AND e.expense_date >= $${comptesAExclure.length + 1} 
-                        AND e.expense_date <= $${comptesAExclure.length + 2}
-                    `;
-                    const exclusParams = [...comptesAExclure, startOfMonthStr, selectedDateStr];
-                    
-                    const cashBurnExclusResult = await pool.query(cashBurnExclusQuery, exclusParams);
-                    const cashBurnExclus = parseFloat(cashBurnExclusResult.rows[0].total) || 0;
-                    
-                    // Calculer les montants exclus (pour affichage)
-                    const depensesExclues = totalMonthlyExpenses - cashBurnExclus;
-                    
-                    // Recalculer les PL avec le Cash Burn alternatif (virements inclus dans PL de base)
-                    const plBaseAlt = cashBictorysValue + totalCreance - totalRemboursements + totalVirementsMois + totalStockSoir - cashBurnExclus;
-                    const plBrutAlt = plBaseAlt + stockVivantVariation - totalDeliveriesMonth;
-                    const plFinalAlt = plBrutAlt - chargesProrata;
-                    
-                    console.log(`📊 Cash Burn excluant ${comptesAExclure.join(', ')}: ${cashBurnExclus.toLocaleString()} FCFA`);
-                    console.log(`📊 Dépenses exclues: ${depensesExclues.toLocaleString()} FCFA`);
-                    console.log(`📊 PL Base alternatif: ${plBaseAlt.toLocaleString()} FCFA`);
-                    console.log(`📊 PL Final alternatif: ${Math.round(plFinalAlt).toLocaleString()} FCFA`);
-                    
-                    // Stocker le résultat
-                    plAlternatifs[configKey] = {
-                        configKey: configKey,
-                        nom: plName,
-                        comptesExclus: comptesAExclure,
-                        cashBurn: cashBurnExclus,
-                        depensesExclues: depensesExclues,
-                        plBase: plBaseAlt,
-                        plBrut: Math.round(plBrutAlt),
-                        plFinal: Math.round(plFinalAlt)
-                    };
+            // Lire la configuration depuis app_settings (helper async, fallback JSON)
+            const financialConfig = await getFinancialConfig();
+
+            // Extraire tous les noeuds commençant par 'comptes_'
+            const comptesConfigs = Object.keys(financialConfig)
+                .filter(key => key.startsWith('comptes_'))
+                .reduce((acc, key) => {
+                    acc[key] = financialConfig[key];
+                    return acc;
+                }, {});
+
+            console.log(`\n📊 EXTERNAL API: CALCUL PL ALTERNATIFS`);
+            console.log(`📊 Configurations trouvées: ${Object.keys(comptesConfigs).length}`);
+
+            // Pour chaque configuration, calculer un PL alternatif
+            for (const [configKey, comptesAExclure] of Object.entries(comptesConfigs)) {
+                if (!Array.isArray(comptesAExclure) || comptesAExclure.length === 0) {
+                    console.log(`⚠️ Configuration ${configKey} invalide ou vide, ignorée`);
+                    continue;
                 }
-                
-                console.log(`📊 FIN CALCUL PL ALTERNATIFS\n`);
+
+                // Générer un nom lisible pour la carte PL
+                const plName = configKey
+                    .replace('comptes_', '')
+                    .replace(/_/g, ' ')
+                    .replace(/\b\w/g, l => l.toUpperCase());
+
+                console.log(`\n📊 Calcul PL sans: ${plName}`);
+                console.log(`📊 Config key: ${configKey}`);
+                console.log(`📊 Comptes exclus: ${comptesAExclure.join(', ')}`);
+
+                // Calculer le Cash Burn en excluant les comptes spécifiés
+                const cashBurnExclusQuery = `
+                    SELECT COALESCE(SUM(e.total), 0) as total
+                    FROM expenses e
+                    JOIN accounts a ON e.account_id = a.id
+                    WHERE a.account_name NOT IN (${comptesAExclure.map((_, i) => `$${i + 1}`).join(', ')})
+                    AND a.is_active = true
+                    AND a.account_type IN ('classique', 'statut')
+                    AND e.expense_date >= $${comptesAExclure.length + 1}
+                    AND e.expense_date <= $${comptesAExclure.length + 2}
+                `;
+                const exclusParams = [...comptesAExclure, startOfMonthStr, selectedDateStr];
+
+                const cashBurnExclusResult = await pool.query(cashBurnExclusQuery, exclusParams);
+                const cashBurnExclus = parseFloat(cashBurnExclusResult.rows[0].total) || 0;
+
+                // Calculer les montants exclus (pour affichage)
+                const depensesExclues = totalMonthlyExpenses - cashBurnExclus;
+
+                // Recalculer les PL avec le Cash Burn alternatif (virements inclus dans PL de base)
+                const plBaseAlt = cashBictorysValue + totalCreance - totalRemboursements + totalVirementsMois + totalStockSoir - cashBurnExclus;
+                const plBrutAlt = plBaseAlt + stockVivantVariation - totalDeliveriesMonth;
+                const plFinalAlt = plBrutAlt - chargesProrata;
+
+                console.log(`📊 Cash Burn excluant ${comptesAExclure.join(', ')}: ${cashBurnExclus.toLocaleString()} FCFA`);
+                console.log(`📊 Dépenses exclues: ${depensesExclues.toLocaleString()} FCFA`);
+                console.log(`📊 PL Base alternatif: ${plBaseAlt.toLocaleString()} FCFA`);
+                console.log(`📊 PL Final alternatif: ${Math.round(plFinalAlt).toLocaleString()} FCFA`);
+
+                // Stocker le résultat
+                plAlternatifs[configKey] = {
+                    configKey: configKey,
+                    nom: plName,
+                    comptesExclus: comptesAExclure,
+                    cashBurn: cashBurnExclus,
+                    depensesExclues: depensesExclues,
+                    plBase: plBaseAlt,
+                    plBrut: Math.round(plBrutAlt),
+                    plFinal: Math.round(plFinalAlt)
+                };
             }
+
+            console.log(`📊 FIN CALCUL PL ALTERNATIFS\n`);
         } catch (error) {
             console.error('❌ EXTERNAL API: Erreur calcul PL alternatifs:', error);
         }
@@ -11487,7 +11522,7 @@ app.post('/api/transfert', requireSuperAdmin, async (req, res) => {
             return res.status(400).json({ error: 'Type ou statut de compte non autorisé' });
         }
         // Vérification du solde pour les transferts selon la configuration
-        const financialConfig = getFinancialConfig();
+        const financialConfig = await getFinancialConfig();
         const validateBalance = financialConfig.validate_expense_balance;
         
         if (validateBalance && source.account_type !== 'statut') {
@@ -13922,6 +13957,151 @@ const requireVirementMensuelAuth = (req, res, next) => {
     next();
 };
 
+// =====================================================
+// POINTS DE VENTE & VIREMENT CLIENTS
+// =====================================================
+
+// Validation : nom de client libre, mais on filtre les caractères dangereux pour limiter le risque XSS
+// même si le rendu côté client utilise textContent (défense en profondeur).
+function validateClientName(raw) {
+    if (typeof raw !== 'string') return { ok: false, error: 'client_name doit être une chaîne' };
+    const name = raw.trim();
+    if (name.length === 0) return { ok: false, error: 'client_name vide' };
+    if (name.length > 255) return { ok: false, error: 'client_name trop long (max 255)' };
+    // Interdit les caractères de contrôle, brackets HTML et accolades JS-like
+    if (/[ -<>{}]/.test(name)) {
+        return { ok: false, error: 'client_name contient des caractères interdits (<, >, {, }, contrôle)' };
+    }
+    return { ok: true, name };
+}
+
+function validatePointDeVente(raw) {
+    if (raw === null || raw === undefined || raw === '') return { ok: true, value: null };
+    if (typeof raw !== 'string') return { ok: false, error: 'point_de_vente doit être une chaîne ou null' };
+    const v = raw.trim();
+    if (v.length === 0) return { ok: true, value: null };
+    if (v.length > 255) return { ok: false, error: 'point_de_vente trop long (max 255)' };
+    if (/[ -<>{}]/.test(v)) {
+        return { ok: false, error: 'point_de_vente contient des caractères interdits' };
+    }
+    return { ok: true, value: v };
+}
+
+// Liste des points de vente actifs (basée sur stock_mata du dernier mois)
+app.get('/api/points-de-vente', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT DISTINCT point_de_vente
+            FROM stock_mata
+            WHERE date >= CURRENT_DATE - INTERVAL '1 month'
+              AND point_de_vente IS NOT NULL
+              AND point_de_vente <> ''
+            ORDER BY point_de_vente
+        `);
+        res.json(result.rows.map(r => r.point_de_vente));
+    } catch (error) {
+        console.error('Erreur GET /api/points-de-vente:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la lecture des points de vente' });
+    }
+});
+
+// Liste tous les clients virement avec leur point de vente
+app.get('/api/virement-clients', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT client_name, point_de_vente, is_internal, updated_at
+            FROM virement_clients
+            ORDER BY client_name
+        `);
+        res.json(result.rows);
+    } catch (error) {
+        console.error('Erreur GET /api/virement-clients:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la lecture des clients virement' });
+    }
+});
+
+// Crée ou remplace un client virement (UPSERT)
+app.post('/api/virement-clients', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const nameCheck = validateClientName(req.body?.client_name);
+        if (!nameCheck.ok) return res.status(400).json({ error: nameCheck.error });
+
+        const pdvCheck = validatePointDeVente(req.body?.point_de_vente);
+        if (!pdvCheck.ok) return res.status(400).json({ error: pdvCheck.error });
+
+        const isInternal = req.body?.is_internal === true;
+        const userId = req.session?.user?.id || null;
+
+        const result = await pool.query(`
+            INSERT INTO virement_clients (client_name, point_de_vente, is_internal, created_by, updated_by, updated_at)
+            VALUES ($1, $2, $3, $4, $4, CURRENT_TIMESTAMP)
+            ON CONFLICT (client_name) DO UPDATE SET
+                point_de_vente = EXCLUDED.point_de_vente,
+                is_internal = EXCLUDED.is_internal,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING client_name, point_de_vente, is_internal, updated_at
+        `, [nameCheck.name, pdvCheck.value, isInternal, userId]);
+
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Erreur POST /api/virement-clients:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la création du client virement' });
+    }
+});
+
+// Met à jour le point de vente et/ou le flag is_internal d'un client existant
+app.put('/api/virement-clients/:clientName', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const nameCheck = validateClientName(req.params.clientName);
+        if (!nameCheck.ok) return res.status(400).json({ error: nameCheck.error });
+
+        const pdvCheck = validatePointDeVente(req.body?.point_de_vente);
+        if (!pdvCheck.ok) return res.status(400).json({ error: pdvCheck.error });
+
+        const isInternal = req.body?.is_internal === true;
+        const userId = req.session?.user?.id || null;
+
+        const result = await pool.query(`
+            UPDATE virement_clients SET
+                point_de_vente = $2,
+                is_internal = $3,
+                updated_by = $4,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE client_name = $1
+            RETURNING client_name, point_de_vente, is_internal, updated_at
+        `, [nameCheck.name, pdvCheck.value, isInternal, userId]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Client virement introuvable' });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error('Erreur PUT /api/virement-clients:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la mise à jour du client virement' });
+    }
+});
+
+// Supprime un client virement (n'affecte pas les lignes existantes dans virement_mensuel)
+app.delete('/api/virement-clients/:clientName', requireVirementMensuelAuth, async (req, res) => {
+    try {
+        const nameCheck = validateClientName(req.params.clientName);
+        if (!nameCheck.ok) return res.status(400).json({ error: nameCheck.error });
+
+        const result = await pool.query(
+            'DELETE FROM virement_clients WHERE client_name = $1 RETURNING client_name',
+            [nameCheck.name]
+        );
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Client virement introuvable' });
+        }
+        res.json({ message: 'Client virement supprimé', client_name: result.rows[0].client_name });
+    } catch (error) {
+        console.error('Erreur DELETE /api/virement-clients:', error);
+        res.status(500).json({ error: 'Erreur serveur lors de la suppression du client virement' });
+    }
+});
+
 // Route pour obtenir les données Virement Mensuel d'un mois donné
 app.get('/api/virement-mensuel/:monthYear', requireVirementMensuelAuth, async (req, res) => {
     try {
@@ -15373,15 +15553,11 @@ app.get('/api/visualisation/pl-data', requireAdminAuth, async (req, res) => {
         console.log(`📊 Visualisation PL - Résultat SQL brut:`, result.rows);
         console.log(`📊 Visualisation PL - Nombre de lignes récupérées: ${result.rows.length}`);
         
-        // Lire l'estimation des charges fixes depuis le fichier JSON
+        // Lire l'estimation des charges fixes depuis app_settings (helper async, fallback JSON)
         let chargesFixesEstimation = 0; // Valeur par défaut (même que dashboard)
         try {
-            const configPath = path.join(__dirname, 'financial_settings.json');
-            if (fs.existsSync(configPath)) {
-                const configData = fs.readFileSync(configPath, 'utf8');
-                const financialConfig = JSON.parse(configData);
-                chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 0;
-            }
+            const financialConfig = await getFinancialConfig();
+            chargesFixesEstimation = parseFloat(financialConfig.charges_fixes_estimation) || 0;
         } catch (configError) {
             console.error('Erreur lecture config financière pour visualisation PL:', configError);
             chargesFixesEstimation = 0;
@@ -16426,35 +16602,47 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
 
         console.log(`📅 EXTERNAL: Période demandée - Du ${startDate} au ${endDate}`);
 
-        // Charger le mapping client -> point de vente
-        let virementMapping = {};
-        let exclusionList = [];
+        // Charger le mapping fallback depuis virementMapping.json (utilisé si la DB n'a pas l'info)
+        let jsonMapping = {};
+        let jsonExclusionList = [];
         try {
             const mappingPath = path.join(__dirname, 'virementMapping.json');
             if (fs.existsSync(mappingPath)) {
-                const mappingData = fs.readFileSync(mappingPath, 'utf8');
-                const fullMapping = JSON.parse(mappingData);
-                
-                // Extraire la liste d'exclusion
-                exclusionList = fullMapping.virementPointDeVenteInterneToExclude || [];
-                
-                // Retirer la liste d'exclusion du mapping pour ne garder que les mappings client -> point de vente
-                virementMapping = { ...fullMapping };
-                delete virementMapping.virementPointDeVenteInterneToExclude;
-                
-                console.log('📋 EXTERNAL: Mapping virement chargé:', Object.keys(virementMapping).length, 'mappings');
-                console.log('🚫 EXTERNAL: Points de vente à exclure:', exclusionList);
+                const fullMapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
+                jsonExclusionList = fullMapping.virementPointDeVenteInterneToExclude || [];
+                jsonMapping = { ...fullMapping };
+                delete jsonMapping.virementPointDeVenteInterneToExclude;
+                console.log('📋 EXTERNAL: Fallback JSON chargé:', Object.keys(jsonMapping).length, 'mappings,', jsonExclusionList.length, 'exclusions');
             } else {
-                console.log('⚠️ EXTERNAL: Fichier virementMapping.json non trouvé, mapping vide');
+                console.log('⚠️ EXTERNAL: Fichier virementMapping.json non trouvé, fallback vide');
             }
         } catch (error) {
-            console.error('❌ EXTERNAL: Erreur chargement mapping virement:', error);
-            // Continue sans mapping en cas d'erreur
+            console.error('❌ EXTERNAL: Erreur chargement fallback JSON:', error.message);
+        }
+
+        // Charger le mapping depuis la DB (source de vérité)
+        const dbMapping = {};
+        try {
+            const dbResult = await pool.query('SELECT client_name, point_de_vente, is_internal FROM virement_clients');
+            for (const row of dbResult.rows) {
+                dbMapping[row.client_name] = {
+                    point_de_vente: row.point_de_vente,
+                    is_internal: row.is_internal === true
+                };
+            }
+            console.log('📋 EXTERNAL: Mapping DB chargé:', Object.keys(dbMapping).length, 'clients');
+        } catch (error) {
+            // Si la table n'existe pas (migration non appliquée), on tombe en fallback JSON pur
+            if (error.code !== '42P01') {
+                console.error('❌ EXTERNAL: Erreur lecture virement_clients:', error.message);
+            } else {
+                console.log('⚠️ EXTERNAL: Table virement_clients absente, fallback JSON uniquement');
+            }
         }
 
         // Récupérer les virements groupés par client pour la période
         const virementsQuery = `
-            SELECT 
+            SELECT
                 client,
                 SUM(valeur) as total_virement,
                 COUNT(*) as nombre_virements,
@@ -16467,15 +16655,18 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
         `;
 
         const result = await pool.query(virementsQuery, [startDate, endDate]);
-        
-        // Mapper les résultats avec le pointDevente
+
+        // Résolution : DB d'abord, JSON en fallback. is_internal = DB OR jsonExclusionList.
         let virementsParClient = result.rows.map(row => {
             const clientName = row.client;
-            const pointDevente = virementMapping[clientName] || null;
-            
+            const dbEntry = dbMapping[clientName];
+            const pointDevente = (dbEntry && dbEntry.point_de_vente) || jsonMapping[clientName] || null;
+            const isInternal = (dbEntry && dbEntry.is_internal) || jsonExclusionList.includes(clientName);
+
             return {
                 client: clientName,
                 pointDevente: pointDevente,
+                is_internal: isInternal,
                 total_virement: parseInt(row.total_virement) || 0,
                 nombre_virements: parseInt(row.nombre_virements) || 0,
                 premiere_date: row.premiere_date,
@@ -16484,10 +16675,10 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
             };
         });
 
-        // Filtrer les virements dont le nom de client (clé) est dans la liste d'exclusion
+        // Filtrer les virements internes (nouvelle source : flag DB ou JSON exclusion list)
         virementsParClient = virementsParClient.filter(v => {
-            if (exclusionList.includes(v.client)) {
-                console.log(`🚫 EXTERNAL: Exclusion de ${v.client}`);
+            if (v.is_internal) {
+                console.log(`🚫 EXTERNAL: Exclusion de ${v.client} (interne)`);
                 return false;
             }
             return true;
@@ -16550,29 +16741,94 @@ app.get('/external/api/virement-mensuel', requireAdminAuth, async (req, res) => 
     }
 
     try {
-        const result = await pool.query(`
-            SELECT
-                TO_CHAR(vm.date, 'YYYY-MM-DD') AS date,
-                vm.valeur,
-                vm.client,
-                vm.month_year,
-                TO_CHAR(vm.updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
-                TO_CHAR(vm.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
-                u.username AS saisi_par
-            FROM virement_mensuel vm
-            LEFT JOIN users u ON u.id = vm.updated_by
-            WHERE vm.date >= $1 AND vm.date <= $2
-            ORDER BY vm.date, vm.client
-        `, [date_debut, date_fin]);
+        // Charger le fallback JSON
+        let jsonMapping = {};
+        let jsonExclusionList = [];
+        try {
+            const mappingPath = path.join(__dirname, 'virementMapping.json');
+            if (fs.existsSync(mappingPath)) {
+                const fullMapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
+                jsonExclusionList = fullMapping.virementPointDeVenteInterneToExclude || [];
+                jsonMapping = { ...fullMapping };
+                delete jsonMapping.virementPointDeVenteInterneToExclude;
+            }
+        } catch (error) {
+            console.error('❌ EXTERNAL virement-mensuel: erreur fallback JSON:', error.message);
+        }
+
+        // LEFT JOIN sur virement_clients pour récupérer point_de_vente et is_internal.
+        // Si la table n'existe pas (migration non appliquée), Postgres renverra une erreur 42P01 :
+        // dans ce cas on retombe sur la requête historique sans jointure + fallback JSON.
+        let rows;
+        try {
+            const result = await pool.query(`
+                SELECT
+                    TO_CHAR(vm.date, 'YYYY-MM-DD') AS date,
+                    vm.valeur,
+                    vm.client,
+                    vm.month_year,
+                    TO_CHAR(vm.updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
+                    TO_CHAR(vm.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                    u.username AS saisi_par,
+                    vc.point_de_vente AS db_point_de_vente,
+                    COALESCE(vc.is_internal, FALSE) AS db_is_internal
+                FROM virement_mensuel vm
+                LEFT JOIN users u ON u.id = vm.updated_by
+                LEFT JOIN virement_clients vc ON vc.client_name = vm.client
+                WHERE vm.date >= $1 AND vm.date <= $2
+                ORDER BY vm.date, vm.client
+            `, [date_debut, date_fin]);
+            rows = result.rows;
+        } catch (joinError) {
+            if (joinError.code === '42P01') {
+                console.log('⚠️ EXTERNAL virement-mensuel: table virement_clients absente, fallback JSON');
+                const fallback = await pool.query(`
+                    SELECT
+                        TO_CHAR(vm.date, 'YYYY-MM-DD') AS date,
+                        vm.valeur,
+                        vm.client,
+                        vm.month_year,
+                        TO_CHAR(vm.updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
+                        TO_CHAR(vm.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                        u.username AS saisi_par,
+                        NULL AS db_point_de_vente,
+                        FALSE AS db_is_internal
+                    FROM virement_mensuel vm
+                    LEFT JOIN users u ON u.id = vm.updated_by
+                    WHERE vm.date >= $1 AND vm.date <= $2
+                    ORDER BY vm.date, vm.client
+                `, [date_debut, date_fin]);
+                rows = fallback.rows;
+            } else {
+                throw joinError;
+            }
+        }
+
+        // Résolution finale : DB d'abord, JSON en fallback
+        const operations = rows.map(row => {
+            const pointDevente = row.db_point_de_vente || jsonMapping[row.client] || null;
+            const isInternal = row.db_is_internal === true || jsonExclusionList.includes(row.client);
+            return {
+                date: row.date,
+                valeur: row.valeur,
+                client: row.client,
+                month_year: row.month_year,
+                updated_at: row.updated_at,
+                created_at: row.created_at,
+                saisi_par: row.saisi_par,
+                pointDevente,
+                is_internal: isInternal
+            };
+        });
 
         return res.json({
             success: true,
             period: { date_debut, date_fin },
-            total: result.rows.length,
-            operations: result.rows,
+            total: operations.length,
+            operations,
             metadata: {
                 generated_at: new Date().toISOString(),
-                api_version: '1.0'
+                api_version: '1.1'
             }
         });
     } catch (error) {
