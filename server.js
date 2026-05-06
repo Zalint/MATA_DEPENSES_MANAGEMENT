@@ -51,10 +51,45 @@ function cleanEncoding(obj) {
     return obj;
 }
 
-// Fonction utilitaire pour lire la configuration financière (async).
+// Code Postgres pour "table absente" — utilisé en fallback gracieux quand une migration
+// n'a pas encore été appliquée.
+const PG_UNDEFINED_TABLE = '42P01';
+
+// =====================================================
+// CACHES TTL POUR CONFIGURATIONS PARTAGÉES
+// =====================================================
+// getFinancialConfig() et getVirementClientsContext() sont appelées sur des chemins très
+// fréquents (chaque dashboard, chaque export, chaque appel API externe). Sans cache, chaque
+// requête entraîne un fs.readFileSync + une requête SQL. On cache 30 s en mémoire et on
+// invalide explicitement après chaque écriture.
+// Trade-off : sur déploiement multi-instance, une écriture sur l'instance A n'invalide pas
+// l'instance B → fenêtre max 30 s d'incohérence. Acceptable pour des paramètres modifiés
+// très rarement (typiquement quelques fois par mois).
+const CONFIG_CACHE_TTL_MS = 30_000;
+
+let financialConfigCache = null;
+let financialConfigCacheTime = 0;
+function invalidateFinancialConfigCache() {
+    financialConfigCache = null;
+    financialConfigCacheTime = 0;
+}
+
+let virementClientsContextCache = null;
+let virementClientsContextCacheTime = 0;
+function invalidateVirementClientsCache() {
+    virementClientsContextCache = null;
+    virementClientsContextCacheTime = 0;
+}
+
+// Fonction utilitaire pour lire la configuration financière (async, mémorisée 30 s).
 // Source de vérité : table app_settings. Fallback : financial_settings.json. Defaults hardcodés en dernier recours.
 // Précédence : defaults < JSON file < DB (DB écrase tout)
 async function getFinancialConfig() {
+    const now = Date.now();
+    if (financialConfigCache && (now - financialConfigCacheTime) < CONFIG_CACHE_TTL_MS) {
+        return financialConfigCache;
+    }
+
     const defaults = {
         charges_fixes_estimation: 5320000,
         validate_expense_balance: true,
@@ -75,18 +110,25 @@ async function getFinancialConfig() {
     let dbConfig = {};
     try {
         const r = await pool.query('SELECT key, value FROM app_settings');
-        dbConfig = Object.fromEntries(r.rows.map(row => [row.key, row.value]));
+        // Filtrer les valeurs nulles : un setting null ne doit pas écraser le default/JSON
+        dbConfig = Object.fromEntries(
+            r.rows.filter(row => row.value !== null).map(row => [row.key, row.value])
+        );
     } catch (error) {
         // Table absente ou DB inaccessible : on tombe en fallback JSON sans bruit excessif
-        if (error.code !== '42P01') {
+        if (error.code !== PG_UNDEFINED_TABLE) {
             console.error('Erreur lecture app_settings (fallback JSON):', error.message);
         }
     }
 
-    return { ...defaults, ...jsonConfig, ...dbConfig };
+    const merged = { ...defaults, ...jsonConfig, ...dbConfig };
+    financialConfigCache = merged;
+    financialConfigCacheTime = now;
+    return merged;
 }
 
 // UPSERT d'une clé dans app_settings. La valeur est sérialisée en JSONB côté Postgres.
+// Invalide le cache pour que la valeur soit visible immédiatement sur l'instance courante.
 async function setFinancialSetting(key, value, userId = null) {
     await pool.query(
         `INSERT INTO app_settings (key, value, updated_by, updated_at)
@@ -97,6 +139,55 @@ async function setFinancialSetting(key, value, userId = null) {
              updated_by = EXCLUDED.updated_by`,
         [key, JSON.stringify(value), userId]
     );
+    invalidateFinancialConfigCache();
+}
+
+// Charge le mapping client→point_de_vente depuis la DB + le fallback JSON, mémorisé 30 s.
+// Utilisé par /external/api/virement et /external/api/virement-mensuel.
+// Retourne { dbMapping, jsonMapping, jsonExclusionList, dbAvailable }.
+async function getVirementClientsContext() {
+    const now = Date.now();
+    if (virementClientsContextCache && (now - virementClientsContextCacheTime) < CONFIG_CACHE_TTL_MS) {
+        return virementClientsContextCache;
+    }
+
+    // Fallback JSON
+    let jsonMapping = {};
+    let jsonExclusionList = [];
+    try {
+        const mappingPath = path.join(__dirname, 'virementMapping.json');
+        if (fs.existsSync(mappingPath)) {
+            const fullMapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
+            jsonExclusionList = fullMapping.virementPointDeVenteInterneToExclude || [];
+            jsonMapping = { ...fullMapping };
+            delete jsonMapping.virementPointDeVenteInterneToExclude;
+        }
+    } catch (error) {
+        console.error('Erreur lecture virementMapping.json (fallback):', error.message);
+    }
+
+    // DB — source de vérité
+    const dbMapping = {};
+    let dbAvailable = true;
+    try {
+        const dbResult = await pool.query('SELECT client_name, point_de_vente, is_internal FROM virement_clients');
+        for (const row of dbResult.rows) {
+            dbMapping[row.client_name] = {
+                point_de_vente: row.point_de_vente,
+                is_internal: row.is_internal === true
+            };
+        }
+    } catch (error) {
+        dbAvailable = false;
+        if (error.code !== PG_UNDEFINED_TABLE) {
+            console.error('Erreur lecture virement_clients (fallback JSON):', error.message);
+        }
+    }
+
+    const ctx = { dbMapping, jsonMapping, jsonExclusionList, dbAvailable };
+    virementClientsContextCache = ctx;
+    virementClientsContextCacheTime = now;
+    return ctx;
 }
 
 // Fonction helper pour forcer la synchronisation de tous les comptes après modifications de crédit
@@ -8026,25 +8117,56 @@ app.get('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
     }
 });
 
+// Bornes anti-DoS pour PUT /api/admin/config/financial
+const MAX_SETTINGS_KEYS_PER_REQUEST = 50;
+const MAX_SETTING_VALUE_BYTES = 64 * 1024; // 64 KB par valeur après JSON.stringify
+
 app.put('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
     try {
         if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
             return res.status(400).json({ error: 'Body must be a JSON object of settings' });
         }
 
+        const entries = Object.entries(req.body);
+        // Garde anti-flood : un body avec des milliers de clés ferait autant d'UPSERTs en une transaction
+        if (entries.length > MAX_SETTINGS_KEYS_PER_REQUEST) {
+            return res.status(400).json({
+                error: `Trop de paramètres dans une seule requête (max ${MAX_SETTINGS_KEYS_PER_REQUEST})`,
+                received: entries.length
+            });
+        }
+
         const userId = req.session?.user?.id || null;
         // 'description' est de la documentation et n'est pas persistée en base
         const skipKeys = new Set(['description']);
 
-        // UPSERT clé par clé. Une transaction garde l'opération atomique.
+        // Pré-validation : on vérifie toutes les clés/valeurs avant d'ouvrir la transaction.
+        // Évite d'allouer une connexion + commencer une transaction qui rollback systématiquement
+        // pour un payload évidemment invalide.
+        const validated = [];
+        for (const [key, value] of entries) {
+            if (skipKeys.has(key)) continue;
+            if (typeof key !== 'string' || key.length === 0 || key.length > 100) {
+                return res.status(400).json({ error: `Invalid setting key: ${JSON.stringify(key)}` });
+            }
+            // Garde anti-DoS : refuse une valeur dont la sérialisation JSON dépasse la limite
+            const serialized = JSON.stringify(value);
+            if (serialized === undefined) {
+                return res.status(400).json({ error: `Invalid value for ${key}: not JSON-serialisable` });
+            }
+            if (Buffer.byteLength(serialized, 'utf8') > MAX_SETTING_VALUE_BYTES) {
+                return res.status(413).json({
+                    error: `Valeur trop volumineuse pour ${key} (max ${MAX_SETTING_VALUE_BYTES} octets)`,
+                });
+            }
+            validated.push({ key, serialized });
+        }
+
+        // UPSERT clé par clé dans une transaction atomique.
         const client = await pool.connect();
         try {
             await client.query('BEGIN');
-            for (const [key, value] of Object.entries(req.body)) {
-                if (skipKeys.has(key)) continue;
-                if (typeof key !== 'string' || key.length === 0 || key.length > 100) {
-                    throw new Error(`Invalid setting key: ${key}`);
-                }
+            for (const { key, serialized } of validated) {
                 await client.query(
                     `INSERT INTO app_settings (key, value, updated_by, updated_at)
                      VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
@@ -8052,7 +8174,7 @@ app.put('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
                          value = EXCLUDED.value,
                          updated_at = CURRENT_TIMESTAMP,
                          updated_by = EXCLUDED.updated_by`,
-                    [key, JSON.stringify(value), userId]
+                    [key, serialized, userId]
                 );
             }
             await client.query('COMMIT');
@@ -8062,6 +8184,9 @@ app.put('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
         } finally {
             client.release();
         }
+
+        // Rendre les nouvelles valeurs visibles immédiatement sur cette instance
+        invalidateFinancialConfigCache();
 
         res.json({ message: 'Financial settings configuration updated successfully' });
     } catch (error) {
@@ -13963,13 +14088,19 @@ const requireVirementMensuelAuth = (req, res, next) => {
 
 // Validation : nom de client libre, mais on filtre les caractères dangereux pour limiter le risque XSS
 // même si le rendu côté client utilise textContent (défense en profondeur).
+// Caractères interdits dans les noms : NUL..US (0x00-0x1F), DEL (0x7F), brackets HTML/JS dangereux.
+// Réutilisé par validateClientName et validatePointDeVente.
+// IMPORTANT : conserver les escapes explicites \xNN. Ne pas remplacer par les caractères de
+// contrôle littéraux — illisibles en revue de code, invisibles dans la plupart des éditeurs.
+const FORBIDDEN_CHARS_REGEX = /[\x00-\x1F\x7F<>{}]/;
+
 function validateClientName(raw) {
     if (typeof raw !== 'string') return { ok: false, error: 'client_name doit être une chaîne' };
     const name = raw.trim();
     if (name.length === 0) return { ok: false, error: 'client_name vide' };
     if (name.length > 255) return { ok: false, error: 'client_name trop long (max 255)' };
     // Interdit les caractères de contrôle, brackets HTML et accolades JS-like
-    if (/[ -<>{}]/.test(name)) {
+    if (FORBIDDEN_CHARS_REGEX.test(name)) {
         return { ok: false, error: 'client_name contient des caractères interdits (<, >, {, }, contrôle)' };
     }
     return { ok: true, name };
@@ -13981,7 +14112,7 @@ function validatePointDeVente(raw) {
     const v = raw.trim();
     if (v.length === 0) return { ok: true, value: null };
     if (v.length > 255) return { ok: false, error: 'point_de_vente trop long (max 255)' };
-    if (/[ -<>{}]/.test(v)) {
+    if (FORBIDDEN_CHARS_REGEX.test(v)) {
         return { ok: false, error: 'point_de_vente contient des caractères interdits' };
     }
     return { ok: true, value: v };
@@ -14043,6 +14174,7 @@ app.post('/api/virement-clients', requireVirementMensuelAuth, async (req, res) =
             RETURNING client_name, point_de_vente, is_internal, updated_at
         `, [nameCheck.name, pdvCheck.value, isInternal, userId]);
 
+        invalidateVirementClientsCache();
         res.json(result.rows[0]);
     } catch (error) {
         console.error('Erreur POST /api/virement-clients:', error);
@@ -14075,6 +14207,7 @@ app.put('/api/virement-clients/:clientName', requireVirementMensuelAuth, async (
         if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Client virement introuvable' });
         }
+        invalidateVirementClientsCache();
         res.json(result.rows[0]);
     } catch (error) {
         console.error('Erreur PUT /api/virement-clients:', error);
@@ -14095,6 +14228,7 @@ app.delete('/api/virement-clients/:clientName', requireVirementMensuelAuth, asyn
         if (result.rowCount === 0) {
             return res.status(404).json({ error: 'Client virement introuvable' });
         }
+        invalidateVirementClientsCache();
         res.json({ message: 'Client virement supprimé', client_name: result.rows[0].client_name });
     } catch (error) {
         console.error('Erreur DELETE /api/virement-clients:', error);
@@ -16602,42 +16736,10 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
 
         console.log(`📅 EXTERNAL: Période demandée - Du ${startDate} au ${endDate}`);
 
-        // Charger le mapping fallback depuis virementMapping.json (utilisé si la DB n'a pas l'info)
-        let jsonMapping = {};
-        let jsonExclusionList = [];
-        try {
-            const mappingPath = path.join(__dirname, 'virementMapping.json');
-            if (fs.existsSync(mappingPath)) {
-                const fullMapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
-                jsonExclusionList = fullMapping.virementPointDeVenteInterneToExclude || [];
-                jsonMapping = { ...fullMapping };
-                delete jsonMapping.virementPointDeVenteInterneToExclude;
-                console.log('📋 EXTERNAL: Fallback JSON chargé:', Object.keys(jsonMapping).length, 'mappings,', jsonExclusionList.length, 'exclusions');
-            } else {
-                console.log('⚠️ EXTERNAL: Fichier virementMapping.json non trouvé, fallback vide');
-            }
-        } catch (error) {
-            console.error('❌ EXTERNAL: Erreur chargement fallback JSON:', error.message);
-        }
-
-        // Charger le mapping depuis la DB (source de vérité)
-        const dbMapping = {};
-        try {
-            const dbResult = await pool.query('SELECT client_name, point_de_vente, is_internal FROM virement_clients');
-            for (const row of dbResult.rows) {
-                dbMapping[row.client_name] = {
-                    point_de_vente: row.point_de_vente,
-                    is_internal: row.is_internal === true
-                };
-            }
-            console.log('📋 EXTERNAL: Mapping DB chargé:', Object.keys(dbMapping).length, 'clients');
-        } catch (error) {
-            // Si la table n'existe pas (migration non appliquée), on tombe en fallback JSON pur
-            if (error.code !== '42P01') {
-                console.error('❌ EXTERNAL: Erreur lecture virement_clients:', error.message);
-            } else {
-                console.log('⚠️ EXTERNAL: Table virement_clients absente, fallback JSON uniquement');
-            }
+        // Charger le mapping client→PdV via le helper mémorisé (DB + fallback JSON)
+        const { dbMapping, jsonMapping, jsonExclusionList, dbAvailable } = await getVirementClientsContext();
+        if (!dbAvailable) {
+            console.log('⚠️ EXTERNAL: virement_clients indisponible, fallback JSON uniquement');
         }
 
         // Récupérer les virements groupés par client pour la période
@@ -16705,7 +16807,8 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
             virements_par_client: virementsParClient,
             metadata: {
                 generated_at: new Date().toISOString(),
-                api_version: "1.0"
+                // 1.1 : ajout du champ is_internal par client + résolution via DB virement_clients
+                api_version: "1.1"
             }
         };
 
@@ -16741,73 +16844,34 @@ app.get('/external/api/virement-mensuel', requireAdminAuth, async (req, res) => 
     }
 
     try {
-        // Charger le fallback JSON
-        let jsonMapping = {};
-        let jsonExclusionList = [];
-        try {
-            const mappingPath = path.join(__dirname, 'virementMapping.json');
-            if (fs.existsSync(mappingPath)) {
-                const fullMapping = JSON.parse(fs.readFileSync(mappingPath, 'utf8'));
-                jsonExclusionList = fullMapping.virementPointDeVenteInterneToExclude || [];
-                jsonMapping = { ...fullMapping };
-                delete jsonMapping.virementPointDeVenteInterneToExclude;
-            }
-        } catch (error) {
-            console.error('❌ EXTERNAL virement-mensuel: erreur fallback JSON:', error.message);
+        // Récupérer le mapping client→PdV via le helper mémorisé.
+        // Plutôt que de faire un LEFT JOIN SQL (qui exigeait un fallback à 42P01), on enrichit
+        // les lignes côté JS — la map fait quelques dizaines d'entrées au plus, c'est gratuit.
+        const { dbMapping, jsonMapping, jsonExclusionList, dbAvailable } = await getVirementClientsContext();
+        if (!dbAvailable) {
+            console.log('⚠️ EXTERNAL virement-mensuel: virement_clients indisponible, fallback JSON');
         }
 
-        // LEFT JOIN sur virement_clients pour récupérer point_de_vente et is_internal.
-        // Si la table n'existe pas (migration non appliquée), Postgres renverra une erreur 42P01 :
-        // dans ce cas on retombe sur la requête historique sans jointure + fallback JSON.
-        let rows;
-        try {
-            const result = await pool.query(`
-                SELECT
-                    TO_CHAR(vm.date, 'YYYY-MM-DD') AS date,
-                    vm.valeur,
-                    vm.client,
-                    vm.month_year,
-                    TO_CHAR(vm.updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
-                    TO_CHAR(vm.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
-                    u.username AS saisi_par,
-                    vc.point_de_vente AS db_point_de_vente,
-                    COALESCE(vc.is_internal, FALSE) AS db_is_internal
-                FROM virement_mensuel vm
-                LEFT JOIN users u ON u.id = vm.updated_by
-                LEFT JOIN virement_clients vc ON vc.client_name = vm.client
-                WHERE vm.date >= $1 AND vm.date <= $2
-                ORDER BY vm.date, vm.client
-            `, [date_debut, date_fin]);
-            rows = result.rows;
-        } catch (joinError) {
-            if (joinError.code === '42P01') {
-                console.log('⚠️ EXTERNAL virement-mensuel: table virement_clients absente, fallback JSON');
-                const fallback = await pool.query(`
-                    SELECT
-                        TO_CHAR(vm.date, 'YYYY-MM-DD') AS date,
-                        vm.valeur,
-                        vm.client,
-                        vm.month_year,
-                        TO_CHAR(vm.updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
-                        TO_CHAR(vm.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
-                        u.username AS saisi_par,
-                        NULL AS db_point_de_vente,
-                        FALSE AS db_is_internal
-                    FROM virement_mensuel vm
-                    LEFT JOIN users u ON u.id = vm.updated_by
-                    WHERE vm.date >= $1 AND vm.date <= $2
-                    ORDER BY vm.date, vm.client
-                `, [date_debut, date_fin]);
-                rows = fallback.rows;
-            } else {
-                throw joinError;
-            }
-        }
+        const result = await pool.query(`
+            SELECT
+                TO_CHAR(vm.date, 'YYYY-MM-DD') AS date,
+                vm.valeur,
+                vm.client,
+                vm.month_year,
+                TO_CHAR(vm.updated_at, 'YYYY-MM-DD HH24:MI:SS') AS updated_at,
+                TO_CHAR(vm.created_at, 'YYYY-MM-DD HH24:MI:SS') AS created_at,
+                u.username AS saisi_par
+            FROM virement_mensuel vm
+            LEFT JOIN users u ON u.id = vm.updated_by
+            WHERE vm.date >= $1 AND vm.date <= $2
+            ORDER BY vm.date, vm.client
+        `, [date_debut, date_fin]);
 
         // Résolution finale : DB d'abord, JSON en fallback
-        const operations = rows.map(row => {
-            const pointDevente = row.db_point_de_vente || jsonMapping[row.client] || null;
-            const isInternal = row.db_is_internal === true || jsonExclusionList.includes(row.client);
+        const operations = result.rows.map(row => {
+            const dbEntry = dbMapping[row.client];
+            const pointDevente = (dbEntry && dbEntry.point_de_vente) || jsonMapping[row.client] || null;
+            const isInternal = (dbEntry && dbEntry.is_internal) || jsonExclusionList.includes(row.client);
             return {
                 date: row.date,
                 valeur: row.valeur,
