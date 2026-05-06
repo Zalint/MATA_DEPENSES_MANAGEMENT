@@ -121,17 +121,97 @@ function showNotification(message, type = 'info') {
     notification.textContent = message;
     notification.className = `notification ${type}`;
     notification.classList.add('show');
-    
+
     // Supprimer tout timeout existant pour éviter les conflits
     if (notification.timeoutId) {
         clearTimeout(notification.timeoutId);
     }
-    
+
     // Programmer la disparition après 5 secondes
     notification.timeoutId = setTimeout(() => {
         notification.classList.remove('show');
         notification.timeoutId = null;
     }, 5000);
+}
+
+// Modal de confirmation moderne - alternative à window.confirm().
+// Retourne une Promise<boolean> : true = OK, false = Cancel/Échap/clic en dehors.
+// Tous les textes sont insérés via textContent → pas d'injection HTML possible.
+function confirmModal({ title = 'Confirmation', message = '', okLabel = 'OK', cancelLabel = 'Annuler', danger = false } = {}) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+
+        const dialog = document.createElement('div');
+        dialog.className = 'confirm-modal-dialog' + (danger ? ' confirm-modal-danger' : '');
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'confirm-modal-title';
+        titleEl.textContent = title;
+        dialog.appendChild(titleEl);
+
+        if (message) {
+            const messageEl = document.createElement('div');
+            messageEl.className = 'confirm-modal-message';
+            // Préserve les retours à la ligne
+            message.split('\n').forEach((line, i, arr) => {
+                messageEl.appendChild(document.createTextNode(line));
+                if (i < arr.length - 1) messageEl.appendChild(document.createElement('br'));
+            });
+            dialog.appendChild(messageEl);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'confirm-modal-actions';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-secondary confirm-modal-cancel';
+        cancelBtn.textContent = cancelLabel;
+
+        const okBtn = document.createElement('button');
+        okBtn.type = 'button';
+        okBtn.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary') + ' confirm-modal-ok';
+        okBtn.textContent = okLabel;
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(okBtn);
+        dialog.appendChild(actions);
+
+        overlay.appendChild(dialog);
+
+        const previouslyFocused = document.activeElement;
+        const close = (result) => {
+            overlay.removeEventListener('click', onOverlayClick);
+            document.removeEventListener('keydown', onKey);
+            overlay.classList.add('confirm-modal-closing');
+            // Petite anim de sortie avant de retirer le DOM
+            setTimeout(() => overlay.remove(), 120);
+            if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+                previouslyFocused.focus();
+            }
+            resolve(result);
+        };
+
+        const onOverlayClick = (event) => {
+            if (event.target === overlay) close(false);
+        };
+        const onKey = (event) => {
+            if (event.key === 'Escape') { event.preventDefault(); close(false); }
+            else if (event.key === 'Enter') { event.preventDefault(); close(true); }
+        };
+
+        cancelBtn.addEventListener('click', () => close(false));
+        okBtn.addEventListener('click', () => close(true));
+        overlay.addEventListener('click', onOverlayClick);
+        document.addEventListener('keydown', onKey);
+
+        document.body.appendChild(overlay);
+        // Focus sur le bouton dangereux/OK pour permettre Tab et Entrée
+        okBtn.focus();
+    });
 }
 
 // Fonction pour charger dynamiquement l'agent AI

@@ -161,16 +161,33 @@ async function loadVirementMensuel() {
                 const dateStr = row.date;
                 const client = row.client;
                 const valeur = parseInt(row.valeur) || 0;
-                
+
                 if (!virementData[dateStr]) {
                     virementData[dateStr] = {};
                 }
-                
+
                 virementData[dateStr][client] = valeur;
                 clientsList.add(client);
             });
         }
-        
+
+        // S'assurer que les clients déclarés dans virement_clients (métadonnées en DB)
+        // apparaissent même s'ils n'ont aucune ligne dans virement_mensuel pour ce mois.
+        // Sinon un client créé via le formulaire mais sauvegardé avec uniquement des 0
+        // disparaît au rechargement (la sauvegarde ne persiste pas les valeurs nulles).
+        // On rafraîchit d'abord la map au cas où d'autres onglets auraient ajouté un client.
+        await loadVirementClientsMeta();
+        for (const clientName of virementClientsMap.keys()) {
+            if (!clientsList.has(clientName)) {
+                clientsList.add(clientName);
+                Object.keys(virementData).forEach(dateStr => {
+                    if (virementData[dateStr][clientName] === undefined) {
+                        virementData[dateStr][clientName] = 0;
+                    }
+                });
+            }
+        }
+
         // Afficher les badges des clients
         renderClientsBadges();
         
@@ -236,8 +253,15 @@ async function addNewClient() {
         return;
     }
 
-    if (clientsList.has(clientName)) {
-        showNotification('Ce client existe déjà', 'error');
+    // Vérification de doublon insensible à la casse : "ABC" et "abc" sont considérés
+    // comme le même client. On compare contre les badges affichés ET contre les
+    // métadonnées DB (qui peuvent contenir des clients sans virement saisi).
+    const lowerName = clientName.toLowerCase();
+    const dupFromBadges = Array.from(clientsList).find(c => c.toLowerCase() === lowerName);
+    const dupFromMeta = Array.from(virementClientsMap.keys()).find(c => c.toLowerCase() === lowerName);
+    const existing = dupFromBadges || dupFromMeta;
+    if (existing) {
+        showNotification(`Ce client existe déjà sous le nom "${existing}" (insensible à la casse)`, 'error');
         return;
     }
 
@@ -362,41 +386,57 @@ async function editClientMeta(clientName) {
 
 // Supprimer un client
 async function removeClient(clientName) {
-    if (!confirm(`Voulez-vous vraiment supprimer le client "${clientName}" ?\n\nToutes ses données seront supprimées immédiatement.`)) {
-        return;
-    }
-    
+    const confirmed = await confirmModal({
+        title: 'Supprimer le client',
+        message: `Voulez-vous vraiment supprimer le client "${clientName}" ?\n\nToutes ses lignes de virement pour ce mois ainsi que ses métadonnées (point de vente, flag interne) seront supprimées définitivement.`,
+        okLabel: 'Supprimer',
+        cancelLabel: 'Annuler',
+        danger: true
+    });
+    if (!confirmed) return;
+
     try {
-        // Appeler l'API pour supprimer le client de la base de données
+        // 1. Supprimer les lignes de virement_mensuel pour le mois courant
         if (currentVirementMonth) {
             const response = await fetch(`/api/virement-mensuel/${currentVirementMonth}/client/${encodeURIComponent(clientName)}`, {
                 method: 'DELETE'
             });
-            
             const result = await response.json();
-            
             if (!result.success) {
-                throw new Error(result.error || 'Erreur lors de la suppression');
+                throw new Error(result.error || 'Erreur suppression virements du mois');
             }
-            
-            console.log(`💸 Client supprimé en base:`, result);
+            console.log(`💸 Virements du mois supprimés:`, result);
         }
-        
-        // Retirer le client de l'UI
+
+        // 2. Supprimer la métadonnée du client dans virement_clients.
+        // Sinon le client réapparaît au prochain rechargement (loadVirementMensuel le récupère
+        // depuis virementClientsMap pour les clients qui ont une métadonnée mais pas encore de virement).
+        // 404 = pas de métadonnée → on ignore silencieusement (le client n'avait que des virements).
+        const metaResponse = await fetch(`/api/virement-clients/${encodeURIComponent(clientName)}`, {
+            method: 'DELETE'
+        });
+        if (metaResponse.ok) {
+            console.log(`💸 Métadonnée client supprimée: ${clientName}`);
+        } else if (metaResponse.status !== 404) {
+            // Erreur réelle — on log mais on continue le nettoyage UI pour ne pas laisser un état incohérent
+            const metaErr = await metaResponse.json().catch(() => ({}));
+            console.warn(`⚠️ Échec suppression métadonnée client "${clientName}":`, metaErr.error || metaResponse.status);
+        }
+
+        // 3. Retirer du state local
         clientsList.delete(clientName);
-        
-        // Supprimer les données de ce client
+        virementClientsMap.delete(clientName);
         Object.keys(virementData).forEach(date => {
             delete virementData[date][clientName];
         });
-        
-        // Réafficher
+
+        // 4. Réafficher
         renderClientsBadges();
         renderVirementTable();
         calculateAndDisplayTotals();
-        
+
         showNotification(`Client "${clientName}" supprimé avec succès`, 'success');
-        
+
     } catch (error) {
         console.error('❌ Erreur suppression client:', error);
         showNotification('Erreur lors de la suppression: ' + error.message, 'error');

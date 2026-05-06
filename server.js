@@ -14163,6 +14163,21 @@ app.post('/api/virement-clients', requireVirementMensuelAuth, async (req, res) =
         const isInternal = req.body?.is_internal === true;
         const userId = req.session?.user?.id || null;
 
+        // Garde anti-doublon insensible à la casse : "ABC" et "abc" doivent être traités
+        // comme le même client. On laisse passer un POST avec EXACTEMENT le même nom (UPSERT
+        // utile pour mettre à jour point_de_vente / is_internal) mais on rejette une casse
+        // différente sur un nom déjà pris.
+        const dupCheck = await pool.query(
+            'SELECT client_name FROM virement_clients WHERE LOWER(client_name) = LOWER($1) AND client_name <> $1 LIMIT 1',
+            [nameCheck.name]
+        );
+        if (dupCheck.rowCount > 0) {
+            return res.status(409).json({
+                error: `Un client existe déjà sous le nom "${dupCheck.rows[0].client_name}" (la comparaison est insensible à la casse)`,
+                existing_client_name: dupCheck.rows[0].client_name
+            });
+        }
+
         const result = await pool.query(`
             INSERT INTO virement_clients (client_name, point_de_vente, is_internal, created_by, updated_by, updated_at)
             VALUES ($1, $2, $3, $4, $4, CURRENT_TIMESTAMP)
