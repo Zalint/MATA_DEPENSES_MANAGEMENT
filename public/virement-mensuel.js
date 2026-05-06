@@ -314,66 +314,175 @@ async function addNewClient() {
     showNotification(`Client "${clientName}" ajouté`, 'success');
 }
 
+// Modale d'édition de métadonnées client (remplace prompt + confirm natifs).
+// Affiche un <select> de points de vente connus + une checkbox "interne", retourne
+// une Promise<{ point_de_vente: string|null, is_internal: boolean } | null>.
+// `null` = utilisateur a annulé. Tous les textes sont insérés via textContent (pas d'XSS).
+function editClientMetaModal({ clientName, currentPointDeVente, currentIsInternal, pointsDeVenteList }) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+
+        const dialog = document.createElement('div');
+        dialog.className = 'confirm-modal-dialog edit-client-modal';
+
+        const titleEl = document.createElement('div');
+        titleEl.className = 'confirm-modal-title';
+        titleEl.textContent = `Modifier "${clientName}"`;
+        dialog.appendChild(titleEl);
+
+        // Select Point de vente
+        const pdvFieldId = 'edit-client-pdv-' + Date.now();
+        const pdvLabel = document.createElement('label');
+        pdvLabel.className = 'edit-client-field-label';
+        pdvLabel.htmlFor = pdvFieldId;
+        pdvLabel.textContent = 'Point de vente';
+        dialog.appendChild(pdvLabel);
+
+        const select = document.createElement('select');
+        select.id = pdvFieldId;
+        select.className = 'form-control edit-client-pdv-select';
+
+        const noneOpt = document.createElement('option');
+        noneOpt.value = '';
+        noneOpt.textContent = 'Aucun point de vente';
+        select.appendChild(noneOpt);
+
+        // Construire la liste des choix : la liste connue + la valeur actuelle si elle est inconnue
+        const choices = Array.isArray(pointsDeVenteList) ? pointsDeVenteList.slice() : [];
+        if (currentPointDeVente && !choices.includes(currentPointDeVente)) {
+            choices.unshift(currentPointDeVente);
+        }
+        for (const pdv of choices) {
+            const opt = document.createElement('option');
+            opt.value = pdv;
+            opt.textContent = pdv;
+            if (pdv === currentPointDeVente) opt.selected = true;
+            select.appendChild(opt);
+        }
+        dialog.appendChild(select);
+
+        // Checkbox is_internal
+        const internalLabel = document.createElement('label');
+        internalLabel.className = 'edit-client-internal';
+        const internalCb = document.createElement('input');
+        internalCb.type = 'checkbox';
+        internalCb.checked = currentIsInternal === true;
+        internalLabel.appendChild(internalCb);
+        const internalText = document.createElement('span');
+        internalText.textContent = ' Virement interne (exclu de l\'API externe)';
+        internalLabel.appendChild(internalText);
+        dialog.appendChild(internalLabel);
+
+        // Boutons
+        const actions = document.createElement('div');
+        actions.className = 'confirm-modal-actions';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'btn btn-secondary confirm-modal-cancel';
+        cancelBtn.textContent = 'Annuler';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.type = 'button';
+        saveBtn.className = 'btn btn-primary confirm-modal-ok';
+        saveBtn.textContent = 'Enregistrer';
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(saveBtn);
+        dialog.appendChild(actions);
+        overlay.appendChild(dialog);
+
+        const previouslyFocused = document.activeElement;
+        const close = (result) => {
+            overlay.removeEventListener('click', onOverlayClick);
+            document.removeEventListener('keydown', onKey);
+            overlay.classList.add('confirm-modal-closing');
+            setTimeout(() => overlay.remove(), 120);
+            if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+                previouslyFocused.focus();
+            }
+            resolve(result);
+        };
+
+        const onOverlayClick = (event) => { if (event.target === overlay) close(null); };
+        const onKey = (event) => {
+            if (event.key === 'Escape') { event.preventDefault(); close(null); }
+            // Pas de Enter→submit ici : un select ouvert capture Enter, et on évite
+            // un submit accidentel en cours d'édition de la checkbox.
+        };
+
+        cancelBtn.addEventListener('click', () => close(null));
+        saveBtn.addEventListener('click', () => {
+            const chosenPdv = select.value || null;
+            // Validation : si l'utilisateur a sélectionné un PdV, il doit faire partie des choix proposés
+            // (impossible normalement avec un <select>, mais on défend en profondeur).
+            if (chosenPdv !== null && !choices.includes(chosenPdv)) {
+                showNotification('Point de vente invalide', 'error');
+                return;
+            }
+            close({ point_de_vente: chosenPdv, is_internal: internalCb.checked });
+        });
+        overlay.addEventListener('click', onOverlayClick);
+        document.addEventListener('keydown', onKey);
+
+        document.body.appendChild(overlay);
+        select.focus();
+    });
+}
+
 // Modifier les métadonnées d'un client existant (point de vente + is_internal)
 async function editClientMeta(clientName) {
     const meta = virementClientsMap.get(clientName) || { point_de_vente: null, is_internal: false };
 
-    // Construire les options du prompt avec la liste connue + valeur actuelle
-    const choices = pointsDeVente.slice();
-    if (meta.point_de_vente && !choices.includes(meta.point_de_vente)) {
-        choices.unshift(meta.point_de_vente);
-    }
-    const choiceList = choices.length > 0 ? '\n- ' + choices.join('\n- ') : '';
-    const newPdv = prompt(
-        `Point de vente pour "${clientName}" (vide = aucun) :${choiceList}`,
-        meta.point_de_vente || ''
-    );
-    if (newPdv === null) return; // annulé
+    const result = await editClientMetaModal({
+        clientName,
+        currentPointDeVente: meta.point_de_vente,
+        currentIsInternal: meta.is_internal,
+        pointsDeVenteList: pointsDeVente
+    });
+    if (result === null) return; // utilisateur a annulé : aucun appel réseau
 
-    const newInternal = confirm(
-        `"${clientName}" est-il un virement interne (à exclure de l'API externe) ?\n\nOK = interne, Annuler = client externe normal`
-    );
+    const { point_de_vente: newPdv, is_internal: newInternal } = result;
 
     try {
         const response = await fetch(`/api/virement-clients/${encodeURIComponent(clientName)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                point_de_vente: newPdv.trim() || null,
-                is_internal: newInternal
-            })
+            body: JSON.stringify({ point_de_vente: newPdv, is_internal: newInternal })
         });
-        if (!response.ok) {
-            const err = await response.json().catch(() => ({}));
-            // 404 = pas encore en DB, on tente un POST (UPSERT) en fallback
-            if (response.status === 404) {
-                const createRes = await fetch('/api/virement-clients', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        client_name: clientName,
-                        point_de_vente: newPdv.trim() || null,
-                        is_internal: newInternal
-                    })
-                });
-                if (!createRes.ok) {
-                    const e2 = await createRes.json().catch(() => ({}));
-                    throw new Error(e2.error || `Erreur HTTP ${createRes.status}`);
-                }
-                const created = await createRes.json();
-                virementClientsMap.set(created.client_name, {
-                    point_de_vente: created.point_de_vente,
-                    is_internal: created.is_internal === true
-                });
-            } else {
-                throw new Error(err.error || `Erreur HTTP ${response.status}`);
-            }
-        } else {
+
+        if (response.ok) {
             const updated = await response.json();
             virementClientsMap.set(updated.client_name, {
                 point_de_vente: updated.point_de_vente,
                 is_internal: updated.is_internal === true
             });
+        } else if (response.status === 404) {
+            // Client connu uniquement via virement_mensuel, pas encore de métadonnée → on crée
+            const createRes = await fetch('/api/virement-clients', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    client_name: clientName,
+                    point_de_vente: newPdv,
+                    is_internal: newInternal
+                })
+            });
+            if (!createRes.ok) {
+                const e2 = await createRes.json().catch(() => ({}));
+                throw new Error(e2.error || `Erreur HTTP ${createRes.status}`);
+            }
+            const created = await createRes.json();
+            virementClientsMap.set(created.client_name, {
+                point_de_vente: created.point_de_vente,
+                is_internal: created.is_internal === true
+            });
+        } else {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.error || `Erreur HTTP ${response.status}`);
         }
 
         renderClientsBadges();
@@ -470,25 +579,37 @@ function renderClientsBadges() {
         pdvSpan.textContent = meta.point_de_vente || '—';
         badge.appendChild(pdvSpan);
 
-        // Crayon d'édition
-        const editIcon = document.createElement('i');
-        editIcon.className = 'fas fa-pencil-alt edit-icon';
-        editIcon.title = 'Modifier le point de vente / flag interne';
-        editIcon.onclick = (event) => {
+        // Crayon d'édition (button focusable au clavier, accessible aux lecteurs d'écran)
+        const editBtn = document.createElement('button');
+        editBtn.type = 'button';
+        editBtn.className = 'client-badge-action edit-icon';
+        editBtn.title = 'Modifier le point de vente / flag interne';
+        editBtn.setAttribute('aria-label', `Modifier le client ${client}`);
+        const editIconEl = document.createElement('i');
+        editIconEl.className = 'fas fa-pencil-alt';
+        editIconEl.setAttribute('aria-hidden', 'true');
+        editBtn.appendChild(editIconEl);
+        editBtn.onclick = (event) => {
             event.stopPropagation();
             editClientMeta(client);
         };
-        badge.appendChild(editIcon);
+        badge.appendChild(editBtn);
 
-        // Croix de suppression
-        const removeIcon = document.createElement('i');
-        removeIcon.className = 'fas fa-times-circle remove-icon';
-        removeIcon.title = 'Supprimer le client';
-        removeIcon.onclick = (event) => {
+        // Croix de suppression (idem)
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'client-badge-action remove-icon';
+        removeBtn.title = 'Supprimer le client';
+        removeBtn.setAttribute('aria-label', `Supprimer le client ${client}`);
+        const removeIconEl = document.createElement('i');
+        removeIconEl.className = 'fas fa-times-circle';
+        removeIconEl.setAttribute('aria-hidden', 'true');
+        removeBtn.appendChild(removeIconEl);
+        removeBtn.onclick = (event) => {
             event.stopPropagation();
             removeClient(client);
         };
-        badge.appendChild(removeIcon);
+        badge.appendChild(removeBtn);
 
         container.appendChild(badge);
     });

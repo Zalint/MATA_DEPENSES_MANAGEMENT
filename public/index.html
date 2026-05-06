@@ -1768,19 +1768,21 @@
                                     </button>
                                 </h4>
                                 <div class="client-management-section accordion-content" id="clients-accordion-content">
-                                    <div class="add-client-form">
-                                        <label>Ajouter un nouveau client</label>
+                                    <div class="add-client-form" role="group" aria-labelledby="add-client-form-heading">
+                                        <span id="add-client-form-heading" class="form-label-heading">Ajouter un nouveau client</span>
                                         <div class="input-with-btn add-client-row">
-                                            <input type="text" id="new-client-name" class="form-control add-client-name" placeholder="Nom du nouveau client">
-                                            <select id="new-client-pdv" class="form-control add-client-pdv">
+                                            <label for="new-client-name" class="visually-hidden">Nom du nouveau client</label>
+                                            <input type="text" id="new-client-name" class="form-control add-client-name" placeholder="Nom du nouveau client" aria-required="true">
+                                            <label for="new-client-pdv" class="visually-hidden">Point de vente du nouveau client</label>
+                                            <select id="new-client-pdv" class="form-control add-client-pdv" aria-label="Point de vente du nouveau client">
                                                 <option value="">Aucun point de vente</option>
                                             </select>
                                             <label class="add-client-internal-label">
                                                 <input type="checkbox" id="new-client-internal">
                                                 <span>Virement interne</span>
                                             </label>
-                                            <button id="add-client-btn" class="btn btn-primary add-client-btn">
-                                                <i class="fas fa-plus"></i> Ajouter
+                                            <button id="add-client-btn" class="btn btn-primary add-client-btn" type="button">
+                                                <i class="fas fa-plus" aria-hidden="true"></i> Ajouter
                                             </button>
                                         </div>
                                         <small class="form-help">Le point de vente est facultatif. Cocher "Virement interne" pour exclure ce client de l'API externe.</small>
@@ -2034,6 +2036,26 @@
                     align-items: center;
                 }
 
+                /* Heading visuel pour le formulaire d'ajout (ex-<label> sans for) */
+                .form-label-heading {
+                    display: block;
+                    margin-bottom: 8px;
+                    font-weight: 600;
+                }
+
+                /* Cache visuellement mais reste accessible aux lecteurs d'écran */
+                .visually-hidden {
+                    position: absolute !important;
+                    width: 1px;
+                    height: 1px;
+                    padding: 0;
+                    margin: -1px;
+                    overflow: hidden;
+                    clip: rect(0, 0, 0, 0);
+                    white-space: nowrap;
+                    border: 0;
+                }
+
                 /* Ligne d'ajout client : wrap propre, tailles explicites pour éviter la compression du placeholder */
                 .add-client-row {
                     flex-wrap: wrap;
@@ -2127,18 +2149,29 @@
                     font-style: italic;
                 }
 
-                .client-badge .edit-icon,
-                .client-badge .remove-icon {
+                .client-badge .client-badge-action {
+                    /* Reset des styles natifs du <button> — l'élément doit ressembler à une icône */
+                    background: transparent;
+                    border: none;
+                    color: inherit;
                     font-size: 1em;
-                    opacity: 0.75;
-                    cursor: pointer;
                     padding: 2px;
-                    transition: opacity 0.2s ease, transform 0.2s ease;
+                    margin: 0;
+                    line-height: 1;
+                    cursor: pointer;
+                    opacity: 0.75;
+                    transition: opacity 0.2s ease, transform 0.2s ease, outline-offset 0.15s ease;
+                    border-radius: 4px;
                 }
-                .client-badge .edit-icon:hover,
-                .client-badge .remove-icon:hover {
+                .client-badge .client-badge-action:hover,
+                .client-badge .client-badge-action:focus-visible {
                     opacity: 1;
                     transform: scale(1.15);
+                }
+                /* Anneau de focus visible pour l'accessibilité clavier (Tab) */
+                .client-badge .client-badge-action:focus-visible {
+                    outline: 2px solid #ffffff;
+                    outline-offset: 2px;
                 }
                 .client-badge .remove-icon {
                     font-size: 1.1em;

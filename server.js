@@ -184,7 +184,36 @@ async function getVirementClientsContext() {
         }
     }
 
-    const ctx = { dbMapping, jsonMapping, jsonExclusionList, dbAvailable };
+    // Maps lowercase pour résolution case-insensitive : virement_mensuel.client peut différer
+    // en casse de virement_clients.client_name (ex. "Keur Baly" vs "Keur baly"). Le lookup
+    // case-sensitive renverrait null à tort. La création empêche désormais les doublons
+    // case-insensitive, donc il y a au plus une entrée par variant lowercase.
+    const dbMappingLower = {};
+    for (const [name, entry] of Object.entries(dbMapping)) {
+        dbMappingLower[name.toLowerCase()] = entry;
+    }
+    const jsonMappingLower = {};
+    for (const [name, pdv] of Object.entries(jsonMapping)) {
+        jsonMappingLower[name.toLowerCase()] = pdv;
+    }
+    const jsonExclusionLower = new Set(jsonExclusionList.map(s => s.toLowerCase()));
+
+    /**
+     * Résout un nom de client (case-insensitive) en { pointDevente, isInternal }.
+     * Précédence : DB exact > DB lowercase > JSON exact > JSON lowercase. is_internal vrai si
+     * trouvé dans DB.is_internal OU dans la liste d'exclusion JSON (insensible à la casse).
+     */
+    function resolveClient(clientName) {
+        const lower = (clientName || '').toLowerCase();
+        const dbEntry = dbMapping[clientName] || dbMappingLower[lower];
+        const jsonPdv = jsonMapping[clientName] || jsonMappingLower[lower];
+        return {
+            pointDevente: (dbEntry && dbEntry.point_de_vente) || jsonPdv || null,
+            isInternal: (dbEntry && dbEntry.is_internal) || jsonExclusionLower.has(lower)
+        };
+    }
+
+    const ctx = { dbMapping, jsonMapping, jsonExclusionList, dbAvailable, resolveClient };
     virementClientsContextCache = ctx;
     virementClientsContextCacheTime = now;
     return ctx;
@@ -8121,6 +8150,49 @@ app.get('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
 const MAX_SETTINGS_KEYS_PER_REQUEST = 50;
 const MAX_SETTING_VALUE_BYTES = 64 * 1024; // 64 KB par valeur après JSON.stringify
 
+// Schéma de typage strict pour les clés financières connues. Toute clé absente d'ici
+// est acceptée avec n'importe quelle valeur sérialisable (extensibilité future).
+// Permet d'éviter les bugs sournois (ex. validate_expense_balance reçu comme la string
+// "false" — truthy en JS, donc la validation des dépenses paraîtrait active).
+const TYPED_SETTINGS = {
+    charges_fixes_estimation: { kind: 'number', min: 0 },
+    validate_expense_balance: { kind: 'boolean' },
+    stock_mata_abattement: { kind: 'number', min: 0, max: 1 },
+    comptes_amortissement_investissement: { kind: 'string-array' },
+    comptes_investissement: { kind: 'string-array' },
+};
+
+function validateTypedSetting(key, value) {
+    const spec = TYPED_SETTINGS[key];
+    if (!spec) return { ok: true }; // clé inconnue : pass-through (validations génériques s'appliquent)
+
+    switch (spec.kind) {
+        case 'boolean':
+            if (typeof value !== 'boolean') {
+                return { ok: false, error: `${key} doit être un booléen (true/false), reçu : ${typeof value}` };
+            }
+            return { ok: true };
+        case 'number':
+            if (typeof value !== 'number' || !Number.isFinite(value)) {
+                return { ok: false, error: `${key} doit être un nombre fini, reçu : ${typeof value}` };
+            }
+            if (spec.min !== undefined && value < spec.min) {
+                return { ok: false, error: `${key} doit être ≥ ${spec.min}` };
+            }
+            if (spec.max !== undefined && value > spec.max) {
+                return { ok: false, error: `${key} doit être ≤ ${spec.max}` };
+            }
+            return { ok: true };
+        case 'string-array':
+            if (!Array.isArray(value) || !value.every(v => typeof v === 'string')) {
+                return { ok: false, error: `${key} doit être un tableau de chaînes` };
+            }
+            return { ok: true };
+        default:
+            return { ok: true };
+    }
+}
+
 app.put('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
     try {
         if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
@@ -8149,6 +8221,13 @@ app.put('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
             if (typeof key !== 'string' || key.length === 0 || key.length > 100) {
                 return res.status(400).json({ error: `Invalid setting key: ${JSON.stringify(key)}` });
             }
+
+            // Validation typée pour les clés financières connues — évite les coercitions JS surprenantes
+            const typeCheck = validateTypedSetting(key, value);
+            if (!typeCheck.ok) {
+                return res.status(400).json({ error: typeCheck.error });
+            }
+
             // Garde anti-DoS : refuse une valeur dont la sérialisation JSON dépasse la limite
             const serialized = JSON.stringify(value);
             if (serialized === undefined) {
@@ -8190,8 +8269,10 @@ app.put('/api/admin/config/financial', requireAdminAuth, async (req, res) => {
 
         res.json({ message: 'Financial settings configuration updated successfully' });
     } catch (error) {
+        // Ne pas exposer error.message dans la réponse : peut contenir des détails Postgres internes
+        // (noms de tables/colonnes, requêtes SQL, etc.). Le diagnostic se fait via les logs serveur.
         console.error('Error updating financial settings:', error);
-        res.status(500).json({ error: 'Error updating financial settings configuration', details: error.message });
+        res.status(500).json({ error: 'Error updating financial settings configuration' });
     }
 });
 
@@ -14146,6 +14227,12 @@ app.get('/api/virement-clients', requireVirementMensuelAuth, async (req, res) =>
         `);
         res.json(result.rows);
     } catch (error) {
+        // Si la table n'existe pas (migration pas encore appliquée), on renvoie une liste vide.
+        // L'UI ne casse pas et continue à fonctionner avec le fallback JSON côté API externe.
+        // Les routes mutatives (POST/PUT/DELETE) gardent leur 500 : un succès silencieux serait dangereux.
+        if (error.code === PG_UNDEFINED_TABLE) {
+            return res.json([]);
+        }
         console.error('Erreur GET /api/virement-clients:', error);
         res.status(500).json({ error: 'Erreur serveur lors de la lecture des clients virement' });
     }
@@ -16751,8 +16838,9 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
 
         console.log(`📅 EXTERNAL: Période demandée - Du ${startDate} au ${endDate}`);
 
-        // Charger le mapping client→PdV via le helper mémorisé (DB + fallback JSON)
-        const { dbMapping, jsonMapping, jsonExclusionList, dbAvailable } = await getVirementClientsContext();
+        // Charger le mapping client→PdV via le helper mémorisé (DB + fallback JSON).
+        // resolveClient gère la casse : "Keur Baly" et "Keur baly" pointent sur la même entrée.
+        const { dbAvailable, resolveClient } = await getVirementClientsContext();
         if (!dbAvailable) {
             console.log('⚠️ EXTERNAL: virement_clients indisponible, fallback JSON uniquement');
         }
@@ -16773,12 +16861,10 @@ app.get('/external/api/virement', requireAdminAuth, async (req, res) => {
 
         const result = await pool.query(virementsQuery, [startDate, endDate]);
 
-        // Résolution : DB d'abord, JSON en fallback. is_internal = DB OR jsonExclusionList.
+        // Résolution case-insensitive via resolveClient : DB exact → DB lower → JSON exact → JSON lower
         let virementsParClient = result.rows.map(row => {
             const clientName = row.client;
-            const dbEntry = dbMapping[clientName];
-            const pointDevente = (dbEntry && dbEntry.point_de_vente) || jsonMapping[clientName] || null;
-            const isInternal = (dbEntry && dbEntry.is_internal) || jsonExclusionList.includes(clientName);
+            const { pointDevente, isInternal } = resolveClient(clientName);
 
             return {
                 client: clientName,
@@ -16860,9 +16946,8 @@ app.get('/external/api/virement-mensuel', requireAdminAuth, async (req, res) => 
 
     try {
         // Récupérer le mapping client→PdV via le helper mémorisé.
-        // Plutôt que de faire un LEFT JOIN SQL (qui exigeait un fallback à 42P01), on enrichit
-        // les lignes côté JS — la map fait quelques dizaines d'entrées au plus, c'est gratuit.
-        const { dbMapping, jsonMapping, jsonExclusionList, dbAvailable } = await getVirementClientsContext();
+        // resolveClient gère la résolution case-insensitive (DB exact → DB lower → JSON exact → JSON lower)
+        const { dbAvailable, resolveClient } = await getVirementClientsContext();
         if (!dbAvailable) {
             console.log('⚠️ EXTERNAL virement-mensuel: virement_clients indisponible, fallback JSON');
         }
@@ -16882,11 +16967,8 @@ app.get('/external/api/virement-mensuel', requireAdminAuth, async (req, res) => 
             ORDER BY vm.date, vm.client
         `, [date_debut, date_fin]);
 
-        // Résolution finale : DB d'abord, JSON en fallback
         const operations = result.rows.map(row => {
-            const dbEntry = dbMapping[row.client];
-            const pointDevente = (dbEntry && dbEntry.point_de_vente) || jsonMapping[row.client] || null;
-            const isInternal = (dbEntry && dbEntry.is_internal) || jsonExclusionList.includes(row.client);
+            const { pointDevente, isInternal } = resolveClient(row.client);
             return {
                 date: row.date,
                 valeur: row.valeur,
