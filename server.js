@@ -16448,13 +16448,13 @@ app.get('/external/api/creance/operations', requireAdminAuth, async (req, res) =
 // Endpoint pour l'API externe des créances avec intégration OpenAI
 app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
     console.log('🌐 EXTERNAL: Appel API créance avec params:', req.query);
-    
+
     try {
         // Vérifier la présence de la clé OpenAI
         const openaiApiKey = process.env.OPENAI_API_KEY;
         if (!openaiApiKey) {
             console.log('⚠️ EXTERNAL: OPENAI_API_KEY manquante dans les variables d\'environnement');
-            return res.status(500).json({ 
+            return res.status(500).json({
                 error: 'Configuration OpenAI manquante',
                 code: 'OPENAI_CONFIG_MISSING'
             });
@@ -16468,8 +16468,40 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
         // Formater les dates pour les requêtes SQL
         const selectedDateStr = selectedDate.toISOString().split('T')[0];
         const previousDateStr = previousDate.toISOString().split('T')[0];
-        
+
         console.log(`📅 EXTERNAL: Dates calculées - Sélectionnée: ${selectedDateStr}, Précédente: ${previousDateStr}`);
+
+        // ===== EXCLUSION DE CLIENTS =====
+        // Format : ?exclusionClients=keur%20baly;client2;client3 (séparateur ';')
+        // Comparaison case-insensitive. Filtre appliqué dans toutes les requêtes
+        // (soldes summary + status + operations) pour garder la cohérence des totaux.
+        const MAX_CLIENT_EXCLUSIONS = 100;
+        const exclusionRaw = typeof req.query.exclusionClients === 'string' ? req.query.exclusionClients : '';
+        const exclusionClients = exclusionRaw
+            .split(';')
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+
+        if (exclusionClients.length > MAX_CLIENT_EXCLUSIONS) {
+            return res.status(400).json({
+                error: `Trop de clients dans exclusionClients (max ${MAX_CLIENT_EXCLUSIONS})`,
+                received: exclusionClients.length,
+                code: 'TOO_MANY_EXCLUSIONS'
+            });
+        }
+        for (const name of exclusionClients) {
+            if (name.length > 255 || FORBIDDEN_CHARS_REGEX.test(name)) {
+                return res.status(400).json({
+                    error: 'exclusionClients contient une valeur invalide (longueur > 255 ou caractères interdits)',
+                    invalid_value: name,
+                    code: 'INVALID_EXCLUSION_NAME'
+                });
+            }
+        }
+        const exclusionLower = exclusionClients.map(s => s.toLowerCase());
+        if (exclusionLower.length > 0) {
+            console.log(`🚫 EXTERNAL: Exclusion de ${exclusionLower.length} client(s):`, exclusionClients);
+        }
 
         // ===== PARTIE 1: SUMMARY - Différence des soldes finaux =====
         
@@ -16498,63 +16530,69 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
         const summaryData = [];
         
         for (const portfolio of portfolios) {
+            // Filtre d'exclusion : <> ALL($3) — si le tableau est vide, la condition est toujours vraie.
+            // Comparaison sur LOWER(client_name) pour rester case-insensitive.
+            const exclusionFilter = 'AND LOWER(cc.client_name) <> ALL($3::text[])';
+
             // Solde à la date sélectionnée (même logique que l'interface web)
             const currentBalanceQuery = `
-                SELECT 
+                SELECT
                     COALESCE(SUM(
-                        cc.initial_credit + 
-                        COALESCE(credits.total_credits, 0) - 
+                        cc.initial_credit +
+                        COALESCE(credits.total_credits, 0) -
                         COALESCE(debits.total_debits, 0)
                     ), 0) as solde_final
                 FROM creance_clients cc
                 LEFT JOIN (
                     SELECT client_id, SUM(amount) as total_credits
-                    FROM creance_operations 
-                    WHERE operation_type = 'credit' 
+                    FROM creance_operations
+                    WHERE operation_type = 'credit'
                     AND operation_date <= $2
                     GROUP BY client_id
                 ) credits ON cc.id = credits.client_id
                 LEFT JOIN (
                     SELECT client_id, SUM(amount) as total_debits
-                    FROM creance_operations 
-                    WHERE operation_type = 'debit' 
+                    FROM creance_operations
+                    WHERE operation_type = 'debit'
                     AND operation_date <= $2
                     GROUP BY client_id
                 ) debits ON cc.id = debits.client_id
-                WHERE cc.account_id = $1 
+                WHERE cc.account_id = $1
                 AND cc.is_active = true
+                ${exclusionFilter}
             `;
-            
+
             // Solde à la date précédente (même logique que l'interface web)
             const previousBalanceQuery = `
-                SELECT 
+                SELECT
                     COALESCE(SUM(
-                        cc.initial_credit + 
-                        COALESCE(credits.total_credits, 0) - 
+                        cc.initial_credit +
+                        COALESCE(credits.total_credits, 0) -
                         COALESCE(debits.total_debits, 0)
                     ), 0) as solde_final
                 FROM creance_clients cc
                 LEFT JOIN (
                     SELECT client_id, SUM(amount) as total_credits
-                    FROM creance_operations 
-                    WHERE operation_type = 'credit' 
+                    FROM creance_operations
+                    WHERE operation_type = 'credit'
                     AND operation_date <= $2
                     GROUP BY client_id
                 ) credits ON cc.id = credits.client_id
                 LEFT JOIN (
                     SELECT client_id, SUM(amount) as total_debits
-                    FROM creance_operations 
-                    WHERE operation_type = 'debit' 
+                    FROM creance_operations
+                    WHERE operation_type = 'debit'
                     AND operation_date <= $2
                     GROUP BY client_id
                 ) debits ON cc.id = debits.client_id
-                WHERE cc.account_id = $1 
+                WHERE cc.account_id = $1
                 AND cc.is_active = true
+                ${exclusionFilter}
             `;
 
             const [currentResult, previousResult] = await Promise.all([
-                pool.query(currentBalanceQuery, [portfolio.id, selectedDateStr]),
-                pool.query(previousBalanceQuery, [portfolio.id, previousDateStr])
+                pool.query(currentBalanceQuery, [portfolio.id, selectedDateStr, exclusionLower]),
+                pool.query(previousBalanceQuery, [portfolio.id, previousDateStr, exclusionLower])
             ]);
 
             const currentBalance = parseFloat(currentResult.rows[0]?.solde_final || 0);
@@ -16579,8 +16617,9 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
             console.log(`🔍 EXTERNAL: Traitement portfolio ${portfolio.account_name} (ID: ${portfolio.id})`);
             
             // STATUS: Information sur les clients (même logique que l'interface web)
+            // $3 = exclusion array — vide = pas de filtre, sinon exclut les LOWER(client_name) listés.
             const clientsStatusQuery = `
-                SELECT 
+                SELECT
                     cc.id,
                     cc.client_name,
                     cc.initial_credit as credit_initial,
@@ -16590,20 +16629,21 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 FROM creance_clients cc
                 LEFT JOIN (
                     SELECT client_id, SUM(amount) as total_credits
-                    FROM creance_operations 
-                    WHERE operation_type = 'credit' 
+                    FROM creance_operations
+                    WHERE operation_type = 'credit'
                     AND operation_date <= $2
                     GROUP BY client_id
                 ) credits ON cc.id = credits.client_id
                 LEFT JOIN (
                     SELECT client_id, SUM(amount) as total_debits
-                    FROM creance_operations 
-                    WHERE operation_type = 'debit' 
+                    FROM creance_operations
+                    WHERE operation_type = 'debit'
                     AND operation_date <= $2
                     GROUP BY client_id
                 ) debits ON cc.id = debits.client_id
-                WHERE cc.account_id = $1 
+                WHERE cc.account_id = $1
                 AND cc.is_active = true
+                AND LOWER(cc.client_name) <> ALL($3::text[])
                 ORDER BY cc.client_name
             `;
 
@@ -16612,7 +16652,7 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
             const yearStartDate = `${currentYear}-01-01`;
             
             const operationsQuery = `
-                SELECT 
+                SELECT
                     co.operation_date as date_operation,
                     co.created_at as timestamp,
                     cc.client_name as client,
@@ -16626,12 +16666,13 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 WHERE cc.account_id = $1
                 AND co.operation_date >= $2
                 AND co.operation_date <= $3
+                AND LOWER(cc.client_name) <> ALL($4::text[])
                 ORDER BY co.operation_date DESC, co.created_at DESC
             `;
 
             const [statusResult, operationsResult] = await Promise.all([
-                pool.query(clientsStatusQuery, [portfolio.id, selectedDateStr]),
-                pool.query(operationsQuery, [portfolio.id, yearStartDate, selectedDateStr])
+                pool.query(clientsStatusQuery, [portfolio.id, selectedDateStr, exclusionLower]),
+                pool.query(operationsQuery, [portfolio.id, yearStartDate, selectedDateStr, exclusionLower])
             ]);
 
             const clientsStatus = statusResult.rows.map(client => ({
@@ -16690,6 +16731,10 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 total_operations: detailsData.reduce((sum, d) => sum + d.operations.length, 0)
             };
 
+            const exclusionLine = exclusionClients.length > 0
+                ? `\nClients exclus de l'analyse (sur demande de l'appelant): ${exclusionClients.join(', ')}`
+                : '';
+
             const prompt = `En tant qu'analyste financier expert en créances, analysez ces données de portfolios de créance:
 
 Date d'analyse: ${selectedDateStr} (comparé à ${previousDateStr})
@@ -16698,10 +16743,10 @@ Solde total actuel: ${summaryForAI.total_current_balance} FCFA
 Solde total précédent: ${summaryForAI.total_previous_balance} FCFA
 Différence totale: ${summaryForAI.total_difference} FCFA
 Nombre total de clients: ${summaryForAI.total_clients}
-Nombre total d'opérations: ${summaryForAI.total_operations}
+Nombre total d'opérations: ${summaryForAI.total_operations}${exclusionLine}
 
 Détail par portfolio:
-${summaryForAI.portfolios_summary.map(p => 
+${summaryForAI.portfolios_summary.map(p =>
     `- ${p.name}: ${p.current_balance} FCFA (différence: ${p.difference} FCFA)`
 ).join('\n')}
 
@@ -16766,10 +16811,14 @@ Répondez en français de manière professionnelle.`;
             metadata: {
                 generated_at: new Date().toISOString(),
                 openai_integration: openaiInsights?.error ? "error" : "success",
-                api_version: "1.0",
+                // 1.1 : ajout du filtrage exclusionClients (case-insensitive) et du champ excluded_clients
+                api_version: "1.1",
                 year_filter: selectedDate.getFullYear(),
                 total_clients: detailsData.reduce((sum, d) => sum + d.status.length, 0),
-                total_operations: detailsData.reduce((sum, d) => sum + d.operations.length, 0)
+                total_operations: detailsData.reduce((sum, d) => sum + d.operations.length, 0),
+                // Liste des noms tels que reçus dans la query (avant lowercasing pour le filtre).
+                // Permet au consommateur de vérifier que l'exclusion a bien été prise en compte.
+                excluded_clients: exclusionClients
             }
         };
 
