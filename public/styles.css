@@ -15147,3 +15147,219 @@ span.previsible-no,
 #stock-soir-section > h2 {
     color: var(--qw-text) !important;
 }
+
+/* =========================================================
+   CREANCE VUE GLOBALE — Bascule "Par portefeuille / Par client"
+   ========================================================= */
+
+/* Pill switcher */
+.qw-view-switcher {
+    display: inline-flex;
+    background: var(--qw-bg, #f3f4f6);
+    border: 1px solid var(--qw-border);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 16px;
+    gap: 2px;
+}
+.qw-view-pill {
+    background: transparent;
+    border: none;
+    color: var(--qw-text-secondary);
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+}
+.qw-view-pill:hover {
+    color: var(--qw-text);
+}
+.qw-view-pill.is-active {
+    background: var(--qw-surface);
+    color: var(--qw-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.qw-view-pill i {
+    font-size: 12px;
+}
+
+[data-theme="dark"] .qw-view-switcher {
+    background: rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .qw-view-pill.is-active {
+    background: var(--qw-surface);
+    color: var(--qw-primary);
+}
+
+/* Mini-récap au-dessus des tables clients */
+.qw-client-summary {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    background: var(--qw-surface);
+    border: 1px solid var(--qw-border);
+    border-radius: var(--qw-radius-lg);
+    margin-bottom: 16px;
+}
+.qw-client-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.qw-client-summary-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--qw-text-secondary);
+}
+.qw-client-summary-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--qw-text);
+}
+
+/* En-tête de section "Partie 1 / Partie 2" */
+.qw-client-section {
+    margin-bottom: 24px;
+}
+.qw-client-section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.qw-client-section-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--qw-primary-soft, #eff6ff);
+    color: var(--qw-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+.qw-client-section-head h5 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--qw-text);
+    text-transform: none;
+    letter-spacing: normal;
+}
+.qw-client-section-head small {
+    color: var(--qw-text-secondary);
+    font-size: 12px;
+    margin-left: auto;
+}
+
+[data-theme="dark"] .qw-client-section-num {
+    background: rgba(37, 99, 235, 0.15);
+}
+
+/* Table clients : cellules compactes + alignements */
+.qw-client-table {
+    font-size: 13px;
+}
+.qw-client-table td,
+.qw-client-table th {
+    vertical-align: middle;
+    padding: 10px 12px;
+}
+.qw-cell-rank {
+    color: var(--qw-text-secondary);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+.qw-cell-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+}
+.qw-cell-amount {
+    font-size: 12px;
+    color: var(--qw-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.qw-cell-empty {
+    color: var(--qw-text-muted, #9ca3af);
+}
+
+/* Pills statut générique (utilisable hors créance aussi) */
+.qw-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 1.4;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+.qw-pill i {
+    font-size: 10px;
+}
+.qw-pill-muted {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--qw-text-secondary);
+    border-color: var(--qw-border);
+}
+.qw-pill-primary {
+    background: var(--qw-primary-soft, #eff6ff);
+    color: var(--qw-primary);
+    border-color: rgba(37, 99, 235, 0.2);
+}
+.qw-pill-success {
+    background: rgba(34, 197, 94, 0.1);
+    color: #15803d;
+    border-color: rgba(34, 197, 94, 0.25);
+}
+.qw-pill-warning {
+    background: rgba(245, 158, 11, 0.1);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.3);
+}
+.qw-pill-danger {
+    background: rgba(220, 38, 38, 0.1);
+    color: #b91c1c;
+    border-color: rgba(220, 38, 38, 0.3);
+}
+
+[data-theme="dark"] .qw-pill-muted {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--qw-text-secondary);
+}
+[data-theme="dark"] .qw-pill-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+}
+[data-theme="dark"] .qw-pill-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+}
+[data-theme="dark"] .qw-pill-danger {
+    background: rgba(220, 38, 38, 0.18);
+    color: #f87171;
+}
+
+/* Montants colorés */
+.qw-amount {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.qw-amount-pos { color: var(--qw-text); }
+.qw-amount-neg { color: #dc2626; }
+.qw-amount-zero { color: var(--qw-text-secondary); }
+
+[data-theme="dark"] .qw-amount-neg { color: #f87171; }
+

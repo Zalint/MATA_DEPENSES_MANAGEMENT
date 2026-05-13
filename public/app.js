@@ -4442,7 +4442,24 @@ function setDefaultDate() {
 document.addEventListener('DOMContentLoaded', function() {
     // Event listener pour le bouton info du Cash disponible
     setupCashDetailModal();
-    
+
+    // ---- Fail-safe loader : on garantit que body.nav-ready finit toujours
+    // par être posé, même si l'auth/init throw ou hang. Sinon l'utilisateur
+    // se retrouve coincé sur le spinner. ----
+    const NAV_READY_TIMEOUT_MS = 10000;
+    const navReadyFallbackId = setTimeout(() => {
+        if (!document.body.classList.contains('nav-ready')) {
+            console.warn('⚠️ nav-ready forcé par fail-safe timeout après ' + NAV_READY_TIMEOUT_MS + 'ms');
+            document.body.classList.add('nav-ready');
+        }
+    }, NAV_READY_TIMEOUT_MS);
+    const markNavReady = () => {
+        clearTimeout(navReadyFallbackId);
+        if (!document.body.classList.contains('nav-ready')) {
+            requestAnimationFrame(() => document.body.classList.add('nav-ready'));
+        }
+    };
+
     // Vérifier si l'utilisateur est déjà connecté
     fetch('/api/user')
         .then(response => {
@@ -4453,18 +4470,21 @@ document.addEventListener('DOMContentLoaded', function() {
         })
         .then(async user => {
             currentUser = user;
-            await showApp();
-            await loadInitialData();
-            // loadInitialData() ajoute lui-même nav-ready (qui cache le loader)
+            try {
+                await showApp();
+                await loadInitialData();
+                // loadInitialData() ajoute déjà nav-ready côté happy path.
+            } finally {
+                // Garantit que même si showApp/loadInitialData throw,
+                // le loader disparaît et l'app devient interactive.
+                markNavReady();
+            }
         })
         .catch((error) => {
             // Erreur normale au démarrage si non connecté
             console.log('Utilisateur non connecté, affichage de la page de connexion');
             showLogin();
-            // Pas de loadInitialData en mode non-connecté → on retire le loader nous-même
-            requestAnimationFrame(() => {
-                document.body.classList.add('nav-ready');
-            });
+            markNavReady();
         });
     
     // Gestionnaire de formulaire de connexion
@@ -15374,6 +15394,10 @@ async function loadCreanceMultiAccountData(accountId, container) {
 // État local des exclusions (init avec Keur Baly par défaut)
 let creanceGlobalExclusions = ['Keur Baly'];
 let creanceGlobalListenersAttached = false;
+// Vue active : 'portfolio' (par défaut) ou 'client' (synthèse cross-comptes)
+let creanceGlobalViewMode = 'portfolio';
+// Dernier payload reçu (pour basculer entre les vues sans refetcher)
+let creanceGlobalLastData = null;
 
 function setupCreanceGlobalView() {
     if (creanceGlobalListenersAttached) return;
@@ -15517,6 +15541,8 @@ async function runCreanceGlobalQuery() {
 function renderCreanceGlobalResults(data) {
     const resultsEl = document.getElementById('creance-global-results');
     if (!resultsEl || !data) return;
+    // Cache pour permettre la bascule de vue sans refetch
+    creanceGlobalLastData = data;
 
     const fmt = n => (parseFloat(n) || 0).toLocaleString('fr-FR') + ' FCFA';
     const summary = data.summary || {};
@@ -15642,10 +15668,10 @@ function renderCreanceGlobalResults(data) {
         </div>
     `).join('');
 
-    resultsEl.innerHTML = `
-        <!-- Bandeau totaux -->
+    // ===== Bandeau commun (totaux + écart vs veille) — utilisé par les 2 vues
+    const headerBandeau = `
         <div class="section-card" style="display: flex; align-items: center; gap: 24px;
-                                          flex-wrap: wrap; padding: 16px 20px; margin-bottom: 16px;">
+                                          flex-wrap: wrap; padding: 16px 20px; margin-bottom: 12px;">
             <div>
                 <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
                             color: var(--qw-text-secondary);">Solde total ${summary.date_selected ? `au ${summary.date_selected}` : ''}</div>
@@ -15665,23 +15691,49 @@ function renderCreanceGlobalResults(data) {
                         ${excluded.map(e => escapeHtml(e)).join(', ')}
                     </div>
                 </div>` : ''}
-        </div>
+        </div>`;
 
-        <!-- Grille de cards par portfolio -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-                    gap: 12px; margin-bottom: 18px;">
-            ${portfolioCards}
-        </div>
+    // ===== Pill switcher : Par portefeuille / Par client
+    const viewSwitcher = `
+        <div class="qw-view-switcher" role="tablist" aria-label="Mode de vue">
+            <button type="button" role="tab"
+                    class="qw-view-pill ${creanceGlobalViewMode === 'portfolio' ? 'is-active' : ''}"
+                    data-view="portfolio"
+                    aria-selected="${creanceGlobalViewMode === 'portfolio'}">
+                <i class="fas fa-folder-tree"></i> Par portefeuille
+            </button>
+            <button type="button" role="tab"
+                    class="qw-view-pill ${creanceGlobalViewMode === 'client' ? 'is-active' : ''}"
+                    data-view="client"
+                    aria-selected="${creanceGlobalViewMode === 'client'}">
+                <i class="fas fa-users"></i> Par client
+            </button>
+        </div>`;
 
-        <!-- Analyse IA -->
-        <div style="margin-bottom: 18px;">${aiBlock}</div>
+    // ===== Construction du body en fonction du mode
+    let bodyHtml = '';
+    if (creanceGlobalViewMode === 'portfolio') {
+        bodyHtml = `
+            <!-- Grille de cards par portfolio -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                        gap: 12px; margin-bottom: 18px;">
+                ${portfolioCards}
+            </div>
 
-        <!-- Détails accordions -->
-        <h5 style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px;
-                   color: var(--qw-text-secondary); margin: 0 0 10px;">Détails par portefeuille</h5>
-        ${detailsAccordions || '<div class="no-data-message"><p>Aucun détail disponible</p></div>'}`;
+            <!-- Analyse IA -->
+            <div style="margin-bottom: 18px;">${aiBlock}</div>
 
-    // Attacher handlers aux nouveaux accordions
+            <!-- Détails accordions -->
+            <h5 style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px;
+                       color: var(--qw-text-secondary); margin: 0 0 10px;">Détails par portefeuille</h5>
+            ${detailsAccordions || '<div class="no-data-message"><p>Aucun détail disponible</p></div>'}`;
+    } else {
+        bodyHtml = renderCreanceGlobalByClient(data);
+    }
+
+    resultsEl.innerHTML = headerBandeau + viewSwitcher + bodyHtml;
+
+    // Handlers : accordions
     resultsEl.querySelectorAll('.accordion-header').forEach(header => {
         header.addEventListener('click', () => {
             const card = header.closest('.section-card');
@@ -15698,6 +15750,230 @@ function renderCreanceGlobalResults(data) {
             }
         });
     });
+
+    // Handlers : view switcher
+    resultsEl.querySelectorAll('.qw-view-pill').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const mode = btn.dataset.view;
+            if (!mode || mode === creanceGlobalViewMode) return;
+            creanceGlobalViewMode = mode;
+            // Re-render à partir du cache, sans refetch
+            if (creanceGlobalLastData) renderCreanceGlobalResults(creanceGlobalLastData);
+        });
+    });
+}
+
+/**
+ * Vue "Par client" — synthèse cross-comptes :
+ * - Pour chaque client, on agrège son solde, son portefeuille, sa
+ *   dernière avance et son dernier remboursement (à partir des
+ *   opérations disponibles dans la réponse de l'API).
+ * - Partie 1 : clients ayant au moins une opération sur la période
+ * - Partie 2 : clients sans aucune opération (solde dormant)
+ */
+function renderCreanceGlobalByClient(data) {
+    const fmt = n => (parseFloat(n) || 0).toLocaleString('fr-FR') + ' FCFA';
+    const fmtDate = d => {
+        if (!d) return '';
+        // ISO YYYY-MM-DD -> reste tel quel (les utilisateurs préfèrent cette forme dans le tableau)
+        const s = String(d).slice(0, 10);
+        return s;
+    };
+    const details = data.details || [];
+    const summary = data.summary || {};
+    const today = summary.date_selected ? new Date(summary.date_selected) : new Date();
+
+    // Index : clientKey -> { name, portfolio, solde, lastAvance, lastRemb }
+    const clientMap = new Map();
+    const keyOf = name => (name || '').trim().toLowerCase();
+
+    details.forEach(d => {
+        const pname = d.portfolio_name || '—';
+        (d.status || []).forEach(c => {
+            const k = keyOf(c.client_name);
+            if (!k) return;
+            // Si un client apparaît dans plusieurs portefeuilles, on garde
+            // celui dont le solde absolu est le plus élevé (cas marginal).
+            const prev = clientMap.get(k);
+            const entry = {
+                name: c.client_name,
+                portfolio: pname,
+                solde: parseFloat(c.solde_final || 0),
+                credit_initial: parseFloat(c.credit_initial || 0),
+                total_avances: parseFloat(c.total_avances || 0),
+                total_remboursements: parseFloat(c.total_remboursements || 0),
+                lastAvance: null,    // { date, montant }
+                lastRemb: null
+            };
+            if (!prev || Math.abs(entry.solde) > Math.abs(prev.solde)) {
+                clientMap.set(k, entry);
+            }
+        });
+        // Parcourir les opérations pour identifier dernière avance / dernier remb
+        (d.operations || []).forEach(op => {
+            const k = keyOf(op.client);
+            const entry = clientMap.get(k);
+            if (!entry) return;
+            const dateStr = fmtDate(op.date_operation);
+            const isAvance = op.type === 'avance' || op.type === 'credit';
+            const slot = isAvance ? 'lastAvance' : 'lastRemb';
+            if (!entry[slot] || dateStr > entry[slot].date) {
+                entry[slot] = { date: dateStr, montant: parseFloat(op.montant || 0) };
+            }
+        });
+    });
+
+    // Tri par solde décroissant (comme dans le screenshot)
+    const allClients = Array.from(clientMap.values()).sort((a, b) => b.solde - a.solde);
+
+    // Séparation : actif (au moins une opération) vs sans activité
+    const actifs = [];
+    const inactifs = [];
+    allClients.forEach(c => {
+        if (c.lastAvance || c.lastRemb) actifs.push(c);
+        else inactifs.push(c);
+    });
+
+    // Helper : nombre de jours depuis la dernière activité
+    const daysSince = entry => {
+        const lastDateStr = [entry.lastAvance && entry.lastAvance.date,
+                             entry.lastRemb && entry.lastRemb.date]
+                             .filter(Boolean).sort().reverse()[0];
+        if (!lastDateStr) return null;
+        const lastDate = new Date(lastDateStr);
+        const diff = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));
+        return Math.max(0, diff);
+    };
+
+    // Badge "Compte"
+    const portfolioBadge = name => `
+        <span class="qw-pill qw-pill-muted" title="Portefeuille">
+            <i class="fas fa-folder"></i> ${escapeHtml(name)}
+        </span>`;
+
+    // Pill date avec couleur selon âge (mois courant = bleu, sinon neutre)
+    const datePill = (item, isPositive = false) => {
+        if (!item) return `<span class="qw-cell-empty">—</span>`;
+        const sameMonth = item.date && item.date.slice(0, 7) === (summary.date_selected || '').slice(0, 7);
+        const cls = sameMonth ? 'qw-pill qw-pill-primary' : 'qw-pill qw-pill-muted';
+        return `
+            <div class="qw-cell-stack">
+                <span class="${cls}">${escapeHtml(item.date)}</span>
+                <span class="qw-cell-amount ${isPositive ? 'qw-amount-pos' : ''}">${fmt(item.montant)}</span>
+            </div>`;
+    };
+
+    // Pill "Dernière activité : N jours"
+    const stalenessPill = entry => {
+        const d = daysSince(entry);
+        if (d === null) return `<span class="qw-pill qw-pill-warning">Aucune activité</span>`;
+        if (d > 60) return `<span class="qw-pill qw-pill-danger" title="Dernière activité"><i class="far fa-clock"></i> ${d} j</span>`;
+        if (d > 14) return `<span class="qw-pill qw-pill-warning" title="Dernière activité"><i class="far fa-clock"></i> ${d} j</span>`;
+        return `<span class="qw-pill qw-pill-success" title="Dernière activité"><i class="far fa-clock"></i> ${d} j</span>`;
+    };
+
+    // Solde coloré
+    const soldeCell = v => {
+        const cls = v < 0 ? 'qw-amount-neg' : (v === 0 ? 'qw-amount-zero' : 'qw-amount-pos');
+        return `<span class="qw-amount ${cls}">${fmt(v)}</span>`;
+    };
+
+    // Tableau pour la Partie 1
+    const renderActifsTable = () => `
+        <div class="table-container" style="margin-bottom: 18px;">
+            <table class="data-table qw-client-table">
+                <thead>
+                    <tr>
+                        <th style="width: 36px;">#</th>
+                        <th>Client</th>
+                        <th style="text-align: right;">Solde</th>
+                        <th>Dernier remboursement</th>
+                        <th>Dernière avance</th>
+                        <th>Compte</th>
+                        <th>Activité</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${actifs.map((c, i) => `
+                        <tr>
+                            <td class="qw-cell-rank">${i + 1}</td>
+                            <td><strong>${escapeHtml(c.name)}</strong></td>
+                            <td style="text-align: right;">${soldeCell(c.solde)}</td>
+                            <td>${datePill(c.lastRemb, true)}</td>
+                            <td>${datePill(c.lastAvance, false)}</td>
+                            <td>${portfolioBadge(c.portfolio)}</td>
+                            <td>${stalenessPill(c)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>`;
+
+    // Tableau pour la Partie 2
+    const renderInactifsTable = () => `
+        <div class="table-container">
+            <table class="data-table qw-client-table">
+                <thead>
+                    <tr>
+                        <th style="width: 36px;">#</th>
+                        <th>Client</th>
+                        <th style="text-align: right;">Solde</th>
+                        <th>Compte</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${inactifs.map((c, i) => `
+                        <tr>
+                            <td class="qw-cell-rank">${i + 1}</td>
+                            <td><strong>${escapeHtml(c.name)}</strong></td>
+                            <td style="text-align: right;">${soldeCell(c.solde)}</td>
+                            <td>${portfolioBadge(c.portfolio)}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        </div>`;
+
+    return `
+        <!-- Récap mini-stats par client -->
+        <div class="qw-client-summary">
+            <div class="qw-client-summary-item">
+                <span class="qw-client-summary-label">Clients suivis</span>
+                <span class="qw-client-summary-value">${allClients.length}</span>
+            </div>
+            <div class="qw-client-summary-item">
+                <span class="qw-client-summary-label">Avec activité</span>
+                <span class="qw-client-summary-value">${actifs.length}</span>
+            </div>
+            <div class="qw-client-summary-item">
+                <span class="qw-client-summary-label">Sans activité</span>
+                <span class="qw-client-summary-value">${inactifs.length}</span>
+            </div>
+        </div>
+
+        <!-- Partie 1 -->
+        <div class="qw-client-section">
+            <div class="qw-client-section-head">
+                <span class="qw-client-section-num">1</span>
+                <h5>Clients avec activité</h5>
+                <small>${actifs.length} client${actifs.length > 1 ? 's' : ''}, triés par solde décroissant</small>
+            </div>
+            ${actifs.length === 0
+                ? `<div class="no-data-message"><p>Aucun client avec activité sur la période</p></div>`
+                : renderActifsTable()}
+        </div>
+
+        <!-- Partie 2 -->
+        <div class="qw-client-section">
+            <div class="qw-client-section-head">
+                <span class="qw-client-section-num">2</span>
+                <h5>Sans activité</h5>
+                <small>Aucun remboursement ni avance — solde dormant</small>
+            </div>
+            ${inactifs.length === 0
+                ? `<div class="no-data-message"><p>Tous les clients ont eu une activité</p></div>`
+                : renderInactifsTable()}
+        </div>`;
 }
 
 /** Bascule de la vue multi vers la vue single pour gérer/éditer un compte. */
@@ -17345,10 +17621,17 @@ function createSoldeChart() {
 }
 
 // Configurer les dates par défaut
+// (définition unique — celle qui était dupliquée plus bas a été supprimée)
 function setupVisualisationDateControls() {
+    console.log('📅 CLIENT: Configuration des contrôles de date visualisation');
+
     const today = new Date();
-    // Premier jour du mois en cours (local time pour éviter les surprises de timezone)
-    const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    // Premier jour du mois en cours : on clone today et on positionne le
+    // jour à 1 (plutôt que new Date(y, m, 1) qui utilise des paramètres
+    // numériques). Pas de souci de timezone : on reste dans le local time.
+    const firstOfMonth = new Date(today);
+    firstOfMonth.setDate(1);
+    firstOfMonth.setHours(0, 0, 0, 0);
 
     // Format YYYY-MM-DD en local (toISOString partirait en UTC et pourrait
     // décaler d'un jour pour les premières heures locales)
@@ -17714,31 +17997,10 @@ function updateVisualisationTable(tab, data) {
 }
 
 // ===== FONCTIONS SETUP POUR LE MODULE VISUALISATION =====
-
-// Configurer les contrôles de date pour la visualisation
-function setupVisualisationDateControls() {
-    console.log('📅 CLIENT: Configuration des contrôles de date visualisation');
-
-    // Défaut : 1er jour du mois en cours → aujourd'hui
-    const endDate = new Date();
-    const startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
-
-    // Format YYYY-MM-DD en heure locale (toISOString partirait en UTC)
-    const toLocalDateString = (d) => {
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${y}-${m}-${day}`;
-    };
-
-    const startDateInput = document.getElementById('viz-start-date');
-    const endDateInput = document.getElementById('viz-end-date');
-
-    if (startDateInput) startDateInput.value = toLocalDateString(startDate);
-    if (endDateInput) endDateInput.value = toLocalDateString(endDate);
-
-    console.log(`📅 CLIENT: Dates par défaut configurées (mois en cours): ${toLocalDateString(startDate)} à ${toLocalDateString(endDate)}`);
-}
+// NOTE : setupVisualisationDateControls() est définie plus haut dans ce
+// fichier (recherche : "Configurer les dates par défaut"). La définition
+// dupliquée qui se trouvait ici a été supprimée pour éviter le piège du
+// hoisting (la dernière déclaration gagnait silencieusement).
 
 // Configurer les onglets de visualisation
 function setupVisualisationTabs() {
