@@ -2847,7 +2847,7 @@ function displayAccounts(accounts) {
     
     // Créer les filtres
     const filtersHtml = `
-        <div class="accounts-filters-card" style="margin-bottom: 25px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+        <div class="accounts-filters-card" style="margin-bottom: 25px; background: #2563eb; border-radius: 15px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
             <div style="display: flex; align-items: center; margin-bottom: 20px;">
                 <i class="fas fa-filter" style="color: white; font-size: 20px; margin-right: 10px;"></i>
                 <h5 style="color: white; margin: 0; font-weight: 600;">Filtres de Recherche</h5>
@@ -2951,8 +2951,8 @@ function displayAccounts(accounts) {
             }
             
             .form-check-input:checked {
-                background-color: #667eea;
-                border-color: #667eea;
+                background-color: #2563eb;
+                border-color: #2563eb;
             }
             
             .form-check-label {
@@ -2982,7 +2982,7 @@ function displayAccounts(accounts) {
     // Bouton pour afficher/masquer les colonnes financières
     const toggleFinancialBtn = `
         <div style="margin-bottom: 15px; text-align: right;">
-            <button id="toggle-financial-columns" class="btn btn-outline-primary" style="border-radius: 10px; padding: 8px 15px; font-weight: 500; border: 2px solid #667eea; color: #667eea; background: white; transition: all 0.3s ease;">
+            <button id="toggle-financial-columns" class="btn btn-outline-primary" style="border-radius: 10px; padding: 8px 15px; font-weight: 500; border: 2px solid #2563eb; color: #2563eb; background: white; transition: all 0.3s ease;">
                 <i class="fas fa-eye" style="margin-right: 5px;"></i>Afficher colonnes financières
             </button>
         </div>
@@ -2992,7 +2992,7 @@ function displayAccounts(accounts) {
     const tableHtml = `
         <div class="table-responsive" style="border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
             <table class="table table-striped table-hover mb-0" id="accounts-table" style="border-radius: 15px; overflow: hidden;">
-                <thead style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                <thead style="background: #2563eb; color: white;">
                     <tr>
                         <th style="border: none; padding: 15px; font-weight: 600;">
                             <i class="fas fa-university" style="margin-right: 8px;"></i>COMPTE
@@ -3042,7 +3042,7 @@ function displayAccounts(accounts) {
             
             #accounts-table tbody tr:hover {
                 background: linear-gradient(90deg, #f8f9ff 0%, #ffffff 100%) !important;
-                border-left: 4px solid #667eea;
+                border-left: 4px solid #2563eb;
                 transform: translateX(5px);
                 box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             }
@@ -3061,7 +3061,7 @@ function displayAccounts(accounts) {
             }
             
             .badge-secondary {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: #2563eb;
                 color: white;
             }
             
@@ -3248,7 +3248,7 @@ function toggleFinancialColumns() {
     // Mettre à jour le texte et l'icône du bouton
     if (isHidden) {
         toggleButton.innerHTML = '<i class="fas fa-eye-slash" style="margin-right: 5px;"></i>Masquer colonnes financières';
-        toggleButton.style.background = '#667eea';
+        toggleButton.style.background = '#2563eb';
         toggleButton.style.color = 'white';
         // Ajuster le colspan si nécessaire
         const emptyRow = document.querySelector('#accounts-table-body tr td[colspan]');
@@ -3258,7 +3258,7 @@ function toggleFinancialColumns() {
     } else {
         toggleButton.innerHTML = '<i class="fas fa-eye" style="margin-right: 5px;"></i>Afficher colonnes financières';
         toggleButton.style.background = 'white';
-        toggleButton.style.color = '#667eea';
+        toggleButton.style.color = '#2563eb';
         // Ajuster le colspan si nécessaire
         const emptyRow = document.querySelector('#accounts-table-body tr td[colspan]');
         if (emptyRow) {
@@ -3396,7 +3396,7 @@ function updateAccountFilterCount(filtered, total) {
         const counter = document.createElement('div');
         counter.className = 'account-filter-count';
         counter.style.cssText = `
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #2563eb;
             color: white;
             padding: 10px 15px;
             border-radius: 20px;
@@ -5194,7 +5194,7 @@ async function openEditModal(expenseId) {
         if (currentUser.role === 'directeur') {
             const hoursDifference = (new Date() - new Date(expense.created_at)) / 36e5;
             if (hoursDifference > 24) {
-                alert(`Modification non autorisée. La dépense a été créée il y a plus de 24 heures.`);
+                showNotification('Modification non autorisée. La dépense a été créée il y a plus de 24 heures.', 'warning');
                 return;
             }
         }
@@ -6064,7 +6064,7 @@ function createExpenseDetailsModal() {
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         ">
             <div class="modal-header" style="
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: #2563eb;
                 color: white;
                 padding: 20px;
                 border-radius: 8px 8px 0 0;
@@ -8253,7 +8253,7 @@ function displayAllUsers(users) {
     const tableHtml = `
         <div class="table-responsive" style="border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
             <table class="table table-striped table-hover mb-0" style="border-radius: 15px; overflow: hidden;">
-                <thead style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                <thead style="background: #2563eb; color: white;">
                     <tr>
                         <th style="border: none; padding: 15px; font-weight: 600;">
                             <i class="fas fa-user" style="margin-right: 8px;"></i>Nom d'utilisateur
@@ -8342,13 +8342,13 @@ function displayAllUsers(users) {
         <style>
             .users-list tbody tr:hover {
                 background: linear-gradient(90deg, #f8f9ff 0%, #ffffff 100%) !important;
-                border-left: 4px solid #667eea !important;
+                border-left: 4px solid #2563eb !important;
                 transform: translateX(5px);
                 box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             }
             
             .badge-primary {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: #2563eb;
                 color: white;
             }
         </style>
@@ -8407,7 +8407,7 @@ function updateUserFilterCount(filtered, total) {
         const counter = document.createElement('div');
         counter.className = 'user-filter-count';
         counter.style.cssText = `
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #2563eb;
             color: white;
             padding: 10px 15px;
             border-radius: 20px;
@@ -17206,7 +17206,7 @@ async function saveDashboardSnapshot() {
     
     if (!snapshotDateInput) {
         console.error('❌ CLIENT: Élément snapshot-date non trouvé');
-        alert('Erreur: champ date non trouvé');
+        showNotification('Erreur: champ date non trouvé', 'error');
         return;
     }
     
@@ -17214,7 +17214,7 @@ async function saveDashboardSnapshot() {
     const notes = snapshotNotesInput ? snapshotNotesInput.value : '';
     
     if (!snapshotDate) {
-        alert('Veuillez sélectionner une date pour le snapshot');
+        showNotification('Veuillez sélectionner une date pour le snapshot', 'warning');
         return;
     }
     
@@ -17308,7 +17308,7 @@ async function saveDashboardSnapshot() {
             alertMessage += `\nAncien snapshot créé le: ${new Date(result.previousSnapshot.created_at).toLocaleString()}`;
         }
         
-        alert(alertMessage);
+        showNotification(alertMessage, 'success');
         
         // Optionnel: réinitialiser les notes
         if (snapshotNotesInput) {
@@ -17317,7 +17317,7 @@ async function saveDashboardSnapshot() {
         
     } catch (error) {
         console.error('❌ CLIENT: Erreur sauvegarde snapshot:', error);
-        alert(`Erreur lors de la sauvegarde du snapshot: ${error.message}`);
+        showNotification(`Erreur lors de la sauvegarde du snapshot: ${error.message}`, 'error');
     }
 }
 
@@ -17351,7 +17351,7 @@ async function addPartnerDelivery(accountId, formData) {
 
     } catch (error) {
         console.error(`[Partner] CRITICAL: Exception while adding delivery for account ${accountId}:`, error);
-        alert(`Erreur lors de l'ajout de la livraison: ${error.message}`);
+        showNotification(`Erreur lors de l'ajout de la livraison: ${error.message}`, 'error');
     }
 }
 
@@ -18867,7 +18867,7 @@ function closePLDetailsModal() {
 // Fonction pour exporter les détails PL en Excel
 function exportPLDetailsToExcel() {
     if (!window.currentPLDetails) {
-        alert('Aucune donnée PL disponible pour l\'export');
+        showNotification('Aucune donnée PL disponible pour l\'export', 'warning');
         return;
     }
 
