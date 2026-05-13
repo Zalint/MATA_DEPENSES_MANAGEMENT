@@ -29,22 +29,37 @@
         <div class="login-container">
             <div class="login-card">
                 <div class="login-header">
-                    <i class="fas fa-wallet"></i>
-                    <h1>Gestion des Dépenses</h1>
+                    <div class="login-logo-bubble">
+                        <i class="fas fa-wallet"></i>
+                    </div>
+                    <h1>MataBanq</h1>
+                    <p class="login-subtitle">Gestion financière sécurisée</p>
                 </div>
                 <form id="login-form">
-                                            <div class="form-group">
-                            <label for="username">Nom d'utilisateur</label>
-                            <input type="text" id="username" name="username" autocomplete="username" required>
+                    <div class="form-group login-field">
+                        <label for="username">Nom d'utilisateur</label>
+                        <div class="login-input-wrap">
+                            <i class="fas fa-user login-input-icon" aria-hidden="true"></i>
+                            <input type="text" id="username" name="username" autocomplete="username" required placeholder="Votre identifiant">
                         </div>
-                        <div class="form-group">
-                            <label for="password">Mot de passe</label>
-                            <input type="password" id="password" name="password" autocomplete="current-password" required>
+                    </div>
+                    <div class="form-group login-field">
+                        <label for="password">Mot de passe</label>
+                        <div class="login-input-wrap">
+                            <i class="fas fa-lock login-input-icon" aria-hidden="true"></i>
+                            <input type="password" id="password" name="password" autocomplete="current-password" required placeholder="••••••••">
                         </div>
-                    <button type="submit">Se connecter</button>
+                    </div>
+                    <button type="submit" class="login-submit">
+                        <span>Se connecter</span>
+                        <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                    </button>
                 </form>
                 <div id="login-error" class="error-message"></div>
-               
+                <div class="login-footer">
+                    <i class="fas fa-shield-halved"></i>
+                    <span>Connexion chiffrée &middot; Mata Group</span>
+                </div>
             </div>
         </div>
     </div>
