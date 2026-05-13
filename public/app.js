@@ -116,6 +116,151 @@ function formatDate(dateString) {
     return formatted;
 }
 
+/* ============================================================
+   DARK MODE — Toggle + persistance
+   - Lit la préférence depuis localStorage (clé : qw-theme)
+   - Sinon, respecte prefers-color-scheme (système)
+   - Le toggle bascule entre 'light' et 'dark' et persiste le choix
+   - S'exécute en IIFE le plus tôt possible pour éviter le flash blanc
+   ============================================================ */
+(function initThemePreference() {
+    try {
+        const stored = localStorage.getItem('qw-theme');
+        if (stored === 'dark' || stored === 'light') {
+            document.documentElement.setAttribute('data-theme', stored);
+        }
+        // sinon : on laisse @media prefers-color-scheme décider
+    } catch (e) { /* localStorage indisponible : ignorer */ }
+})();
+
+function qwToggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme');
+    let next;
+    if (current === 'dark') {
+        next = 'light';
+    } else if (current === 'light') {
+        next = 'dark';
+    } else {
+        // Pas encore défini : on inverse vs la pref système
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        next = prefersDark ? 'light' : 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('qw-theme', next); } catch (e) { /* ignore */ }
+    qwUpdateThemeToggle();
+}
+
+function qwUpdateThemeToggle() {
+    const btn = document.getElementById('qw-theme-toggle-btn');
+    if (!btn) return;
+    const isDark =
+        document.documentElement.getAttribute('data-theme') === 'dark' ||
+        (!document.documentElement.getAttribute('data-theme') &&
+         window.matchMedia('(prefers-color-scheme: dark)').matches);
+    btn.innerHTML = isDark
+        ? '<i class="fas fa-sun"></i>'
+        : '<i class="fas fa-moon"></i>';
+    btn.setAttribute('title', isDark ? 'Passer en mode clair' : 'Passer en mode sombre');
+    btn.setAttribute('aria-label', isDark ? 'Passer en mode clair' : 'Passer en mode sombre');
+}
+
+/** Injecte le bouton toggle dans le topbar à côté du profil utilisateur. */
+function qwInjectThemeToggle() {
+    if (document.getElementById('qw-theme-toggle-btn')) return;
+
+    // Cibler la zone utilisateur du topbar (à côté du badge ADMIN/logout)
+    const target =
+        document.querySelector('.user-info') ||
+        document.querySelector('.navbar-user') ||
+        document.querySelector('.top-bar-user') ||
+        document.querySelector('#logout-btn')?.parentElement ||
+        document.querySelector('.btn-logout')?.parentElement;
+    if (!target) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'qw-theme-toggle-btn';
+    btn.className = 'qw-theme-toggle';
+    btn.addEventListener('click', qwToggleTheme);
+    target.insertBefore(btn, target.firstChild);
+
+    qwUpdateThemeToggle();
+
+    // Réagir aux changements de pref système si l'utilisateur n'a pas choisi
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)')
+            .addEventListener('change', qwUpdateThemeToggle);
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', qwInjectThemeToggle);
+} else {
+    qwInjectThemeToggle();
+}
+
+/**
+ * Génère un badge "trend" comparant deux valeurs.
+ * @param {number} current - valeur actuelle
+ * @param {number} previous - valeur de comparaison (mois précédent, snapshot, etc.)
+ * @param {Object} [opts]
+ * @param {boolean} [opts.inverse=false] - si true, une hausse est "mauvaise" (ex. cash burn)
+ * @param {string}  [opts.suffix='%']    - suffixe affiché après le nombre
+ * @param {string}  [opts.label]         - texte additionnel ("vs mois dernier")
+ * @returns {string} HTML à injecter dans un container
+ *
+ * Exemple :
+ *   container.innerHTML = renderTrend(stats.current, stats.previous,
+ *                                     { label: 'vs mois dernier' });
+ */
+function renderTrend(current, previous, opts = {}) {
+    const cur = Number(current) || 0;
+    const prev = Number(previous) || 0;
+    const inverse = opts.inverse === true;
+    const suffix = opts.suffix || '%';
+    const label = opts.label ? ` <span style="color: var(--qw-text-muted); font-weight: 400;">${escapeHtml(opts.label)}</span>` : '';
+
+    // Pas de comparaison possible
+    if (prev === 0) {
+        if (cur === 0) {
+            return `<span class="trend trend-flat" title="Pas de variation"><i class="fas fa-minus"></i> 0${suffix}${label}</span>`;
+        }
+        return `<span class="trend trend-flat" title="Pas de référence précédente">Nouveau${label}</span>`;
+    }
+
+    const delta = cur - prev;
+    const pct = (delta / Math.abs(prev)) * 100;
+    const absPct = Math.abs(pct);
+    const formatted = absPct < 0.05 ? '0' : absPct.toFixed(1);
+
+    let cls, icon;
+    if (Math.abs(delta) < 0.01) {
+        cls = 'trend-flat'; icon = 'fa-minus';
+    } else if (delta > 0) {
+        cls = inverse ? 'trend-bad' : 'trend-good';
+        icon = 'fa-arrow-up';
+    } else {
+        cls = inverse ? 'trend-good' : 'trend-bad';
+        icon = 'fa-arrow-down';
+    }
+
+    const sign = delta > 0 ? '+' : (delta < 0 ? '-' : '');
+    return `<span class="trend ${cls}" title="${sign}${formatted}${suffix} (${cur.toLocaleString('fr-FR')} vs ${prev.toLocaleString('fr-FR')})">
+                <i class="fas ${icon}"></i> ${sign}${formatted}${suffix}${label}
+            </span>`;
+}
+
+/** Échappe le HTML pour éviter l'injection */
+function escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function showNotification(message, type = 'info') {
     const notification = document.getElementById('notification');
     notification.textContent = message;
@@ -2847,7 +2992,7 @@ function displayAccounts(accounts) {
     
     // Créer les filtres
     const filtersHtml = `
-        <div class="accounts-filters-card" style="margin-bottom: 25px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 15px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
+        <div class="accounts-filters-card" style="margin-bottom: 25px; background: #2563eb; border-radius: 15px; padding: 25px; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
             <div style="display: flex; align-items: center; margin-bottom: 20px;">
                 <i class="fas fa-filter" style="color: white; font-size: 20px; margin-right: 10px;"></i>
                 <h5 style="color: white; margin: 0; font-weight: 600;">Filtres de Recherche</h5>
@@ -2951,8 +3096,8 @@ function displayAccounts(accounts) {
             }
             
             .form-check-input:checked {
-                background-color: #667eea;
-                border-color: #667eea;
+                background-color: #2563eb;
+                border-color: #2563eb;
             }
             
             .form-check-label {
@@ -2982,7 +3127,7 @@ function displayAccounts(accounts) {
     // Bouton pour afficher/masquer les colonnes financières
     const toggleFinancialBtn = `
         <div style="margin-bottom: 15px; text-align: right;">
-            <button id="toggle-financial-columns" class="btn btn-outline-primary" style="border-radius: 10px; padding: 8px 15px; font-weight: 500; border: 2px solid #667eea; color: #667eea; background: white; transition: all 0.3s ease;">
+            <button id="toggle-financial-columns" class="btn btn-outline-primary" style="border-radius: 10px; padding: 8px 15px; font-weight: 500; border: 2px solid #2563eb; color: #2563eb; background: white; transition: all 0.3s ease;">
                 <i class="fas fa-eye" style="margin-right: 5px;"></i>Afficher colonnes financières
             </button>
         </div>
@@ -2992,7 +3137,7 @@ function displayAccounts(accounts) {
     const tableHtml = `
         <div class="table-responsive" style="border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
             <table class="table table-striped table-hover mb-0" id="accounts-table" style="border-radius: 15px; overflow: hidden;">
-                <thead style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                <thead style="background: #2563eb; color: white;">
                     <tr>
                         <th style="border: none; padding: 15px; font-weight: 600;">
                             <i class="fas fa-university" style="margin-right: 8px;"></i>COMPTE
@@ -3042,7 +3187,7 @@ function displayAccounts(accounts) {
             
             #accounts-table tbody tr:hover {
                 background: linear-gradient(90deg, #f8f9ff 0%, #ffffff 100%) !important;
-                border-left: 4px solid #667eea;
+                border-left: 4px solid #2563eb;
                 transform: translateX(5px);
                 box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             }
@@ -3061,7 +3206,7 @@ function displayAccounts(accounts) {
             }
             
             .badge-secondary {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: #2563eb;
                 color: white;
             }
             
@@ -3248,7 +3393,7 @@ function toggleFinancialColumns() {
     // Mettre à jour le texte et l'icône du bouton
     if (isHidden) {
         toggleButton.innerHTML = '<i class="fas fa-eye-slash" style="margin-right: 5px;"></i>Masquer colonnes financières';
-        toggleButton.style.background = '#667eea';
+        toggleButton.style.background = '#2563eb';
         toggleButton.style.color = 'white';
         // Ajuster le colspan si nécessaire
         const emptyRow = document.querySelector('#accounts-table-body tr td[colspan]');
@@ -3258,7 +3403,7 @@ function toggleFinancialColumns() {
     } else {
         toggleButton.innerHTML = '<i class="fas fa-eye" style="margin-right: 5px;"></i>Afficher colonnes financières';
         toggleButton.style.background = 'white';
-        toggleButton.style.color = '#667eea';
+        toggleButton.style.color = '#2563eb';
         // Ajuster le colspan si nécessaire
         const emptyRow = document.querySelector('#accounts-table-body tr td[colspan]');
         if (emptyRow) {
@@ -3396,7 +3541,7 @@ function updateAccountFilterCount(filtered, total) {
         const counter = document.createElement('div');
         counter.className = 'account-filter-count';
         counter.style.cssText = `
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #2563eb;
             color: white;
             padding: 10px 15px;
             border-radius: 20px;
@@ -5194,7 +5339,7 @@ async function openEditModal(expenseId) {
         if (currentUser.role === 'directeur') {
             const hoursDifference = (new Date() - new Date(expense.created_at)) / 36e5;
             if (hoursDifference > 24) {
-                alert(`Modification non autorisée. La dépense a été créée il y a plus de 24 heures.`);
+                showNotification('Modification non autorisée. La dépense a été créée il y a plus de 24 heures.', 'warning');
                 return;
             }
         }
@@ -6064,7 +6209,7 @@ function createExpenseDetailsModal() {
             box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         ">
             <div class="modal-header" style="
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: #2563eb;
                 color: white;
                 padding: 20px;
                 border-radius: 8px 8px 0 0;
@@ -8253,7 +8398,7 @@ function displayAllUsers(users) {
     const tableHtml = `
         <div class="table-responsive" style="border-radius: 15px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.1);">
             <table class="table table-striped table-hover mb-0" style="border-radius: 15px; overflow: hidden;">
-                <thead style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                <thead style="background: #2563eb; color: white;">
                     <tr>
                         <th style="border: none; padding: 15px; font-weight: 600;">
                             <i class="fas fa-user" style="margin-right: 8px;"></i>Nom d'utilisateur
@@ -8342,13 +8487,13 @@ function displayAllUsers(users) {
         <style>
             .users-list tbody tr:hover {
                 background: linear-gradient(90deg, #f8f9ff 0%, #ffffff 100%) !important;
-                border-left: 4px solid #667eea !important;
+                border-left: 4px solid #2563eb !important;
                 transform: translateX(5px);
                 box-shadow: 0 5px 15px rgba(0,0,0,0.1);
             }
             
             .badge-primary {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: #2563eb;
                 color: white;
             }
         </style>
@@ -8407,7 +8552,7 @@ function updateUserFilterCount(filtered, total) {
         const counter = document.createElement('div');
         counter.className = 'user-filter-count';
         counter.style.cssText = `
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: #2563eb;
             color: white;
             padding: 10px 15px;
             border-radius: 20px;
@@ -17206,7 +17351,7 @@ async function saveDashboardSnapshot() {
     
     if (!snapshotDateInput) {
         console.error('❌ CLIENT: Élément snapshot-date non trouvé');
-        alert('Erreur: champ date non trouvé');
+        showNotification('Erreur: champ date non trouvé', 'error');
         return;
     }
     
@@ -17214,7 +17359,7 @@ async function saveDashboardSnapshot() {
     const notes = snapshotNotesInput ? snapshotNotesInput.value : '';
     
     if (!snapshotDate) {
-        alert('Veuillez sélectionner une date pour le snapshot');
+        showNotification('Veuillez sélectionner une date pour le snapshot', 'warning');
         return;
     }
     
@@ -17308,7 +17453,7 @@ async function saveDashboardSnapshot() {
             alertMessage += `\nAncien snapshot créé le: ${new Date(result.previousSnapshot.created_at).toLocaleString()}`;
         }
         
-        alert(alertMessage);
+        showNotification(alertMessage, 'success');
         
         // Optionnel: réinitialiser les notes
         if (snapshotNotesInput) {
@@ -17317,7 +17462,7 @@ async function saveDashboardSnapshot() {
         
     } catch (error) {
         console.error('❌ CLIENT: Erreur sauvegarde snapshot:', error);
-        alert(`Erreur lors de la sauvegarde du snapshot: ${error.message}`);
+        showNotification(`Erreur lors de la sauvegarde du snapshot: ${error.message}`, 'error');
     }
 }
 
@@ -17351,7 +17496,7 @@ async function addPartnerDelivery(accountId, formData) {
 
     } catch (error) {
         console.error(`[Partner] CRITICAL: Exception while adding delivery for account ${accountId}:`, error);
-        alert(`Erreur lors de l'ajout de la livraison: ${error.message}`);
+        showNotification(`Erreur lors de l'ajout de la livraison: ${error.message}`, 'error');
     }
 }
 
@@ -18867,7 +19012,7 @@ function closePLDetailsModal() {
 // Fonction pour exporter les détails PL en Excel
 function exportPLDetailsToExcel() {
     if (!window.currentPLDetails) {
-        alert('Aucune donnée PL disponible pour l\'export');
+        showNotification('Aucune donnée PL disponible pour l\'export', 'warning');
         return;
     }
 

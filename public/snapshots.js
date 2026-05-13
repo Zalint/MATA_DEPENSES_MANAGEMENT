@@ -113,19 +113,37 @@ async function createSnapshot() {
     }
 }
 
+// Génère du HTML skeleton (4 cards) pour le placeholder de chargement
+function renderSnapshotsSkeleton() {
+    const card = `
+        <div class="skeleton-card" style="margin-bottom: 12px;">
+            <div style="display: flex; align-items: center; gap: 16px; margin-bottom: 14px;">
+                <div class="skeleton skeleton-square"></div>
+                <div style="flex: 1;">
+                    <div class="skeleton skeleton-title" style="width: 35%;"></div>
+                    <div class="skeleton skeleton-text short"></div>
+                </div>
+                <div class="skeleton skeleton-pill"></div>
+            </div>
+            <div class="skeleton skeleton-text long"></div>
+            <div class="skeleton skeleton-text medium"></div>
+        </div>`;
+    return card.repeat(4);
+}
+
 // Charger la liste des snapshots
 async function loadSnapshotsList() {
     const loadingDiv = document.getElementById('snapshots-loading');
     const listDiv = document.getElementById('snapshots-list');
-    
+
     try {
-        // Afficher le loading
-        loadingDiv.style.display = 'block';
-        listDiv.innerHTML = '';
-        
+        // Cacher le vieux spinner banner, injecter des skeleton cards à la place
+        if (loadingDiv) loadingDiv.style.display = 'none';
+        listDiv.innerHTML = renderSnapshotsSkeleton();
+
         const response = await fetch('/api/snapshots');
         const result = await response.json();
-        
+
         if (result.success) {
             currentSnapshots = result.snapshots;
             currentPage = 1;
@@ -133,7 +151,7 @@ async function loadSnapshotsList() {
         } else {
             throw new Error(result.message);
         }
-        
+
     } catch (error) {
         console.error('❌ Erreur chargement snapshots:', error);
         listDiv.innerHTML = `
@@ -143,8 +161,6 @@ async function loadSnapshotsList() {
                 <small>${error.message}</small>
             </div>
         `;
-    } finally {
-        loadingDiv.style.display = 'none';
     }
 }
 
