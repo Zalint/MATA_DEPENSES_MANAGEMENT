@@ -11957,6 +11957,11 @@ body.comptable-mode .comptable-hide {
    tokens existants. Réversible : supprimer ce bloc pour revenir.
    ============================================================ */
 :root {
+    /* Indique à Chromium d'utiliser les contrôles natifs en thème clair
+       par défaut (sinon le menu déroulant des <select> hérite du thème
+       OS, donnant un dropdown sombre alors que la page est claire). */
+    color-scheme: light;
+
     /* Primary : bleu moderne style banking (Stripe, Wise, Revolut).
        On abandonne le violet pour un bleu neutre plus pro. */
     --qw-primary: #2563eb;            /* Tailwind blue-600 */
@@ -12261,6 +12266,112 @@ section .page-header h2 {
     background: #fbfbfd !important;
     border-right: 1px solid var(--qw-border) !important;
     box-shadow: none !important;
+}
+
+/* Anti-FOUC : cache la nav-menu ET le contenu principal tant que JS
+   n'a pas fini d'appliquer les permissions. Un loader full-screen
+   masque tout pendant ce temps. Tout fade-in ensemble. */
+.sidebar .nav-menu {
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.25s ease-out;
+}
+body.nav-ready .sidebar .nav-menu {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Loader global plein écran — style banking pro */
+#qw-app-loader {
+    position: fixed;
+    inset: 0;
+    background: var(--qw-page);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10001;
+    opacity: 1;
+    visibility: visible;
+    transition: opacity 0.35s ease, visibility 0.35s ease;
+}
+body.nav-ready #qw-app-loader {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.qw-app-loader-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 22px;
+    padding: 40px 56px;
+    /* Petite "carte" douce pour un effet banking premium */
+    background: var(--qw-surface);
+    border: 1px solid var(--qw-border);
+    border-radius: 18px;
+    box-shadow: 0 24px 60px rgba(15, 23, 42, 0.08);
+}
+
+/* Spinner : double anneau, le primary + un trail plus doux */
+.qw-app-loader-spinner {
+    width: 56px;
+    height: 56px;
+    position: relative;
+}
+.qw-app-loader-spinner::before,
+.qw-app-loader-spinner::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border-style: solid;
+    border-width: 3px;
+}
+.qw-app-loader-spinner::before {
+    border-color: transparent;
+    border-top-color: var(--qw-primary);
+    border-right-color: var(--qw-primary);
+    animation: qw-spin 1s linear infinite;
+}
+.qw-app-loader-spinner::after {
+    inset: 8px;
+    border-color: transparent;
+    border-bottom-color: rgba(37, 99, 235, 0.35);
+    border-left-color: rgba(37, 99, 235, 0.35);
+    animation: qw-spin 1.6s linear infinite reverse;
+}
+
+[data-theme="dark"] .qw-app-loader-spinner::after {
+    border-bottom-color: rgba(59, 130, 246, 0.5);
+    border-left-color: rgba(59, 130, 246, 0.5);
+}
+
+@keyframes qw-spin {
+    to { transform: rotate(360deg); }
+}
+
+.qw-app-loader-brand {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: var(--qw-primary);
+}
+
+.qw-app-loader-label {
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    color: var(--qw-text-muted);
+}
+
+/* Respect des préférences d'animation réduite */
+@media (prefers-reduced-motion: reduce) {
+    .qw-app-loader-spinner::before,
+    .qw-app-loader-spinner::after {
+        animation: none;
+    }
 }
 
 /* Items de nav : moins hauts, typo plus pro */
@@ -13866,6 +13977,7 @@ span.previsible-no,
 /* 1. Détection système (auto-activation si pas de pref enregistrée) */
 @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
+        color-scheme: dark;
         --qw-primary: #3b82f6;
         --qw-primary-hover: #60a5fa;
         --qw-primary-soft: rgba(59, 130, 246, 0.18);
@@ -13887,9 +13999,17 @@ span.previsible-no,
     }
 }
 
+/* Force light scheme si l'utilisateur a explicitement choisi le mode clair
+   (sinon Chromium dans un OS en dark mode rendrait quand même les
+   contrôles natifs en sombre). */
+:root[data-theme="light"] {
+    color-scheme: light;
+}
+
 /* 2. Override explicite via data-theme="dark" (priorité sur la détection système) */
 :root[data-theme="dark"],
 [data-theme="dark"] {
+    color-scheme: dark;
     --qw-primary: #3b82f6;
     --qw-primary-hover: #60a5fa;
     --qw-primary-soft: rgba(59, 130, 246, 0.18);
@@ -14557,6 +14677,45 @@ span.previsible-no,
     color: var(--qw-text-secondary) !important;
 }
 
+/* ============================================================
+   SNAPSHOTS CONTROLS — bandeau "Date de référence" violet → sobre
+   S'applique en light ET en dark (override universel)
+   ============================================================ */
+.snapshots-controls-section {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border: 1px solid var(--qw-border) !important;
+    border-left: 4px solid var(--qw-primary) !important;
+    box-shadow: var(--qw-shadow-sm) !important;
+}
+.snapshots-controls-section .control-panel .form-group label {
+    color: var(--qw-text) !important;
+}
+.snapshots-controls-section .form-help {
+    color: var(--qw-text-secondary) !important;
+}
+.snapshots-controls-section .form-control {
+    background: var(--qw-surface) !important;
+    color: var(--qw-text) !important;
+    border: 1px solid var(--qw-border) !important;
+}
+
+/* Dark mode : pareil mais surface dark */
+[data-theme="dark"] .snapshots-controls-section {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .snapshots-controls-section .form-control {
+    background: #131c2d !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .snapshots-controls-section .form-help {
+    color: var(--qw-text-secondary) !important;
+}
+
 /* Labels DANS .filters et .dashboard-filters (haute spécificité) */
 [data-theme="dark"] .filters label,
 [data-theme="dark"] .filters .form-group label,
@@ -14847,3 +15006,360 @@ span.previsible-no,
 .qw-theme-toggle i {
     font-size: 14px;
 }
+
+/* =========================================================
+   STOCK SOIR — Uniformisation des couleurs
+   (titre vert + banner vert + boutons multicolores -> sobre)
+   ========================================================= */
+
+/* Banner "Total Stock Soir" : gradient vert -> carte sobre filet bleu */
+.stock-total-display {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    border: 1px solid var(--qw-border) !important;
+    border-left: 4px solid var(--qw-primary) !important;
+    border-radius: var(--qw-radius-lg) !important;
+    box-shadow: var(--qw-shadow-sm) !important;
+    padding: 16px 20px !important;
+    margin: 16px 0 !important;
+}
+.stock-total-display .total-card {
+    color: var(--qw-text) !important;
+    text-align: left !important;
+}
+.stock-total-display .total-card h4 {
+    color: var(--qw-text-secondary) !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    justify-content: flex-start !important;
+    margin: 0 0 6px 0 !important;
+}
+.stock-total-display .total-card h4 i {
+    color: var(--qw-primary) !important;
+}
+.stock-total-display .total-amount {
+    color: var(--qw-text) !important;
+    text-shadow: none !important;
+    font-size: 1.6rem !important;
+    font-weight: 700 !important;
+}
+
+/* Dark mode */
+[data-theme="dark"] .stock-total-display {
+    background: var(--qw-surface) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .stock-total-display .total-card,
+[data-theme="dark"] .stock-total-display .total-amount {
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .stock-total-display .total-card h4 {
+    color: var(--qw-text-secondary) !important;
+}
+
+/* Boutons d'action du header Stock Soir : tous en variantes sobres
+   #add-stock-btn (success vert), #view-stats-btn (info bleu),
+   #export-excel-btn (primary), #delete-by-date-btn (danger rouge)
+   -> garder UN seul accent primaire + ghost pour le reste. */
+#stock-soir-section .stock-controls .btn,
+#stock-soir-section .stock-actions .btn {
+    box-shadow: none !important;
+    background-image: none !important;
+}
+
+/* Action principale : Ajouter -> primaire */
+#stock-soir-section #add-stock-btn.btn,
+#stock-soir-section #add-stock-btn {
+    background: var(--qw-primary) !important;
+    color: #fff !important;
+    border: 1px solid var(--qw-primary) !important;
+}
+#stock-soir-section #add-stock-btn:hover {
+    background: var(--qw-primary-hover, #1d4ed8) !important;
+    border-color: var(--qw-primary-hover, #1d4ed8) !important;
+}
+
+/* Actions secondaires : Statistiques, Export, Supprimer par date -> ghost */
+#stock-soir-section #view-stats-btn,
+#stock-soir-section #export-excel-btn,
+#stock-soir-section #delete-by-date-btn {
+    background: var(--qw-surface) !important;
+    color: var(--qw-text) !important;
+    border: 1px solid var(--qw-border) !important;
+}
+#stock-soir-section #view-stats-btn:hover,
+#stock-soir-section #export-excel-btn:hover {
+    background: var(--qw-primary-soft, #eff6ff) !important;
+    color: var(--qw-primary) !important;
+    border-color: rgba(37, 99, 235, 0.3) !important;
+}
+/* Supprimer par date conserve un hint danger discret au hover uniquement */
+#stock-soir-section #delete-by-date-btn:hover {
+    background: rgba(220, 38, 38, 0.08) !important;
+    color: #b91c1c !important;
+    border-color: rgba(220, 38, 38, 0.3) !important;
+}
+
+/* Boutons d'action dans le tableau (Modifier violet / Supprimer rouge)
+   -> ghost neutres avec hint au hover */
+#stock-soir-section table .btn-warning,
+#stock-soir-section .stock-table .btn-warning,
+#stock-soir-section table .edit-stock-btn,
+#stock-soir-section .stock-table .edit-stock-btn {
+    background: transparent !important;
+    background-image: none !important;
+    color: var(--qw-text-secondary) !important;
+    border: 1px solid var(--qw-border) !important;
+    box-shadow: none !important;
+}
+#stock-soir-section table .btn-warning:hover,
+#stock-soir-section .stock-table .btn-warning:hover,
+#stock-soir-section table .edit-stock-btn:hover,
+#stock-soir-section .stock-table .edit-stock-btn:hover {
+    background: var(--qw-primary-soft, #eff6ff) !important;
+    color: var(--qw-primary) !important;
+    border-color: rgba(37, 99, 235, 0.3) !important;
+}
+
+#stock-soir-section table .btn-danger,
+#stock-soir-section .stock-table .btn-danger,
+#stock-soir-section table .delete-stock-btn,
+#stock-soir-section .stock-table .delete-stock-btn {
+    background: transparent !important;
+    background-image: none !important;
+    color: var(--qw-text-secondary) !important;
+    border: 1px solid var(--qw-border) !important;
+    box-shadow: none !important;
+}
+#stock-soir-section table .btn-danger:hover,
+#stock-soir-section .stock-table .btn-danger:hover,
+#stock-soir-section table .delete-stock-btn:hover,
+#stock-soir-section .stock-table .delete-stock-btn:hover {
+    background: rgba(220, 38, 38, 0.08) !important;
+    color: #b91c1c !important;
+    border-color: rgba(220, 38, 38, 0.3) !important;
+}
+
+/* Titre H2 de la section (le inline color:#22c55e a été retiré côté HTML,
+   on garantit ici la couleur standard) */
+#stock-soir-section > h2 {
+    color: var(--qw-text) !important;
+}
+
+/* =========================================================
+   CREANCE VUE GLOBALE — Bascule "Par portefeuille / Par client"
+   ========================================================= */
+
+/* Pill switcher */
+.qw-view-switcher {
+    display: inline-flex;
+    background: var(--qw-bg, #f3f4f6);
+    border: 1px solid var(--qw-border);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 16px;
+    gap: 2px;
+}
+.qw-view-pill {
+    background: transparent;
+    border: none;
+    color: var(--qw-text-secondary);
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.15s ease;
+}
+.qw-view-pill:hover {
+    color: var(--qw-text);
+}
+.qw-view-pill.is-active {
+    background: var(--qw-surface);
+    color: var(--qw-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.qw-view-pill i {
+    font-size: 12px;
+}
+
+[data-theme="dark"] .qw-view-switcher {
+    background: rgba(255, 255, 255, 0.04);
+}
+[data-theme="dark"] .qw-view-pill.is-active {
+    background: var(--qw-surface);
+    color: var(--qw-primary);
+}
+
+/* Mini-récap au-dessus des tables clients */
+.qw-client-summary {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    background: var(--qw-surface);
+    border: 1px solid var(--qw-border);
+    border-radius: var(--qw-radius-lg);
+    margin-bottom: 16px;
+}
+.qw-client-summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.qw-client-summary-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--qw-text-secondary);
+}
+.qw-client-summary-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--qw-text);
+}
+
+/* En-tête de section "Partie 1 / Partie 2" */
+.qw-client-section {
+    margin-bottom: 24px;
+}
+.qw-client-section-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+.qw-client-section-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--qw-primary-soft, #eff6ff);
+    color: var(--qw-primary);
+    font-size: 13px;
+    font-weight: 700;
+}
+.qw-client-section-head h5 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--qw-text);
+    text-transform: none;
+    letter-spacing: normal;
+}
+.qw-client-section-head small {
+    color: var(--qw-text-secondary);
+    font-size: 12px;
+    margin-left: auto;
+}
+
+[data-theme="dark"] .qw-client-section-num {
+    background: rgba(37, 99, 235, 0.15);
+}
+
+/* Table clients : cellules compactes + alignements */
+.qw-client-table {
+    font-size: 13px;
+}
+.qw-client-table td,
+.qw-client-table th {
+    vertical-align: middle;
+    padding: 10px 12px;
+}
+.qw-cell-rank {
+    color: var(--qw-text-secondary);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+.qw-cell-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+}
+.qw-cell-amount {
+    font-size: 12px;
+    color: var(--qw-text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+.qw-cell-empty {
+    color: var(--qw-text-muted, #9ca3af);
+}
+
+/* Pills statut générique (utilisable hors créance aussi) */
+.qw-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 500;
+    line-height: 1.4;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+.qw-pill i {
+    font-size: 10px;
+}
+.qw-pill-muted {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--qw-text-secondary);
+    border-color: var(--qw-border);
+}
+.qw-pill-primary {
+    background: var(--qw-primary-soft, #eff6ff);
+    color: var(--qw-primary);
+    border-color: rgba(37, 99, 235, 0.2);
+}
+.qw-pill-success {
+    background: rgba(34, 197, 94, 0.1);
+    color: #15803d;
+    border-color: rgba(34, 197, 94, 0.25);
+}
+.qw-pill-warning {
+    background: rgba(245, 158, 11, 0.1);
+    color: #b45309;
+    border-color: rgba(245, 158, 11, 0.3);
+}
+.qw-pill-danger {
+    background: rgba(220, 38, 38, 0.1);
+    color: #b91c1c;
+    border-color: rgba(220, 38, 38, 0.3);
+}
+
+[data-theme="dark"] .qw-pill-muted {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--qw-text-secondary);
+}
+[data-theme="dark"] .qw-pill-success {
+    background: rgba(34, 197, 94, 0.15);
+    color: #4ade80;
+}
+[data-theme="dark"] .qw-pill-warning {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+}
+[data-theme="dark"] .qw-pill-danger {
+    background: rgba(220, 38, 38, 0.18);
+    color: #f87171;
+}
+
+/* Montants colorés */
+.qw-amount {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.qw-amount-pos { color: var(--qw-text); }
+.qw-amount-neg { color: #dc2626; }
+.qw-amount-zero { color: var(--qw-text-secondary); }
+
+[data-theme="dark"] .qw-amount-neg { color: #f87171; }
+

@@ -1,31 +1,42 @@
 @echo off
-echo 🧪 ==================================
-echo 🧪 TESTS DE NON-REGRESSION PRE-PUSH
-echo 🧪 ==================================
+echo =====================================
+echo TESTS DE NON-REGRESSION PRE-PUSH
+echo =====================================
 
-echo 📋 Configuration des variables d'environnement...
-set DB_HOST=localhost
-set DB_PORT=5432
-set DB_NAME=depenses_management_preprod
-set DB_USER=zalint
-set DB_PASSWORD=bonea2024
+REM Les credentials NE doivent PAS etre embarques en clair dans ce script.
+REM Configurez DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD via votre
+REM secret manager ou votre shell avant d'invoquer ce script.
+if "%DB_HOST%"=="" goto :missing
+if "%DB_PORT%"=="" goto :missing
+if "%DB_NAME%"=="" goto :missing
+if "%DB_USER%"=="" goto :missing
+if "%DB_PASSWORD%"=="" goto :missing
+goto :run
+
+:missing
+echo ERREUR: Variables d'environnement manquantes.
+echo Requises: DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD.
+echo Configurez-les avant d'executer ce script.
+exit /b 1
+
+:run
 set NODE_ENV=test
 
-echo ⚡ Démarrage des tests de régression...
+echo Demarrage des tests de regression...
 call npm run test:regression
 
 if %ERRORLEVEL% NEQ 0 (
-    echo ❌ ==================================
-    echo ❌ TESTS DE REGRESSION ECHOUES!
-    echo ❌ ==================================
-    echo ❌ Les tests de non-régression ont échoué.
-    echo ❌ Corrigez les erreurs avant de continuer.
+    echo =====================================
+    echo TESTS DE REGRESSION ECHOUES
+    echo =====================================
+    echo Les tests de non-regression ont echoue.
+    echo Corrigez les erreurs avant de continuer.
     pause
     exit /b 1
 )
 
-echo ✅ ==================================
-echo ✅ TESTS DE REGRESSION REUSSIS!
-echo ✅ ==================================
-echo ✅ Tous les tests de non-régression sont passés.
+echo =====================================
+echo TESTS DE REGRESSION REUSSIS
+echo =====================================
+echo Tous les tests de non-regression sont passes.
 pause

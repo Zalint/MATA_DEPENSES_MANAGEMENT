@@ -45,7 +45,19 @@ function initVirementMensuel() {
     loadPointsDeVente();
     loadVirementClientsMeta();
 
-    console.log('✅ Module Virement Mensuel initialisé');
+    // Auto-charger le mois en cours.
+    // On awaite réellement la fin du chargement pour que le log "initialisé"
+    // ne fire qu'à la complétion. Les erreurs métier (réseau, parsing) sont
+    // déjà gérées à l'intérieur de loadVirementMensuel ; le catch ci-dessous
+    // ne sert qu'à attraper un échec inattendu (DOM manquant, runtime).
+    (async () => {
+        try {
+            await loadVirementMensuel();
+            console.log('✅ Module Virement Mensuel initialisé');
+        } catch (err) {
+            console.warn('⚠️ Init Virement Mensuel : échec inattendu (DOM/runtime) :', err && err.message ? err.message : err);
+        }
+    })();
 }
 
 // Charge la liste des points de vente actifs et peuple le <select>
