@@ -13,6 +13,17 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
+    <!-- Loader global affiché pendant le chargement initial (avant
+         que JS ait fini l'auth + le setup des permissions).
+         Retiré par app.js via document.body.classList.add('nav-ready'). -->
+    <div id="qw-app-loader" aria-live="polite" aria-busy="true">
+        <div class="qw-app-loader-card">
+            <div class="qw-app-loader-spinner" aria-hidden="true"></div>
+            <div class="qw-app-loader-brand">MataBanq</div>
+            <div class="qw-app-loader-label">Chargement en cours…</div>
+        </div>
+    </div>
+
     <!-- Page de connexion -->
     <div id="login-page" class="page active">
         <div class="login-container">
@@ -1437,6 +1448,62 @@
                             <select id="creance-account-select" class="form-control">
                                 <option value="">Choisir un compte créance...</option>
                             </select>
+                        </div>
+
+                        <!-- Sélection multi-comptes (read-only view) -->
+                        <div class="creance-multi-selector" style="margin-top: 12px;">
+                            <label class="checkbox-label" style="display: inline-flex; align-items: center; gap: 8px; font-weight: 500; cursor: pointer;">
+                                <input type="checkbox" id="creance-multi-mode-toggle">
+                                <span>Vue multi-comptes (lecture seule)</span>
+                            </label>
+                            <div id="creance-multi-controls" style="display: none; margin-top: 10px;">
+                                <label class="checkbox-label" style="display: inline-flex; align-items: center; gap: 8px; font-weight: 600;">
+                                    <input type="checkbox" id="creance-select-all-accounts">
+                                    <span>Tout sélectionner</span>
+                                </label>
+                                <div id="creance-accounts-checkboxes" style="display: flex; flex-wrap: wrap; gap: 12px 18px; margin-top: 8px;">
+                                    <!-- Checkboxes générées dynamiquement -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Conteneur des accordéons multi-comptes (lecture seule) -->
+                    <div id="creance-multi-view" style="display: none;"></div>
+
+                    <!-- Vue globale (synthèse cross-comptes via /external/api/creance) -->
+                    <div class="section-card" id="creance-global-section" style="margin-top: 14px;">
+                        <button type="button" class="accordion-header collapsed" id="creance-global-header" aria-expanded="false" aria-controls="creance-global-content">
+                            <span><i class="fas fa-globe"></i> Vue globale (synthèse cross-comptes)</span>
+                            <i class="fas fa-chevron-down accordion-icon"></i>
+                        </button>
+                        <div class="accordion-content collapsed" id="creance-global-content">
+                            <div id="creance-global-filters" style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 16px;">
+                                <div class="form-group" style="margin: 0;">
+                                    <label for="creance-global-date">Date d'analyse</label>
+                                    <input type="date" id="creance-global-date" class="form-control" style="max-width: 200px;">
+                                </div>
+                                <div class="form-group" style="margin: 0; flex: 1; min-width: 280px;">
+                                    <label for="creance-global-exclusion-input">Clients à exclure</label>
+                                    <div style="display: flex; gap: 8px; align-items: center;">
+                                        <input type="text" id="creance-global-exclusion-input" class="form-control" placeholder="Nom du client (Enter pour ajouter)" style="flex: 1;">
+                                        <button type="button" id="creance-global-exclusion-add" class="btn btn-secondary">
+                                            <i class="fas fa-plus"></i> Ajouter
+                                        </button>
+                                    </div>
+                                    <div id="creance-global-exclusion-chips" style="display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px;"></div>
+                                </div>
+                                <button type="button" id="creance-global-refresh" class="btn btn-primary">
+                                    <i class="fas fa-sync-alt"></i> Actualiser
+                                </button>
+                            </div>
+                            <div id="creance-global-results">
+                                <div class="empty-state">
+                                    <div class="empty-state-icon"><i class="fas fa-chart-line"></i></div>
+                                    <h4>Cliquez sur Actualiser</h4>
+                                    <p>La vue globale agrège tous les comptes créance pour la date sélectionnée, avec exclusion des clients listés ci-dessus.</p>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -2881,7 +2948,7 @@
 
                 <!-- Section Gestion Stock -->
                 <section id="stock-soir-section" class="section">
-                    <h2 style="color: #22c55e;">Gestion des Stocks du Soir</h2>
+                    <h2>Gestion des Stocks du Soir</h2>
                     
                     <!-- Upload de fichier JSON -->
                     <div class="stock-upload-card" style="display: none;">

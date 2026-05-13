@@ -45,6 +45,11 @@ function initVirementMensuel() {
     loadPointsDeVente();
     loadVirementClientsMeta();
 
+    // Auto-charger le mois en cours
+    loadVirementMensuel().catch(err => {
+        console.warn('⚠️ Auto-load Virement Mensuel échoué (non bloquant) :', err.message);
+    });
+
     console.log('✅ Module Virement Mensuel initialisé');
 }
 

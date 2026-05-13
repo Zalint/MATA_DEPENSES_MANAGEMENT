@@ -6,7 +6,7 @@ echo 🧪 ==================================
 echo 📋 Configuration des variables d'environnement...
 set DB_HOST=localhost
 set DB_PORT=5432
-set DB_NAME=depenses_management_preprod
+set DB_NAME=depenses_management_preprod_v2
 set DB_USER=zalint
 set DB_PASSWORD=bonea2024
 set NODE_ENV=test

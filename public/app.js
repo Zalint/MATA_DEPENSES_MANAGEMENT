@@ -690,8 +690,9 @@ function initMenuVisibility() {
         }
     }
     
-    // Menu Montant Début de Mois pour DG, PCA, Admin uniquement
-    if (['directeur_general', 'pca', 'admin'].includes(currentUser.role)) {
+    // Menu Montant Début de Mois — caché à la demande (entrée obsolète, gardée
+    // dans le HTML pour ne rien casser mais plus exposée dans la sidebar).
+    if (false /* ['directeur_general', 'pca', 'admin'].includes(currentUser.role) */) {
         const montantDebutMoisMenu = document.getElementById('montant-debut-mois-menu');
         if (montantDebutMoisMenu) {
             montantDebutMoisMenu.style.display = 'block';
@@ -814,6 +815,14 @@ async function loadInitialData() {
         initAIAnalysis();
         console.log('✅ CLIENT: AI Analysis module initialized');
     }
+
+    // Révéler la sidebar maintenant que toutes les permissions
+    // ont été appliquées (évite le "saut" visible quand des menus
+    // apparaissent/disparaissent en fonction du rôle).
+    // requestAnimationFrame pour s'assurer que le rendu reflète l'état final.
+    requestAnimationFrame(() => {
+        document.body.classList.add('nav-ready');
+    });
 }
 
 // Initialiser le menu collapse
@@ -4446,11 +4455,16 @@ document.addEventListener('DOMContentLoaded', function() {
             currentUser = user;
             await showApp();
             await loadInitialData();
+            // loadInitialData() ajoute lui-même nav-ready (qui cache le loader)
         })
         .catch((error) => {
             // Erreur normale au démarrage si non connecté
             console.log('Utilisateur non connecté, affichage de la page de connexion');
             showLogin();
+            // Pas de loadInitialData en mode non-connecté → on retire le loader nous-même
+            requestAnimationFrame(() => {
+                document.body.classList.add('nav-ready');
+            });
         });
     
     // Gestionnaire de formulaire de connexion
@@ -10647,11 +10661,14 @@ async function initStockModule() {
     }
     
     try {
-        // Default to today's date to avoid loading the entire table
+        // Par défaut : la date d'hier (les données du stock du soir
+        // sont normalement saisies le lendemain matin, hier est la
+        // valeur la plus pertinente à afficher au chargement).
         const dateFilter = document.getElementById('stock-date-filter');
         if (dateFilter && !dateFilter.value) {
-            const today = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD
-            dateFilter.value = today;
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            dateFilter.value = yesterday.toLocaleDateString('en-CA'); // YYYY-MM-DD
         }
 
         console.log('🏭 CLIENT: Chargement des données...');
@@ -15064,21 +15081,25 @@ function setupBraceHighlightCleanup(configType) {
 let currentCreanceAccount = null;
 
 // Charger les comptes créance au démarrage
+// Cache local des comptes créance pour le mode multi-comptes
+let creanceAccountsCache = [];
+
 async function loadCreanceAccounts() {
     try {
         const response = await fetch(apiUrl('/api/creance/accounts'));
         if (!response.ok) {
             throw new Error(`Erreur ${response.status}: ${response.statusText}`);
         }
-        
+
         const accounts = await response.json();
+        creanceAccountsCache = accounts;
+
         const select = document.getElementById('creance-account-select');
-        
         if (!select) return;
-        
+
         // Vider les options existantes
         select.innerHTML = '<option value="">Choisir un compte créance...</option>';
-        
+
         // Ajouter les comptes
         accounts.forEach(account => {
             const option = document.createElement('option');
@@ -15087,17 +15108,610 @@ async function loadCreanceAccounts() {
             option.dataset.director = account.assigned_director_name || 'Non assigné';
             select.appendChild(option);
         });
-        
+
+        // Peupler aussi les checkboxes du mode multi-comptes
+        renderCreanceMultiCheckboxes(accounts);
+
         // Si il n'y a qu'un seul compte, le sélectionner automatiquement
         if (accounts.length === 1) {
             select.value = accounts[0].id;
-            // Déclencher l'événement de sélection pour charger les données du compte
             handleCreanceAccountSelection();
         }
-        
+
+        // Attacher les event listeners du mode multi (idempotent)
+        setupCreanceMultiModeListeners();
+
     } catch (error) {
         console.error('Erreur chargement comptes créance:', error);
         showNotification('Erreur lors du chargement des comptes créance', 'error');
+    }
+}
+
+// =====================================================
+// MODE MULTI-COMPTES — Vue lecture seule en accordéons
+// =====================================================
+
+function renderCreanceMultiCheckboxes(accounts) {
+    const container = document.getElementById('creance-accounts-checkboxes');
+    if (!container) return;
+    container.innerHTML = '';
+    accounts.forEach(account => {
+        const label = document.createElement('label');
+        label.className = 'checkbox-label';
+        label.style.cssText = 'display: inline-flex; align-items: center; gap: 6px; font-weight: 400;';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'creance-account-checkbox';
+        cb.dataset.accountId = account.id;
+        cb.dataset.accountName = account.account_name;
+        cb.dataset.director = account.assigned_director_name || 'Non assigné';
+        const span = document.createElement('span');
+        span.textContent = account.account_name;
+        label.appendChild(cb);
+        label.appendChild(span);
+        container.appendChild(label);
+
+        cb.addEventListener('change', renderCreanceMultiView);
+    });
+}
+
+function setupCreanceMultiModeListeners() {
+    const toggle = document.getElementById('creance-multi-mode-toggle');
+    const selectAll = document.getElementById('creance-select-all-accounts');
+    const controls = document.getElementById('creance-multi-controls');
+    const multiView = document.getElementById('creance-multi-view');
+    const singleSelect = document.getElementById('creance-account-select');
+    const singleContent = document.getElementById('creance-main-content');
+
+    if (!toggle || toggle.dataset.listenerAttached) return;
+
+    toggle.addEventListener('change', () => {
+        const isMulti = toggle.checked;
+        if (controls) controls.style.display = isMulti ? 'block' : 'none';
+        if (multiView) multiView.style.display = isMulti ? 'block' : 'none';
+        if (singleSelect) singleSelect.parentElement.style.display = isMulti ? 'none' : 'block';
+        if (singleContent && isMulti) singleContent.style.display = 'none';
+        if (isMulti) renderCreanceMultiView();
+    });
+
+    if (selectAll && !selectAll.dataset.listenerAttached) {
+        selectAll.addEventListener('change', () => {
+            document.querySelectorAll('.creance-account-checkbox').forEach(cb => {
+                cb.checked = selectAll.checked;
+            });
+            renderCreanceMultiView();
+        });
+        selectAll.dataset.listenerAttached = 'true';
+    }
+
+    toggle.dataset.listenerAttached = 'true';
+}
+
+async function renderCreanceMultiView() {
+    const container = document.getElementById('creance-multi-view');
+    if (!container) return;
+    const checked = Array.from(document.querySelectorAll('.creance-account-checkbox:checked'));
+    if (checked.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon"><i class="fas fa-check-square"></i></div>
+                <h4>Aucun compte sélectionné</h4>
+                <p>Cochez un ou plusieurs comptes créance ci-dessus pour afficher leurs détails.</p>
+            </div>`;
+        return;
+    }
+
+    // Render un accordéon par compte (tous fermés)
+    container.innerHTML = checked.map(cb => {
+        const accountId = cb.dataset.accountId;
+        const accountName = escapeHtml(cb.dataset.accountName);
+        const director = escapeHtml(cb.dataset.director || 'Non assigné');
+        return `
+            <div class="section-card" data-creance-account-id="${accountId}" style="margin-bottom: 14px;">
+                <button type="button" class="accordion-header collapsed" aria-expanded="false">
+                    <span><i class="fas fa-folder"></i> ${accountName}
+                        <small style="margin-left: 8px; font-weight: 400; opacity: 0.8;">
+                            Directeur : ${director}
+                        </small>
+                    </span>
+                    <i class="fas fa-chevron-down accordion-icon"></i>
+                </button>
+                <div class="accordion-content collapsed" data-creance-content="${accountId}">
+                    <div class="creance-multi-loading">
+                        <span class="qw-loading-inline"><i class="fas fa-spinner fa-spin"></i> Chargement…</span>
+                    </div>
+                </div>
+            </div>`;
+    }).join('');
+
+    // Attacher handlers d'ouverture + bouton "Gérer ce compte"
+    container.querySelectorAll('.accordion-header').forEach(header => {
+        header.addEventListener('click', async () => {
+            const card = header.closest('.section-card');
+            const content = card.querySelector('.accordion-content');
+            const accountId = card.dataset.creanceAccountId;
+            const isCollapsed = header.classList.contains('collapsed');
+            if (isCollapsed) {
+                header.classList.remove('collapsed');
+                content.classList.remove('collapsed');
+                header.setAttribute('aria-expanded', 'true');
+                // Charger les données la première fois
+                if (!content.dataset.loaded) {
+                    await loadCreanceMultiAccountData(accountId, content);
+                    content.dataset.loaded = 'true';
+                }
+            } else {
+                header.classList.add('collapsed');
+                content.classList.add('collapsed');
+                header.setAttribute('aria-expanded', 'false');
+            }
+        });
+    });
+}
+
+/**
+ * Charge le récap clients + l'historique pour un compte donné et les rend
+ * dans le conteneur fourni (pour le mode multi-comptes en lecture seule).
+ */
+async function loadCreanceMultiAccountData(accountId, container) {
+    try {
+        const [clientsRes, opsRes] = await Promise.all([
+            fetch(apiUrl(`/api/creance/${accountId}/clients`)),
+            fetch(apiUrl(`/api/creance/${accountId}/operations`))
+        ]);
+        if (!clientsRes.ok || !opsRes.ok) throw new Error('Erreur chargement données');
+        const clients = await clientsRes.json();
+        const operations = await opsRes.json();
+
+        const fmt = n => (parseFloat(n) || 0).toLocaleString('fr-FR') + ' FCFA';
+        // L'endpoint /api/creance/:accountId/clients renvoie : client_name,
+        // initial_credit, total_credits, total_debits, balance
+        const totalSolde = clients.reduce((s, c) => s + (parseFloat(c.balance) || 0), 0);
+        const recentOps = operations.slice(0, 10);
+
+        container.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+                        padding: 8px 0 16px; border-bottom: 1px solid var(--qw-border);
+                        margin-bottom: 16px;">
+                <div>
+                    <div style="font-size: 12px; color: var(--qw-text-secondary); text-transform: uppercase; letter-spacing: 0.4px;">Solde total</div>
+                    <div style="font-size: 20px; font-weight: 700; color: var(--qw-text);">${fmt(totalSolde)}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--qw-text-secondary); text-transform: uppercase; letter-spacing: 0.4px;">Clients</div>
+                    <div style="font-size: 16px; font-weight: 600; color: var(--qw-text);">${clients.length}</div>
+                </div>
+                <div>
+                    <div style="font-size: 12px; color: var(--qw-text-secondary); text-transform: uppercase; letter-spacing: 0.4px;">Opérations</div>
+                    <div style="font-size: 16px; font-weight: 600; color: var(--qw-text);">${operations.length}</div>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" style="margin-left: auto;"
+                        onclick="switchToSingleCreanceMode(${accountId})">
+                    <i class="fas fa-pen"></i> Gérer ce compte
+                </button>
+            </div>
+
+            <h5 style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px;
+                       color: var(--qw-text-secondary); margin: 0 0 8px;">
+                Récapitulatif par client
+            </h5>
+            <div class="table-container" style="margin-bottom: 20px;">
+                <table class="data-table" style="font-size: 13px;">
+                    <thead>
+                        <tr>
+                            <th>Client</th>
+                            <th>Crédit initial</th>
+                            <th>Avances</th>
+                            <th>Remboursements</th>
+                            <th>Solde</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${clients.length === 0 ? `
+                            <tr><td colspan="5" style="text-align: center; color: var(--qw-text-secondary);">Aucun client</td></tr>
+                        ` : clients.map(c => `
+                            <tr>
+                                <td>${escapeHtml(c.client_name)}</td>
+                                <td>${fmt(c.initial_credit)}</td>
+                                <td>${fmt(c.total_credits)}</td>
+                                <td>${fmt(c.total_debits)}</td>
+                                <td><strong>${fmt(c.balance)}</strong></td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+
+            <h5 style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px;
+                       color: var(--qw-text-secondary); margin: 0 0 8px;">
+                Historique récent (10 dernières opérations)
+            </h5>
+            <div class="table-container">
+                <table class="data-table" style="font-size: 13px;">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Client</th>
+                            <th>Type</th>
+                            <th>Montant</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${recentOps.length === 0 ? `
+                            <tr><td colspan="5" style="text-align: center; color: var(--qw-text-secondary);">Aucune opération</td></tr>
+                        ` : recentOps.map(op => `
+                            <tr>
+                                <td>${escapeHtml(op.operation_date || '')}</td>
+                                <td>${escapeHtml(op.client_name || '')}</td>
+                                <td>${op.operation_type === 'credit'
+                                    ? '<span class="badge-success">Avance</span>'
+                                    : '<span class="badge-danger">Remboursement</span>'}</td>
+                                <td>${fmt(op.amount)}</td>
+                                <td style="color: var(--qw-text-secondary);">${escapeHtml(op.description || '—')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>`;
+    } catch (error) {
+        console.error('Erreur loadCreanceMultiAccountData:', error);
+        container.innerHTML = `
+            <div class="no-data-message">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Erreur de chargement</p>
+                <small>${escapeHtml(error.message)}</small>
+            </div>`;
+    }
+}
+
+// =====================================================
+// VUE GLOBALE CRÉANCE — appelle /external/api/creance
+// avec un système d'exclusions de clients (Keur Baly par
+// défaut, ajout/retrait possible).
+// =====================================================
+
+// État local des exclusions (init avec Keur Baly par défaut)
+let creanceGlobalExclusions = ['Keur Baly'];
+let creanceGlobalListenersAttached = false;
+
+function setupCreanceGlobalView() {
+    if (creanceGlobalListenersAttached) return;
+
+    const dateInput = document.getElementById('creance-global-date');
+    const addBtn = document.getElementById('creance-global-exclusion-add');
+    const inputEl = document.getElementById('creance-global-exclusion-input');
+    const refreshBtn = document.getElementById('creance-global-refresh');
+    const accordionHeader = document.getElementById('creance-global-header');
+    const accordionContent = document.getElementById('creance-global-content');
+
+    if (!dateInput || !addBtn || !inputEl || !refreshBtn || !accordionHeader) return;
+
+    // Date par défaut = aujourd'hui
+    const today = new Date();
+    const toLocal = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+    dateInput.value = toLocal(today);
+
+    // Render chips initiaux
+    renderCreanceGlobalChips();
+
+    // Toggle accordéon : charge automatiquement au premier expand
+    accordionHeader.addEventListener('click', async () => {
+        const isCollapsed = accordionHeader.classList.contains('collapsed');
+        if (isCollapsed) {
+            accordionHeader.classList.remove('collapsed');
+            accordionContent.classList.remove('collapsed');
+            accordionHeader.setAttribute('aria-expanded', 'true');
+            if (!accordionContent.dataset.loaded) {
+                await runCreanceGlobalQuery();
+                accordionContent.dataset.loaded = 'true';
+            }
+        } else {
+            accordionHeader.classList.add('collapsed');
+            accordionContent.classList.add('collapsed');
+            accordionHeader.setAttribute('aria-expanded', 'false');
+        }
+    });
+
+    // Ajout d'une exclusion par bouton ou Enter
+    const addExclusion = () => {
+        const raw = inputEl.value.trim();
+        if (!raw) return;
+        // Évite les doublons case-insensitive
+        const exists = creanceGlobalExclusions.some(c => c.toLowerCase() === raw.toLowerCase());
+        if (exists) {
+            showNotification(`"${raw}" est déjà dans la liste`, 'warning');
+            inputEl.value = '';
+            return;
+        }
+        creanceGlobalExclusions.push(raw);
+        inputEl.value = '';
+        renderCreanceGlobalChips();
+    };
+    addBtn.addEventListener('click', addExclusion);
+    inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            addExclusion();
+        }
+    });
+
+    // Actualiser
+    refreshBtn.addEventListener('click', runCreanceGlobalQuery);
+
+    creanceGlobalListenersAttached = true;
+}
+
+function renderCreanceGlobalChips() {
+    const container = document.getElementById('creance-global-exclusion-chips');
+    if (!container) return;
+    if (creanceGlobalExclusions.length === 0) {
+        container.innerHTML = '<small style="color: var(--qw-text-muted);">Aucune exclusion. Tous les clients seront inclus.</small>';
+        return;
+    }
+    container.innerHTML = creanceGlobalExclusions.map((name, i) => `
+        <span class="client-badge" style="font-size: 12px; padding: 4px 10px; cursor: default;">
+            ${escapeHtml(name)}
+            <button type="button" class="client-badge-action remove-icon"
+                    data-exclusion-index="${i}" aria-label="Retirer ${escapeHtml(name)}">
+                <i class="fas fa-times-circle" aria-hidden="true"></i>
+            </button>
+        </span>
+    `).join('');
+    container.querySelectorAll('[data-exclusion-index]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.exclusionIndex, 10);
+            creanceGlobalExclusions.splice(idx, 1);
+            renderCreanceGlobalChips();
+        });
+    });
+}
+
+async function runCreanceGlobalQuery() {
+    const resultsEl = document.getElementById('creance-global-results');
+    const dateInput = document.getElementById('creance-global-date');
+    if (!resultsEl) return;
+
+    // Skeleton de chargement
+    resultsEl.innerHTML = `
+        <div class="skeleton-card" style="margin-bottom: 12px;">
+            <div class="skeleton skeleton-title"></div>
+            <div class="skeleton skeleton-text"></div>
+            <div class="skeleton skeleton-text medium"></div>
+        </div>
+        <div class="skeleton-card">
+            <div class="skeleton skeleton-title"></div>
+            <div class="skeleton skeleton-text long"></div>
+            <div class="skeleton skeleton-text"></div>
+        </div>`;
+
+    try {
+        const params = new URLSearchParams();
+        if (dateInput && dateInput.value) params.set('date', dateInput.value);
+        if (creanceGlobalExclusions.length > 0) {
+            params.set('exclusionClients', creanceGlobalExclusions.join(';'));
+        }
+        const response = await fetch(`/external/api/creance?${params.toString()}`);
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`HTTP ${response.status} — ${errText.slice(0, 200)}`);
+        }
+        const data = await response.json();
+        renderCreanceGlobalResults(data);
+    } catch (error) {
+        console.error('Erreur vue globale créance:', error);
+        resultsEl.innerHTML = `
+            <div class="no-data-message">
+                <i class="fas fa-exclamation-triangle"></i>
+                <p>Erreur lors du chargement</p>
+                <small>${escapeHtml(error.message)}</small>
+            </div>`;
+    }
+}
+
+function renderCreanceGlobalResults(data) {
+    const resultsEl = document.getElementById('creance-global-results');
+    if (!resultsEl || !data) return;
+
+    const fmt = n => (parseFloat(n) || 0).toLocaleString('fr-FR') + ' FCFA';
+    const summary = data.summary || {};
+    const totals = summary.totals || {};
+    const portfolios = summary.portfolios || [];
+    const details = data.details || [];
+    const ai = data.ai_insights || {};
+    const excluded = (data.metadata && data.metadata.excluded_clients) || [];
+
+    // Trend pour le total
+    const totalTrend = renderTrend(totals.current_balance, totals.previous_balance, {
+        label: `vs ${summary.date_previous || 'veille'}`,
+        inverse: false
+    });
+
+    // Cards par portfolio
+    const portfolioCards = portfolios.map(p => {
+        const trend = renderTrend(p.current_balance, p.previous_balance, { inverse: false });
+        return `
+            <div class="section-card" style="padding: 14px 16px; margin: 0;">
+                <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+                            color: var(--qw-text-secondary); margin-bottom: 4px;">
+                    ${escapeHtml(p.portfolio_name || '—')}
+                </div>
+                <div style="font-size: 18px; font-weight: 700; color: var(--qw-text); margin-bottom: 4px;">
+                    ${fmt(p.current_balance)}
+                </div>
+                <div>${trend}</div>
+                <div style="font-size: 11px; color: var(--qw-text-muted); margin-top: 6px;">
+                    Directeur : ${escapeHtml(p.assigned_director || '—')}
+                </div>
+            </div>`;
+    }).join('');
+
+    // AI insights
+    const aiBlock = ai.error
+        ? `<div class="no-data-message" style="text-align: left; padding: 16px;">
+               <p style="margin: 0; color: var(--qw-text-secondary);"><i class="fas fa-robot"></i> Analyse IA indisponible</p>
+               <small>${escapeHtml(ai.error)}</small>
+           </div>`
+        : `<div class="section-card" style="padding: 16px; margin: 0;">
+               <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+                           color: var(--qw-text-secondary); margin-bottom: 8px;">
+                   <i class="fas fa-brain"></i> Analyse IA
+                   <span style="font-weight: 400; text-transform: none; opacity: 0.7;">
+                       (${escapeHtml(ai.model_used || '')}, ${ai.tokens_used || 0} tokens)
+                   </span>
+               </div>
+               <div style="line-height: 1.6; color: var(--qw-text); white-space: pre-line;">
+                   ${escapeHtml(ai.analysis || '—')}
+               </div>
+           </div>`;
+
+    // Accordions de détails par portfolio
+    const detailsAccordions = details.map((d, i) => `
+        <div class="section-card" style="margin-bottom: 10px;" data-portfolio-index="${i}">
+            <button type="button" class="accordion-header collapsed">
+                <span><i class="fas fa-folder"></i> ${escapeHtml(d.portfolio_name || '—')}
+                    <small style="margin-left: 8px; font-weight: 400; opacity: 0.8;">
+                        ${(d.status || []).length} clients · ${(d.operations || []).length} opérations
+                    </small>
+                </span>
+                <i class="fas fa-chevron-down accordion-icon"></i>
+            </button>
+            <div class="accordion-content collapsed">
+                <h5 style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+                           color: var(--qw-text-secondary); margin: 0 0 8px;">Clients</h5>
+                <div class="table-container" style="margin-bottom: 16px;">
+                    <table class="data-table" style="font-size: 13px;">
+                        <thead>
+                            <tr>
+                                <th>Client</th>
+                                <th>Crédit initial</th>
+                                <th>Avances</th>
+                                <th>Remboursements</th>
+                                <th>Solde</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${(d.status || []).length === 0
+                                ? `<tr><td colspan="5" style="text-align: center; color: var(--qw-text-secondary);">Aucun client (peut-être tous exclus)</td></tr>`
+                                : d.status.map(c => `
+                                    <tr>
+                                        <td>${escapeHtml(c.client_name || '')}</td>
+                                        <td>${fmt(c.credit_initial)}</td>
+                                        <td>${fmt(c.total_avances)}</td>
+                                        <td>${fmt(c.total_remboursements)}</td>
+                                        <td><strong>${fmt(c.solde_final)}</strong></td>
+                                    </tr>
+                                `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+                <h5 style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+                           color: var(--qw-text-secondary); margin: 0 0 8px;">Opérations récentes (10)</h5>
+                <div class="table-container">
+                    <table class="data-table" style="font-size: 13px;">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Client</th>
+                                <th>Type</th>
+                                <th>Montant</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${(d.operations || []).slice(0, 10).length === 0
+                                ? `<tr><td colspan="4" style="text-align: center; color: var(--qw-text-secondary);">Aucune opération</td></tr>`
+                                : d.operations.slice(0, 10).map(op => `
+                                    <tr>
+                                        <td>${escapeHtml(op.date_operation || '')}</td>
+                                        <td>${escapeHtml(op.client || '')}</td>
+                                        <td>${op.type === 'avance' || op.type === 'credit'
+                                            ? '<span class="badge-success">Avance</span>'
+                                            : '<span class="badge-danger">Remboursement</span>'}</td>
+                                        <td>${fmt(op.montant)}</td>
+                                    </tr>
+                                `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `).join('');
+
+    resultsEl.innerHTML = `
+        <!-- Bandeau totaux -->
+        <div class="section-card" style="display: flex; align-items: center; gap: 24px;
+                                          flex-wrap: wrap; padding: 16px 20px; margin-bottom: 16px;">
+            <div>
+                <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+                            color: var(--qw-text-secondary);">Solde total ${summary.date_selected ? `au ${summary.date_selected}` : ''}</div>
+                <div style="font-size: 24px; font-weight: 700; color: var(--qw-text);">${fmt(totals.current_balance)}</div>
+                <div style="margin-top: 4px;">${totalTrend}</div>
+            </div>
+            <div style="border-left: 1px solid var(--qw-border); padding-left: 20px;">
+                <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+                            color: var(--qw-text-secondary);">Portefeuilles</div>
+                <div style="font-size: 18px; font-weight: 600; color: var(--qw-text);">${summary.portfolios_count || portfolios.length}</div>
+            </div>
+            ${excluded.length > 0 ? `
+                <div style="border-left: 1px solid var(--qw-border); padding-left: 20px;">
+                    <div style="font-size: 12px; text-transform: uppercase; letter-spacing: 0.4px;
+                                color: var(--qw-text-secondary);">Clients exclus</div>
+                    <div style="font-size: 14px; color: var(--qw-text); margin-top: 2px;">
+                        ${excluded.map(e => escapeHtml(e)).join(', ')}
+                    </div>
+                </div>` : ''}
+        </div>
+
+        <!-- Grille de cards par portfolio -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+                    gap: 12px; margin-bottom: 18px;">
+            ${portfolioCards}
+        </div>
+
+        <!-- Analyse IA -->
+        <div style="margin-bottom: 18px;">${aiBlock}</div>
+
+        <!-- Détails accordions -->
+        <h5 style="font-size: 13px; text-transform: uppercase; letter-spacing: 0.4px;
+                   color: var(--qw-text-secondary); margin: 0 0 10px;">Détails par portefeuille</h5>
+        ${detailsAccordions || '<div class="no-data-message"><p>Aucun détail disponible</p></div>'}`;
+
+    // Attacher handlers aux nouveaux accordions
+    resultsEl.querySelectorAll('.accordion-header').forEach(header => {
+        header.addEventListener('click', () => {
+            const card = header.closest('.section-card');
+            const content = card.querySelector('.accordion-content');
+            const isCollapsed = header.classList.contains('collapsed');
+            if (isCollapsed) {
+                header.classList.remove('collapsed');
+                content.classList.remove('collapsed');
+                header.setAttribute('aria-expanded', 'true');
+            } else {
+                header.classList.add('collapsed');
+                content.classList.add('collapsed');
+                header.setAttribute('aria-expanded', 'false');
+            }
+        });
+    });
+}
+
+/** Bascule de la vue multi vers la vue single pour gérer/éditer un compte. */
+function switchToSingleCreanceMode(accountId) {
+    const toggle = document.getElementById('creance-multi-mode-toggle');
+    const select = document.getElementById('creance-account-select');
+    if (toggle) {
+        toggle.checked = false;
+        toggle.dispatchEvent(new Event('change'));
+    }
+    if (select) {
+        select.value = String(accountId);
+        handleCreanceAccountSelection();
+        select.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 }
 
@@ -15809,10 +16423,13 @@ async function handleAddOperation(event) {
 
 // Initialiser la section créance
 async function initCreanceSection() {
-    
+
     // Charger les comptes créance
     await loadCreanceAccounts();
-    
+
+    // Initialiser la vue globale (chips d'exclusion + accordéon)
+    setupCreanceGlobalView();
+
     // Gérer la sélection du compte
     const accountSelect = document.getElementById('creance-account-select');
     if (accountSelect) {
@@ -16036,18 +16653,25 @@ let canEditCashBictorys = false;
 
 // Initialiser la section Cash Bictorys
 async function initCashBictorysSection() {
-    
+
     // Définir le mois en cours par défaut
     const today = new Date();
     const currentMonth = `${today.getFullYear()}-${(today.getMonth() + 1).toString().padStart(2, '0')}`;
-    
+
     const monthInput = document.getElementById('cash-bictorys-month');
     if (monthInput) {
         monthInput.value = currentMonth;
     }
-    
+
     // Événements
     setupCashBictorysEventListeners();
+
+    // Auto-charger le mois en cours
+    try {
+        await loadCashBictorysMonth(currentMonth);
+    } catch (e) {
+        console.warn('⚠️ Auto-load Cash Bictorys échoué (non bloquant) :', e.message);
+    }
 }
 
 // Configurer les événements Cash Bictorys
@@ -16723,21 +17347,29 @@ function createSoldeChart() {
 // Configurer les dates par défaut
 function setupVisualisationDateControls() {
     const today = new Date();
-    const ninetyDaysAgo = new Date(today);
-    ninetyDaysAgo.setDate(today.getDate() - 90);
-    
+    // Premier jour du mois en cours (local time pour éviter les surprises de timezone)
+    const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    // Format YYYY-MM-DD en local (toISOString partirait en UTC et pourrait
+    // décaler d'un jour pour les premières heures locales)
+    const toLocalDateString = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
     const startDateInput = document.getElementById('viz-start-date');
     const endDateInput = document.getElementById('viz-end-date');
-    
+
     if (startDateInput) {
-        startDateInput.value = ninetyDaysAgo.toISOString().split('T')[0];
+        startDateInput.value = toLocalDateString(firstOfMonth);
     }
-    
     if (endDateInput) {
-        endDateInput.value = today.toISOString().split('T')[0];
+        endDateInput.value = toLocalDateString(today);
     }
-    
-    console.log(`📅 CLIENT: Dates par défaut configurées: ${ninetyDaysAgo.toISOString().split('T')[0]} à ${today.toISOString().split('T')[0]}`);
+
+    console.log(`📅 CLIENT: Dates par défaut configurées (mois en cours): ${toLocalDateString(firstOfMonth)} à ${toLocalDateString(today)}`);
 }
 
 // Configurer les événements des onglets
@@ -17086,19 +17718,26 @@ function updateVisualisationTable(tab, data) {
 // Configurer les contrôles de date pour la visualisation
 function setupVisualisationDateControls() {
     console.log('📅 CLIENT: Configuration des contrôles de date visualisation');
-    
-    // Définir les dates par défaut (derniers 90 jours pour avoir plus de données)
+
+    // Défaut : 1er jour du mois en cours → aujourd'hui
     const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(endDate.getDate() - 90);
-    
+    const startDate = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+
+    // Format YYYY-MM-DD en heure locale (toISOString partirait en UTC)
+    const toLocalDateString = (d) => {
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+    };
+
     const startDateInput = document.getElementById('viz-start-date');
     const endDateInput = document.getElementById('viz-end-date');
-    
-    if (startDateInput) startDateInput.value = startDate.toISOString().split('T')[0];
-    if (endDateInput) endDateInput.value = endDate.toISOString().split('T')[0];
-    
-    console.log(`📅 CLIENT: Dates par défaut configurées: ${startDate.toISOString().split('T')[0]} à ${endDate.toISOString().split('T')[0]}`);
+
+    if (startDateInput) startDateInput.value = toLocalDateString(startDate);
+    if (endDateInput) endDateInput.value = toLocalDateString(endDate);
+
+    console.log(`📅 CLIENT: Dates par défaut configurées (mois en cours): ${toLocalDateString(startDate)} à ${toLocalDateString(endDate)}`);
 }
 
 // Configurer les onglets de visualisation
