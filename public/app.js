@@ -816,6 +816,18 @@ async function loadInitialData() {
         console.log('✅ CLIENT: AI Analysis module initialized');
     }
 
+    // Initialize Snapshots module (post-auth seulement — avant, /api/snapshots
+    // renvoie 401 et déclenche un toast d'erreur parasite sur la page de login)
+    if (typeof initializeSnapshots === 'function'
+        && document.getElementById('snapshots-history-section')) {
+        try {
+            initializeSnapshots();
+            console.log('✅ CLIENT: Snapshots module initialized');
+        } catch (e) {
+            console.warn('⚠️ CLIENT: échec init snapshots:', e && e.message ? e.message : e);
+        }
+    }
+
     // Révéler la sidebar maintenant que toutes les permissions
     // ont été appliquées (évite le "saut" visible quand des menus
     // apparaissent/disparaissent en fonction du rôle).

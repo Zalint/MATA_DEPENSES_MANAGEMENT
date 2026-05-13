@@ -1152,11 +1152,9 @@ function toggleClientsAccordion() {
     }
 }
 
-// Initialiser au chargement du DOM
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initVirementMensuel);
-} else {
-    initVirementMensuel();
-}
+// L'initialisation se fait via app.js (showSection 'virement-mensuel') APRÈS
+// l'authentification. On évite ici tout auto-init sur DOMContentLoaded :
+// il déclenchait des appels API protégés (points-de-vente, virement-clients,
+// virement-mensuel) sur la page de login → 403 et toast d'erreur parasite.
 
 console.log('💸 Module Virement Mensuel chargé');
