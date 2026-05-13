@@ -116,6 +116,151 @@ function formatDate(dateString) {
     return formatted;
 }
 
+/* ============================================================
+   DARK MODE — Toggle + persistance
+   - Lit la préférence depuis localStorage (clé : qw-theme)
+   - Sinon, respecte prefers-color-scheme (système)
+   - Le toggle bascule entre 'light' et 'dark' et persiste le choix
+   - S'exécute en IIFE le plus tôt possible pour éviter le flash blanc
+   ============================================================ */
+(function initThemePreference() {
+    try {
+        const stored = localStorage.getItem('qw-theme');
+        if (stored === 'dark' || stored === 'light') {
+            document.documentElement.setAttribute('data-theme', stored);
+        }
+        // sinon : on laisse @media prefers-color-scheme décider
+    } catch (e) { /* localStorage indisponible : ignorer */ }
+})();
+
+function qwToggleTheme() {
+    const current = document.documentElement.getAttribute('data-theme');
+    let next;
+    if (current === 'dark') {
+        next = 'light';
+    } else if (current === 'light') {
+        next = 'dark';
+    } else {
+        // Pas encore défini : on inverse vs la pref système
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        next = prefersDark ? 'light' : 'dark';
+    }
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('qw-theme', next); } catch (e) { /* ignore */ }
+    qwUpdateThemeToggle();
+}
+
+function qwUpdateThemeToggle() {
+    const btn = document.getElementById('qw-theme-toggle-btn');
+    if (!btn) return;
+    const isDark =
+        document.documentElement.getAttribute('data-theme') === 'dark' ||
+        (!document.documentElement.getAttribute('data-theme') &&
+         window.matchMedia('(prefers-color-scheme: dark)').matches);
+    btn.innerHTML = isDark
+        ? '<i class="fas fa-sun"></i>'
+        : '<i class="fas fa-moon"></i>';
+    btn.setAttribute('title', isDark ? 'Passer en mode clair' : 'Passer en mode sombre');
+    btn.setAttribute('aria-label', isDark ? 'Passer en mode clair' : 'Passer en mode sombre');
+}
+
+/** Injecte le bouton toggle dans le topbar à côté du profil utilisateur. */
+function qwInjectThemeToggle() {
+    if (document.getElementById('qw-theme-toggle-btn')) return;
+
+    // Cibler la zone utilisateur du topbar (à côté du badge ADMIN/logout)
+    const target =
+        document.querySelector('.user-info') ||
+        document.querySelector('.navbar-user') ||
+        document.querySelector('.top-bar-user') ||
+        document.querySelector('#logout-btn')?.parentElement ||
+        document.querySelector('.btn-logout')?.parentElement;
+    if (!target) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'qw-theme-toggle-btn';
+    btn.className = 'qw-theme-toggle';
+    btn.addEventListener('click', qwToggleTheme);
+    target.insertBefore(btn, target.firstChild);
+
+    qwUpdateThemeToggle();
+
+    // Réagir aux changements de pref système si l'utilisateur n'a pas choisi
+    if (window.matchMedia) {
+        window.matchMedia('(prefers-color-scheme: dark)')
+            .addEventListener('change', qwUpdateThemeToggle);
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', qwInjectThemeToggle);
+} else {
+    qwInjectThemeToggle();
+}
+
+/**
+ * Génère un badge "trend" comparant deux valeurs.
+ * @param {number} current - valeur actuelle
+ * @param {number} previous - valeur de comparaison (mois précédent, snapshot, etc.)
+ * @param {Object} [opts]
+ * @param {boolean} [opts.inverse=false] - si true, une hausse est "mauvaise" (ex. cash burn)
+ * @param {string}  [opts.suffix='%']    - suffixe affiché après le nombre
+ * @param {string}  [opts.label]         - texte additionnel ("vs mois dernier")
+ * @returns {string} HTML à injecter dans un container
+ *
+ * Exemple :
+ *   container.innerHTML = renderTrend(stats.current, stats.previous,
+ *                                     { label: 'vs mois dernier' });
+ */
+function renderTrend(current, previous, opts = {}) {
+    const cur = Number(current) || 0;
+    const prev = Number(previous) || 0;
+    const inverse = opts.inverse === true;
+    const suffix = opts.suffix || '%';
+    const label = opts.label ? ` <span style="color: var(--qw-text-muted); font-weight: 400;">${escapeHtml(opts.label)}</span>` : '';
+
+    // Pas de comparaison possible
+    if (prev === 0) {
+        if (cur === 0) {
+            return `<span class="trend trend-flat" title="Pas de variation"><i class="fas fa-minus"></i> 0${suffix}${label}</span>`;
+        }
+        return `<span class="trend trend-flat" title="Pas de référence précédente">Nouveau${label}</span>`;
+    }
+
+    const delta = cur - prev;
+    const pct = (delta / Math.abs(prev)) * 100;
+    const absPct = Math.abs(pct);
+    const formatted = absPct < 0.05 ? '0' : absPct.toFixed(1);
+
+    let cls, icon;
+    if (Math.abs(delta) < 0.01) {
+        cls = 'trend-flat'; icon = 'fa-minus';
+    } else if (delta > 0) {
+        cls = inverse ? 'trend-bad' : 'trend-good';
+        icon = 'fa-arrow-up';
+    } else {
+        cls = inverse ? 'trend-good' : 'trend-bad';
+        icon = 'fa-arrow-down';
+    }
+
+    const sign = delta > 0 ? '+' : (delta < 0 ? '-' : '');
+    return `<span class="trend ${cls}" title="${sign}${formatted}${suffix} (${cur.toLocaleString('fr-FR')} vs ${prev.toLocaleString('fr-FR')})">
+                <i class="fas ${icon}"></i> ${sign}${formatted}${suffix}${label}
+            </span>`;
+}
+
+/** Échappe le HTML pour éviter l'injection */
+function escapeHtml(str) {
+    if (str == null) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function showNotification(message, type = 'info') {
     const notification = document.getElementById('notification');
     notification.textContent = message;

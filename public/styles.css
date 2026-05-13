@@ -13273,3 +13273,1577 @@ input[type="radio"]:disabled {
     color: var(--qw-success) !important;
     font-weight: 600 !important;
 }
+
+/* ============================================================
+   ACCORDIONS — Refonte visuelle (Gestion des Clients,
+   Récapitulatif par Client, Opérations Créance, etc.)
+   ============================================================ */
+
+/* Header de l'accordéon : carte indépendante avec léger relief */
+.accordion-header,
+button.accordion-header {
+    width: 100% !important;
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border: 1px solid var(--qw-border) !important;
+    border-left: 3px solid transparent !important;
+    border-radius: var(--qw-radius) !important;
+    padding: 14px 18px !important;
+    margin: 0 !important;
+    font-weight: 600 !important;
+    font-size: 15px !important;
+    text-align: left !important;
+    cursor: pointer !important;
+    box-shadow: var(--qw-shadow-sm) !important;
+    transition: background-color 0.2s ease, border-left-color 0.2s ease,
+                box-shadow 0.2s ease !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+}
+
+.accordion-header:hover,
+button.accordion-header:hover {
+    background: #f8fafc !important;
+    background-image: none !important;
+    border-left-color: var(--qw-primary) !important;
+    transform: none !important;
+    box-shadow: var(--qw-shadow-md) !important;
+}
+
+/* État ouvert (non collapsed) : filet primary visible + radius bas neutralisé */
+.accordion-header:not(.collapsed) {
+    border-left-color: var(--qw-primary) !important;
+    border-radius: var(--qw-radius) var(--qw-radius) 0 0 !important;
+    border-bottom-color: transparent !important;
+    box-shadow: none !important;
+}
+
+/* Focus visible pour navigation clavier */
+.accordion-header:focus-visible,
+button.accordion-header:focus-visible {
+    outline: 2px solid var(--qw-primary) !important;
+    outline-offset: 2px !important;
+}
+
+/* Titre dans le header */
+.accordion-header h4,
+.accordion-header > span:first-child {
+    color: var(--qw-text) !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    margin: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+
+/* Icône avant le titre (ex. fa-users, fa-list) : couleur primary */
+.accordion-header h4 > i:first-child,
+.accordion-header > i.fas:first-child,
+.accordion-header > i.fa:first-child,
+.accordion-header > span:first-child > i:first-child {
+    color: var(--qw-primary) !important;
+    font-size: 16px !important;
+}
+
+/* Chevron : pastille circulaire bleue subtile */
+.accordion-icon,
+.accordion-header .accordion-icon,
+.accordion-header > i.fa-chevron-down:last-child,
+.accordion-header > i.fa-chevron-up:last-child {
+    background: var(--qw-primary-soft) !important;
+    color: var(--qw-primary) !important;
+    width: 28px !important;
+    height: 28px !important;
+    border-radius: 50% !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 11px !important;
+    transition: transform 0.3s ease, background-color 0.2s ease !important;
+    margin: 0 !important;
+}
+
+.accordion-header:hover .accordion-icon {
+    background: rgba(37, 99, 235, 0.16) !important;
+}
+
+/* Rotation chevron quand collapsed (-90°) — déjà géré, on garde */
+.accordion-header.collapsed .accordion-icon {
+    transform: rotate(-90deg) !important;
+}
+
+/* Contenu de l'accordéon : suite visuelle continue du header */
+.accordion-content {
+    background: var(--qw-surface) !important;
+    border: 1px solid var(--qw-border) !important;
+    border-top: none !important;
+    border-left: 3px solid var(--qw-primary) !important;
+    border-radius: 0 0 var(--qw-radius) var(--qw-radius) !important;
+    padding: 16px 20px !important;
+    box-shadow: var(--qw-shadow-sm) !important;
+}
+
+.accordion-content.collapsed {
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Espacement entre accordéons multiples sur la même page */
+.section-card + .section-card,
+.accordion-header + .section-card {
+    margin-top: 14px !important;
+}
+
+/* ============================================================
+   STAT CARDS — Refonte (Tableau de bord cards)
+   ============================================================ */
+
+.stats-cards .stat-card {
+    background: var(--qw-surface) !important;
+    border-radius: var(--qw-radius-lg) !important;
+    border: 1px solid var(--qw-border) !important;
+    box-shadow: var(--qw-shadow-sm) !important;
+    padding: 18px 20px !important;
+    transition: box-shadow 0.2s ease, transform 0.2s ease,
+                border-color 0.2s ease !important;
+    position: relative !important;
+    overflow: hidden !important;
+}
+
+.stats-cards .stat-card:hover {
+    box-shadow: var(--qw-shadow-md) !important;
+    transform: translateY(-2px) !important;
+    border-color: rgba(37, 99, 235, 0.25) !important;
+}
+
+/* Icône carrée avec fond doux primary (au lieu de gradient violet plein) */
+.stats-cards .stat-icon,
+.stat-icon {
+    width: 44px !important;
+    height: 44px !important;
+    border-radius: 10px !important;
+    background: var(--qw-primary-soft) !important;
+    background-image: none !important;
+    color: var(--qw-primary) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 18px !important;
+    margin-bottom: 14px !important;
+    margin-right: 0 !important;
+    box-shadow: none !important;
+}
+
+.stats-cards .stat-icon i,
+.stat-icon i {
+    color: var(--qw-primary) !important;
+    background: transparent !important;
+    background-image: none !important;
+}
+
+.stats-cards .stat-content h4 {
+    color: var(--qw-text-secondary) !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    margin-bottom: 6px !important;
+    letter-spacing: 0 !important;
+}
+
+.stats-cards .stat-value {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    color: var(--qw-text) !important;
+    line-height: 1.2 !important;
+    margin-bottom: 4px !important;
+}
+
+.stats-cards .stat-period {
+    color: var(--qw-text-muted) !important;
+    font-size: 12px !important;
+}
+
+/* ============================================================
+   ACTION BUTTONS in TABLES (eye view / edit pencil / delete trash)
+   Avant : gradient colorés criards avec ombres
+   Après : "ghost" buttons subtils, icône colorée, fond doux
+   ============================================================ */
+
+.action-buttons {
+    gap: 4px !important;
+    min-width: auto !important;
+    justify-content: flex-start !important;
+}
+
+.action-buttons .btn-sm,
+.action-buttons button.btn-sm {
+    min-width: 32px !important;
+    height: 32px !important;
+    width: 32px !important;
+    padding: 0 !important;
+    border-radius: 7px !important;
+    border: 1px solid transparent !important;
+    box-shadow: none !important;
+    transition: background-color 0.15s ease, transform 0.1s ease !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.action-buttons .btn-sm i {
+    font-size: 12px !important;
+    margin: 0 !important;
+    filter: none !important;
+}
+
+/* Info (eye, vue) : fond bleu pâle + icône bleue */
+.action-buttons .btn-info,
+.action-buttons button.btn-info {
+    background: var(--qw-primary-soft) !important;
+    background-image: none !important;
+    color: var(--qw-primary) !important;
+    border-color: transparent !important;
+}
+.action-buttons .btn-info:hover {
+    background: rgba(37, 99, 235, 0.18) !important;
+    background-image: none !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+/* Warning (edit, crayon) : ambre pâle + icône ambre */
+.action-buttons .btn-warning,
+.action-buttons button.btn-warning {
+    background: rgba(245, 158, 11, 0.12) !important;
+    background-image: none !important;
+    color: #b45309 !important;
+    border-color: transparent !important;
+}
+.action-buttons .btn-warning:hover {
+    background: rgba(245, 158, 11, 0.22) !important;
+    background-image: none !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+/* Danger (delete, poubelle) : rouge pâle + icône rouge */
+.action-buttons .btn-danger,
+.action-buttons button.btn-danger {
+    background: rgba(239, 68, 68, 0.12) !important;
+    background-image: none !important;
+    color: var(--qw-danger) !important;
+    border-color: transparent !important;
+}
+.action-buttons .btn-danger:hover {
+    background: rgba(239, 68, 68, 0.22) !important;
+    background-image: none !important;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+/* Icône warning triangle (alerte 24h) : ambre */
+.action-buttons .btn-sm .fa-exclamation-triangle {
+    color: var(--qw-warning) !important;
+    filter: none !important;
+}
+
+/* ============================================================
+   STATUS BADGES — "Oui"/"Non", "Actif"/"Inactif"
+   ============================================================ */
+
+/* Badge "Oui" générique (Prévisible col) — vert subtil */
+.badge.bg-success,
+.badge-success,
+span.previsible-yes,
+.status-yes {
+    background: rgba(16, 185, 129, 0.12) !important;
+    background-image: none !important;
+    color: #047857 !important;
+    border: 1px solid rgba(16, 185, 129, 0.25) !important;
+    padding: 3px 10px !important;
+    border-radius: 999px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.3px !important;
+}
+
+/* Badge "Non" générique — rouge subtil */
+.badge.bg-danger,
+.badge-danger,
+span.previsible-no,
+.status-no {
+    background: rgba(239, 68, 68, 0.1) !important;
+    background-image: none !important;
+    color: var(--qw-danger-hover) !important;
+    border: 1px solid rgba(239, 68, 68, 0.22) !important;
+    padding: 3px 10px !important;
+    border-radius: 999px !important;
+    font-size: 11px !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.3px !important;
+}
+
+/* ============================================================
+   SKELETON LOADERS — Shimmer reusable
+   Utilisation : <div class="skeleton skeleton-text"></div>
+   Variants : skeleton-text, skeleton-title, skeleton-pill,
+              skeleton-circle, skeleton-card, skeleton-row
+   ============================================================ */
+
+@keyframes qw-skeleton-shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+.skeleton {
+    display: block;
+    background: linear-gradient(
+        90deg,
+        #eef0f4 0%,
+        #f5f6f9 50%,
+        #eef0f4 100%
+    );
+    background-size: 200% 100%;
+    animation: qw-skeleton-shimmer 1.4s ease-in-out infinite;
+    border-radius: 4px;
+    color: transparent !important;
+    user-select: none;
+    pointer-events: none;
+}
+
+.skeleton-text {
+    height: 12px;
+    width: 100%;
+    margin: 6px 0;
+    border-radius: 4px;
+}
+.skeleton-text.short { width: 40%; }
+.skeleton-text.medium { width: 65%; }
+.skeleton-text.long { width: 90%; }
+
+.skeleton-title {
+    height: 20px;
+    width: 50%;
+    margin-bottom: 12px;
+    border-radius: 6px;
+}
+
+.skeleton-pill {
+    height: 24px;
+    width: 80px;
+    border-radius: 999px;
+    display: inline-block;
+}
+
+.skeleton-circle {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: inline-block;
+}
+
+.skeleton-square {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: inline-block;
+}
+
+/* Card skeleton complet : reproduit la silhouette d'une stat-card */
+.skeleton-card {
+    background: var(--qw-surface);
+    border: 1px solid var(--qw-border);
+    border-radius: var(--qw-radius-lg);
+    padding: 18px 20px;
+    box-shadow: var(--qw-shadow-sm);
+}
+.skeleton-card .skeleton-square {
+    margin-bottom: 14px;
+}
+
+/* Row skeleton pour tables : reproduit une ligne complète */
+.skeleton-row {
+    display: flex;
+    gap: 16px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    align-items: center;
+}
+.skeleton-row .skeleton-text {
+    margin: 0;
+    flex: 1;
+}
+
+/* Pause l'animation pour les users qui préfèrent reduced motion */
+@media (prefers-reduced-motion: reduce) {
+    .skeleton {
+        animation: none;
+    }
+}
+
+/* ============================================================
+   EMPTY STATES — Refonte (no-data-message + nouvelle classe)
+   ============================================================ */
+
+/* Modernisation du .no-data-message existant
+   (icône jaune -> gris doux, typo hiérarchisée) */
+.no-data-message {
+    text-align: center !important;
+    padding: 48px 20px !important;
+    color: var(--qw-text-secondary) !important;
+    background: var(--qw-surface) !important;
+    border: 1px dashed var(--qw-border) !important;
+    border-radius: var(--qw-radius-lg) !important;
+}
+
+.no-data-message i {
+    color: #cbd5e1 !important;
+    font-size: 48px !important;
+    margin-bottom: 16px !important;
+    display: block !important;
+}
+
+.no-data-message p {
+    color: var(--qw-text) !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    margin: 0 0 6px 0 !important;
+}
+
+.no-data-message small {
+    color: var(--qw-text-muted) !important;
+    font-size: 13px !important;
+    display: block !important;
+}
+
+/* Nouvelle classe générique pour empty states custom :
+   <div class="empty-state">
+       <div class="empty-state-icon"><i class="fas fa-inbox"></i></div>
+       <h4>Titre</h4>
+       <p>Description courte de pourquoi c'est vide</p>
+       <button class="btn btn-primary">Action principale</button>
+   </div>
+*/
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 48px 20px;
+    background: var(--qw-surface);
+    border: 1px dashed var(--qw-border);
+    border-radius: var(--qw-radius-lg);
+    max-width: 480px;
+    margin: 24px auto;
+}
+
+.empty-state-icon {
+    width: 56px;
+    height: 56px;
+    background: var(--qw-primary-soft);
+    color: var(--qw-primary);
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    font-size: 22px;
+}
+
+.empty-state h4 {
+    color: var(--qw-text);
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 6px 0;
+}
+
+.empty-state p {
+    color: var(--qw-text-secondary);
+    font-size: 13px;
+    margin: 0 0 16px 0;
+    max-width: 320px;
+    line-height: 1.5;
+}
+
+.empty-state .btn {
+    margin-top: 4px;
+}
+
+/* Loading spinner sobre (pour les boutons / placeholders rapides) */
+.qw-loading-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--qw-text-secondary);
+    font-size: 14px;
+}
+.qw-loading-inline i.fa-spinner {
+    color: var(--qw-primary);
+}
+
+/* ============================================================
+   TREND INDICATORS — Variations chiffrées (▲ +X % / ▼ -X %)
+   Usage :
+     <span class="trend trend-up">
+         <i class="fas fa-arrow-trend-up"></i> +8,3 %
+     </span>
+     <span class="trend trend-down">▼ -2,1 %</span>
+     <span class="trend trend-flat">— 0,0 %</span>
+   Ou via le helper JS : renderTrend(current, previous, container)
+   ============================================================ */
+
+.trend {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.4;
+    white-space: nowrap;
+    border: 1px solid transparent;
+}
+
+.trend i,
+.trend svg {
+    font-size: 10px;
+    line-height: 1;
+}
+
+/* Trend positive (hausse — vert si métrique "growth", rouge si métrique "burn") */
+.trend.trend-up {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.22);
+}
+
+/* Trend négative */
+.trend.trend-down {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--qw-danger-hover);
+    border-color: rgba(239, 68, 68, 0.22);
+}
+
+/* Trend neutre (0 ou pas de comparaison) */
+.trend.trend-flat {
+    background: #f1f5f9;
+    color: var(--qw-text-secondary);
+    border-color: var(--qw-border);
+}
+
+/* Variantes inversées : pour les métriques où "+8 %" est mauvais
+   (ex. cash burn qui augmente). Add .trend-inverse au parent ou usage direct. */
+.trend.trend-bad {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--qw-danger-hover);
+    border-color: rgba(239, 68, 68, 0.22);
+}
+.trend.trend-good {
+    background: rgba(16, 185, 129, 0.12);
+    color: #047857;
+    border-color: rgba(16, 185, 129, 0.22);
+}
+
+/* Espacement quand placé sous une valeur de stat-card */
+.stats-cards .stat-card .trend,
+.stat-card .trend {
+    margin-top: 6px;
+}
+
+/* ============================================================
+   DARK MODE — Activé par data-theme="dark" sur <html> ou <body>.
+   Auto via prefers-color-scheme si pas d'override explicite.
+   Palette slate (pas pur noir), primary légèrement plus clair pour
+   contraste WCAG AA sur fond sombre.
+   ============================================================ */
+
+/* 1. Détection système (auto-activation si pas de pref enregistrée) */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --qw-primary: #3b82f6;
+        --qw-primary-hover: #60a5fa;
+        --qw-primary-soft: rgba(59, 130, 246, 0.18);
+        --qw-primary-softer: rgba(59, 130, 246, 0.1);
+        --qw-success: #34d399;
+        --qw-success-hover: #6ee7b7;
+        --qw-danger: #f87171;
+        --qw-danger-hover: #fca5a5;
+        --qw-warning: #fbbf24;
+        --qw-text: #f1f5f9;
+        --qw-text-secondary: #cbd5e1;
+        --qw-text-muted: #64748b;
+        --qw-page: #0f172a;
+        --qw-surface: #1e293b;
+        --qw-border: #334155;
+        --qw-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+        --qw-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+        --qw-shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.4);
+    }
+}
+
+/* 2. Override explicite via data-theme="dark" (priorité sur la détection système) */
+:root[data-theme="dark"],
+[data-theme="dark"] {
+    --qw-primary: #3b82f6;
+    --qw-primary-hover: #60a5fa;
+    --qw-primary-soft: rgba(59, 130, 246, 0.18);
+    --qw-primary-softer: rgba(59, 130, 246, 0.1);
+    --qw-success: #34d399;
+    --qw-success-hover: #6ee7b7;
+    --qw-danger: #f87171;
+    --qw-danger-hover: #fca5a5;
+    --qw-warning: #fbbf24;
+    --qw-text: #f1f5f9;
+    --qw-text-secondary: #cbd5e1;
+    --qw-text-muted: #64748b;
+    --qw-page: #0f172a;
+    --qw-surface: #1e293b;
+    --qw-border: #334155;
+    --qw-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --qw-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.35);
+    --qw-shadow-lg: 0 12px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* 3. Surcharges spécifiques pour les zones avec couleurs hard-codées */
+[data-theme="dark"] body,
+:root[data-theme="dark"] body {
+    background: var(--qw-page) !important;
+    color: var(--qw-text) !important;
+}
+
+/* Topbar / nav du haut */
+[data-theme="dark"] .navbar,
+[data-theme="dark"] header.navbar,
+[data-theme="dark"] .top-nav,
+[data-theme="dark"] .main-header {
+    background: var(--qw-surface) !important;
+    border-bottom: 1px solid var(--qw-border) !important;
+}
+
+/* Sidebar — fond plus sombre que le contenu pour contraste */
+[data-theme="dark"] .sidebar {
+    background: #161e2e !important;
+    border-right: 1px solid var(--qw-border) !important;
+}
+[data-theme="dark"] .sidebar .menu-section-title {
+    border-top-color: rgba(255, 255, 255, 0.06) !important;
+}
+[data-theme="dark"] .sidebar .menu-section-title span {
+    color: #94a3b8 !important;
+}
+
+/* Cards / surfaces blanches → surface dark */
+[data-theme="dark"] .section-card,
+[data-theme="dark"] .stats-card,
+[data-theme="dark"] .stat-card,
+[data-theme="dark"] .stats-cards .stat-card,
+[data-theme="dark"] .stats-grid .stat-card,
+[data-theme="dark"] .dashboard-card,
+[data-theme="dark"] .card,
+[data-theme="dark"] .modal-content,
+[data-theme="dark"] .modal-dialog,
+[data-theme="dark"] .confirm-modal-dialog,
+[data-theme="dark"] .accordion-header,
+[data-theme="dark"] .accordion-content,
+[data-theme="dark"] .creance-account-selector,
+[data-theme="dark"] .creance-account-header,
+[data-theme="dark"] .virement-mensuel-header,
+[data-theme="dark"] .cash-bictorys-header,
+[data-theme="dark"] .dashboard-save-section,
+[data-theme="dark"] .snapshots-header,
+[data-theme="dark"] .user-filters,
+[data-theme="dark"] .accounts-filters-card,
+[data-theme="dark"] .expenses-total,
+[data-theme="dark"] .client-total-card,
+[data-theme="dark"] .data-table-container {
+    background: var(--qw-surface) !important;
+    background-color: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Catch-all : tout élément avec background:white inline (généré par JS) */
+[data-theme="dark"] [style*="background: white"],
+[data-theme="dark"] [style*="background:white"],
+[data-theme="dark"] [style*="background: #fff"],
+[data-theme="dark"] [style*="background:#fff"],
+[data-theme="dark"] [style*="background-color: white"],
+[data-theme="dark"] [style*="background-color:white"] {
+    background: var(--qw-surface) !important;
+    background-color: var(--qw-surface) !important;
+    color: var(--qw-text) !important;
+}
+
+/* Textes hardcodés (color: #333, #666, #2c3e50) — overridés en dark */
+[data-theme="dark"] .stat-value,
+[data-theme="dark"] .stat-content h3,
+[data-theme="dark"] .stat-content h4,
+[data-theme="dark"] .stat-content p,
+[data-theme="dark"] .stat-label,
+[data-theme="dark"] .stat-amount,
+[data-theme="dark"] .stat-card h3,
+[data-theme="dark"] .stat-card h4,
+[data-theme="dark"] .stat-card p,
+[data-theme="dark"] .data-table tbody td,
+[data-theme="dark"] .data-table tbody tr,
+[data-theme="dark"] .text-dark,
+[data-theme="dark"] h1,
+[data-theme="dark"] h2,
+[data-theme="dark"] h3,
+[data-theme="dark"] h4,
+[data-theme="dark"] h5,
+[data-theme="dark"] p,
+[data-theme="dark"] label,
+[data-theme="dark"] td,
+[data-theme="dark"] th {
+    color: var(--qw-text) !important;
+}
+
+/* Textes secondaires : muted en dark aussi */
+[data-theme="dark"] .stat-period,
+[data-theme="dark"] .stat-subtitle,
+[data-theme="dark"] small,
+[data-theme="dark"] .text-muted,
+[data-theme="dark"] .form-help,
+[data-theme="dark"] .text-secondary {
+    color: var(--qw-text-secondary) !important;
+}
+
+/* Catch-all pour textes inline hardcodés foncés */
+[data-theme="dark"] [style*="color: #333"],
+[data-theme="dark"] [style*="color:#333"],
+[data-theme="dark"] [style*="color: #2c3e50"],
+[data-theme="dark"] [style*="color:#2c3e50"],
+[data-theme="dark"] [style*="color: #1f2937"],
+[data-theme="dark"] [style*="color:#1f2937"],
+[data-theme="dark"] [style*="color: black"],
+[data-theme="dark"] [style*="color:black"] {
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] [style*="color: #666"],
+[data-theme="dark"] [style*="color:#666"],
+[data-theme="dark"] [style*="color: #6c757d"],
+[data-theme="dark"] [style*="color:#6c757d"],
+[data-theme="dark"] [style*="color: #6b7280"],
+[data-theme="dark"] [style*="color:#6b7280"] {
+    color: var(--qw-text-secondary) !important;
+}
+
+/* ============================================================
+   FIX DARK MODE — Labels et headers de tables NUCLÉAIRES
+   On force la couleur de tous les labels et th avec une
+   spécificité élevée pour battre les rules .form-group label,
+   .data-table thead th, etc.
+   ============================================================ */
+
+/* Tous les labels visibles partout */
+[data-theme="dark"] label,
+[data-theme="dark"] .form-group label,
+[data-theme="dark"] .form-row label,
+[data-theme="dark"] .form-label,
+[data-theme="dark"] form label,
+[data-theme="dark"] section label,
+[data-theme="dark"] fieldset label,
+[data-theme="dark"] .filters-container label,
+[data-theme="dark"] .filter label,
+[data-theme="dark"] div label,
+[data-theme="dark"] td label,
+[data-theme="dark"] th label,
+[data-theme="dark"] tr label {
+    color: var(--qw-text) !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+
+/* Span/div utilisés comme labels (style "label class") */
+[data-theme="dark"] .form-label-heading,
+[data-theme="dark"] .field-label,
+[data-theme="dark"] .input-label {
+    color: var(--qw-text) !important;
+}
+
+/* Tous les en-têtes de tables — peu importe la classe */
+[data-theme="dark"] table thead th,
+[data-theme="dark"] table > thead > tr > th,
+[data-theme="dark"] thead th,
+[data-theme="dark"] .data-table thead th,
+[data-theme="dark"] .data-table > thead > tr > th,
+[data-theme="dark"] #users-list thead th,
+[data-theme="dark"] .snapshot-viewer .table th,
+[data-theme="dark"] .accounts-list thead th,
+[data-theme="dark"] tr.header th,
+[data-theme="dark"] tr.table-header th,
+[data-theme="dark"] th[scope="col"] {
+    color: var(--qw-text-secondary) !important;
+    background: #1a2436 !important;
+    background-color: #1a2436 !important;
+    background-image: none !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+    border-bottom-color: var(--qw-border) !important;
+}
+
+/* Cellules tbody td */
+[data-theme="dark"] table tbody td,
+[data-theme="dark"] .data-table tbody td,
+[data-theme="dark"] table > tbody > tr > td {
+    color: var(--qw-text) !important;
+    background-color: transparent !important;
+    border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+/* Rows hover */
+[data-theme="dark"] tbody tr:hover,
+[data-theme="dark"] .data-table tbody tr:hover {
+    background: rgba(59, 130, 246, 0.07) !important;
+}
+
+/* Petites annotations type "Du 01/05/2026 au 13/05/2026" / "Soldes actuels" */
+[data-theme="dark"] .stat-card small,
+[data-theme="dark"] .stat-period,
+[data-theme="dark"] .stat-subtitle,
+[data-theme="dark"] .stat-description,
+[data-theme="dark"] .card-subtitle,
+[data-theme="dark"] .text-sm,
+[data-theme="dark"] .help-text,
+[data-theme="dark"] small.form-help,
+[data-theme="dark"] small.muted,
+[data-theme="dark"] .text-muted {
+    color: var(--qw-text-secondary) !important;
+    opacity: 1 !important;
+}
+
+/* Liens dans les tables (BOVIN, Poisson, etc.) */
+[data-theme="dark"] table a,
+[data-theme="dark"] .data-table a,
+[data-theme="dark"] tbody td a {
+    color: #93c5fd !important;
+}
+[data-theme="dark"] table a:hover {
+    color: #60a5fa !important;
+}
+
+/* Container Détails par Compte / Transferts — fond sombre */
+[data-theme="dark"] .accounts-section,
+[data-theme="dark"] .transferts-section,
+[data-theme="dark"] .details-by-account,
+[data-theme="dark"] .transfers-section,
+[data-theme="dark"] [class*="details-section"],
+[data-theme="dark"] [class*="-section-card"] {
+    background: var(--qw-surface) !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Headers dans les sections (Détails par Compte, Transferts) */
+[data-theme="dark"] section > h2,
+[data-theme="dark"] section > h3,
+[data-theme="dark"] section > h4,
+[data-theme="dark"] .section h2,
+[data-theme="dark"] .section h3,
+[data-theme="dark"] .section h4,
+[data-theme="dark"] .section .section-header h2 {
+    color: var(--qw-text) !important;
+}
+
+/* "Total des dépenses affichées" pill — visible en dark */
+[data-theme="dark"] .expenses-total {
+    background: #1a2436 !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .expenses-total .total-label {
+    color: var(--qw-text-secondary) !important;
+}
+[data-theme="dark"] .expenses-total .total-amount {
+    color: var(--qw-text) !important;
+}
+
+/* Form card avec gradient top "Crediter un Compte" — surface dark */
+[data-theme="dark"] .credit-form-card,
+[data-theme="dark"] .form-card,
+[data-theme="dark"] form.form-section,
+[data-theme="dark"] form.card,
+[data-theme="dark"] form > .card-body,
+[data-theme="dark"] .add-form,
+[data-theme="dark"] .creance-form,
+[data-theme="dark"] .virement-form,
+[data-theme="dark"] [class*="-form-section"],
+[data-theme="dark"] [class*="-form-container"] {
+    background: var(--qw-surface) !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Hint text type "Solde actuel: -3892000 FCFA" */
+[data-theme="dark"] .balance-hint,
+[data-theme="dark"] .form-hint,
+[data-theme="dark"] .input-hint,
+[data-theme="dark"] .hint-text {
+    background: rgba(59, 130, 246, 0.1) !important;
+    color: var(--qw-text-secondary) !important;
+    border-color: rgba(59, 130, 246, 0.2) !important;
+}
+
+/* Counter "X dépense(s) sélectionnée(s)" */
+[data-theme="dark"] .selection-counter,
+[data-theme="dark"] .selected-count,
+[data-theme="dark"] p.selection-info {
+    color: var(--qw-text-secondary) !important;
+}
+
+/* ============================================================
+   FIX DARK MODE — Containers light-gradient et white-bg restants
+   Couvre les 3 "controls" et les filtres principaux.
+   ============================================================ */
+
+/* Controls cards "Virement / Cash Bictorys / Montant Début" (gradient clair) */
+[data-theme="dark"] .virement-mensuel-controls,
+[data-theme="dark"] .cash-bictorys-controls,
+[data-theme="dark"] .montant-debut-controls,
+[data-theme="dark"] .stock-controls,
+[data-theme="dark"] .transfert-controls,
+[data-theme="dark"] .creance-controls,
+[data-theme="dark"] [class$="-controls"] {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border: 1px solid var(--qw-border) !important;
+}
+
+/* Filtres "Mes Dépenses" + autres containers blancs */
+[data-theme="dark"] .filters-container,
+[data-theme="dark"] .filter-section,
+[data-theme="dark"] .filter-container,
+[data-theme="dark"] .expenses-filters,
+[data-theme="dark"] .filters-card,
+[data-theme="dark"] [class$="-filters"],
+[data-theme="dark"] .visualization-container,
+[data-theme="dark"] .filter-bar {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+    border-bottom-color: var(--qw-border) !important;
+}
+
+/* Counter "Tout sélectionner" / "Tout désélectionner" sur fond clair */
+[data-theme="dark"] .bulk-actions,
+[data-theme="dark"] .selection-bar,
+[data-theme="dark"] .table-actions-bar,
+[data-theme="dark"] [class*="bulk-"] {
+    background: var(--qw-surface) !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Labels INSIDE .filters-container (haute spécificité requise) */
+[data-theme="dark"] .filters-container label,
+[data-theme="dark"] .filters-container .form-label,
+[data-theme="dark"] .filter-group label,
+[data-theme="dark"] .filter-section label {
+    color: var(--qw-text) !important;
+    opacity: 1 !important;
+}
+
+/* Labels DANS les controls (form-group label spécifique) */
+[data-theme="dark"] .virement-mensuel-controls label,
+[data-theme="dark"] .cash-bictorys-controls label,
+[data-theme="dark"] .montant-debut-controls label,
+[data-theme="dark"] [class$="-controls"] label,
+[data-theme="dark"] [class$="-controls"] .form-label {
+    color: var(--qw-text) !important;
+    opacity: 1 !important;
+}
+
+/* Total du mois / Total des dépenses pills sur fond clair */
+[data-theme="dark"] .total-value,
+[data-theme="dark"] .month-total-value,
+[data-theme="dark"] .month-totals .total-value,
+[data-theme="dark"] .virement-mensuel-header .total-value {
+    background: #1a2436 !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+    text-shadow: none !important;
+}
+[data-theme="dark"] .total-label,
+[data-theme="dark"] .month-totals .total-label {
+    color: var(--qw-text-secondary) !important;
+    opacity: 1 !important;
+}
+
+/* Inputs DANS .filters-container — utilisent peut-être form-control spécifique */
+[data-theme="dark"] .filters-container input,
+[data-theme="dark"] .filters-container select,
+[data-theme="dark"] .filters-container textarea {
+    background: #131c2d !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Sections inférieures du dashboard (Détails par Compte, Transferts) */
+[data-theme="dark"] .details-card,
+[data-theme="dark"] .details-table-container,
+[data-theme="dark"] .transferts-table-container,
+[data-theme="dark"] .visualization-section,
+[data-theme="dark"] .data-summary,
+[data-theme="dark"] [class*="summary-card"],
+[data-theme="dark"] [class$="-table-container"] {
+    background: var(--qw-surface) !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Titres des sections inférieures ("Détails par Compte", "Transferts") */
+[data-theme="dark"] .details-card h2,
+[data-theme="dark"] .details-card h3,
+[data-theme="dark"] .details-card h4,
+[data-theme="dark"] [class*="-table-container"] h2,
+[data-theme="dark"] [class*="-table-container"] h3,
+[data-theme="dark"] [class*="-table-container"] h4 {
+    color: var(--qw-text) !important;
+}
+
+/* ============================================================
+   FIX DARK MODE — Containers manquants (round 3)
+   - .filters (Mes Dépenses) : background:white
+   - .chart-card (Détails par Compte / Transferts) : background:white
+   - .dashboard-filters : background:white
+   - Sous-titres faded
+   ============================================================ */
+
+/* Containers principaux génériques avec background:white hardcodé */
+[data-theme="dark"] .filters,
+[data-theme="dark"] .dashboard-filters,
+[data-theme="dark"] .chart-card,
+[data-theme="dark"] .info-card,
+[data-theme="dark"] .summary-card,
+[data-theme="dark"] .panel,
+[data-theme="dark"] .panel-card,
+[data-theme="dark"] .data-card,
+[data-theme="dark"] .content-card,
+[data-theme="dark"] .form-section,
+[data-theme="dark"] .month-selector,
+[data-theme="dark"] .month-picker-card,
+[data-theme="dark"] [class*="month-selector"] {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* "Données pour mai 2026" pill — sur fond sombre, doit être visible */
+[data-theme="dark"] .month-selector .form-group label,
+[data-theme="dark"] .month-selector label {
+    color: var(--qw-text) !important;
+    opacity: 1 !important;
+}
+[data-theme="dark"] .month-info,
+[data-theme="dark"] .month-info #current-month-display,
+[data-theme="dark"] [class*="month-info"] {
+    background: rgba(59, 130, 246, 0.15) !important;
+    color: #93c5fd !important;
+    border-color: rgba(59, 130, 246, 0.3) !important;
+}
+
+/* "Analyse AI Financière" section */
+[data-theme="dark"] .ai-analysis-card,
+[data-theme="dark"] .ai-analysis-section,
+[data-theme="dark"] .ai-analysis-controls,
+[data-theme="dark"] #ai-analysis-content {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .ai-analysis-header {
+    border-bottom-color: var(--qw-primary) !important;
+}
+[data-theme="dark"] .ai-analysis-header h3 {
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .ai-analysis-header h3 i,
+[data-theme="dark"] .ai-analysis-header .toggle-btn {
+    color: var(--qw-primary) !important;
+    border-color: var(--qw-primary) !important;
+}
+[data-theme="dark"] .ai-analysis-header .toggle-btn:hover {
+    background: var(--qw-primary) !important;
+    color: #ffffff !important;
+}
+[data-theme="dark"] .ai-analysis-header .section-description,
+[data-theme="dark"] .ai-analysis-header p,
+[data-theme="dark"] .ai-analysis-header small {
+    color: var(--qw-text-secondary) !important;
+    opacity: 1 !important;
+}
+[data-theme="dark"] .ai-analysis-card label,
+[data-theme="dark"] .ai-analysis-controls label {
+    color: var(--qw-text) !important;
+}
+
+/* ============================================================
+   FIX DARK MODE FINAL — Toutes les cards/forms/sections
+   restantes avec background:white ou gradient blanc.
+   Liste exhaustive issue d'un scan automatique du CSS.
+   ============================================================ */
+[data-theme="dark"] .transfert-form-section,
+[data-theme="dark"] .transfert-history-section,
+[data-theme="dark"] .login-card,
+[data-theme="dark"] .create-account-form,
+[data-theme="dark"] .account-form,
+[data-theme="dark"] .account-card,
+[data-theme="dark"] .expense-form,
+[data-theme="dark"] form.expense-form,
+[data-theme="dark"] .credit-form-card,
+[data-theme="dark"] .adjustment-form-card,
+[data-theme="dark"] .remboursement-form-card,
+[data-theme="dark"] .remboursement-synthese-card,
+[data-theme="dark"] .partner-config-card,
+[data-theme="dark"] .users-list-section,
+[data-theme="dark"] .stock-upload-card,
+[data-theme="dark"] .stock-vivant-view-card,
+[data-theme="dark"] .stock-vivant-section,
+[data-theme="dark"] .current-permissions-card,
+[data-theme="dark"] .audit-stat-card,
+[data-theme="dark"] .formula-item,
+[data-theme="dark"] .cartes-additionnelles-section,
+[data-theme="dark"] .partner-invoice-card,
+[data-theme="dark"] .facture-form,
+[data-theme="dark"] .invoice-generation-card,
+[data-theme="dark"] [class*="-form-card"],
+[data-theme="dark"] [class*="-form-section"],
+[data-theme="dark"] [class*="-form"],
+[data-theme="dark"] form[class*="form"] {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Tous les labels dans ces formes */
+[data-theme="dark"] .create-account-form label,
+[data-theme="dark"] .account-form label,
+[data-theme="dark"] .expense-form label,
+[data-theme="dark"] .credit-form-card label,
+[data-theme="dark"] .transfert-form-section label,
+[data-theme="dark"] .adjustment-form-card label,
+[data-theme="dark"] .remboursement-form-card label,
+[data-theme="dark"] .users-list-section label,
+[data-theme="dark"] .partner-invoice-card label,
+[data-theme="dark"] [class*="-form-card"] label,
+[data-theme="dark"] [class*="-form-section"] label,
+[data-theme="dark"] form[class*="form"] label {
+    color: var(--qw-text) !important;
+    opacity: 1 !important;
+}
+
+/* Inputs dans ces formes */
+[data-theme="dark"] .create-account-form input,
+[data-theme="dark"] .create-account-form select,
+[data-theme="dark"] .create-account-form textarea,
+[data-theme="dark"] .account-form input,
+[data-theme="dark"] .account-form select,
+[data-theme="dark"] .account-form textarea,
+[data-theme="dark"] form[class*="form"] input,
+[data-theme="dark"] form[class*="form"] select,
+[data-theme="dark"] form[class*="form"] textarea {
+    background: #131c2d !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Titres dans ces formes */
+[data-theme="dark"] .create-account-form h1,
+[data-theme="dark"] .create-account-form h2,
+[data-theme="dark"] .create-account-form h3,
+[data-theme="dark"] .account-form h3,
+[data-theme="dark"] .users-list-section h3,
+[data-theme="dark"] [class*="-form-card"] h3,
+[data-theme="dark"] [class*="-form-section"] h3,
+[data-theme="dark"] form[class*="form"] h3 {
+    color: var(--qw-text) !important;
+}
+
+/* Hints / petits textes auxiliaires sous les inputs */
+[data-theme="dark"] .field-hint,
+[data-theme="dark"] .input-help,
+[data-theme="dark"] .help-block,
+[data-theme="dark"] .form-text {
+    color: var(--qw-text-secondary) !important;
+}
+
+/* Validation alert (Mode libre activé pour les dépenses) */
+[data-theme="dark"] .alert,
+[data-theme="dark"] .alert-warning,
+[data-theme="dark"] .validation-alert {
+    background: rgba(245, 158, 11, 0.15) !important;
+    color: #fcd34d !important;
+    border-color: rgba(245, 158, 11, 0.3) !important;
+}
+[data-theme="dark"] .alert-info,
+[data-theme="dark"] .info-banner {
+    background: rgba(59, 130, 246, 0.12) !important;
+    color: #93c5fd !important;
+    border-color: rgba(59, 130, 246, 0.25) !important;
+}
+[data-theme="dark"] .alert-danger {
+    background: rgba(239, 68, 68, 0.15) !important;
+    color: #fca5a5 !important;
+    border-color: rgba(239, 68, 68, 0.3) !important;
+}
+[data-theme="dark"] .alert-success {
+    background: rgba(16, 185, 129, 0.15) !important;
+    color: #6ee7b7 !important;
+    border-color: rgba(16, 185, 129, 0.3) !important;
+}
+
+/* Validation status card (Mode libre / Validation activée) */
+[data-theme="dark"] .validation-status-card {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    border-color: var(--qw-border) !important;
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .validation-status-card.enabled {
+    background: rgba(16, 185, 129, 0.12) !important;
+    background-image: none !important;
+    border-color: rgba(16, 185, 129, 0.3) !important;
+}
+[data-theme="dark"] .validation-status-card.enabled #validation-icon,
+[data-theme="dark"] .validation-status-card.enabled #validation-message,
+[data-theme="dark"] .validation-status-card.enabled strong,
+[data-theme="dark"] .validation-status-card.enabled span {
+    color: #6ee7b7 !important;
+}
+[data-theme="dark"] .validation-status-card.disabled {
+    background: rgba(245, 158, 11, 0.12) !important;
+    background-image: none !important;
+    border-color: rgba(245, 158, 11, 0.3) !important;
+}
+[data-theme="dark"] .validation-status-card.disabled #validation-icon,
+[data-theme="dark"] .validation-status-card.disabled #validation-message,
+[data-theme="dark"] .validation-status-card.disabled strong,
+[data-theme="dark"] .validation-status-card.disabled span {
+    color: #fcd34d !important;
+}
+
+/* Génération de Factures Partenaires — wrapper principal */
+[data-theme="dark"] .partner-invoice-generator,
+[data-theme="dark"] .partner-invoice-generator .card-header,
+[data-theme="dark"] .partner-invoice-generator .card-body {
+    background: var(--qw-surface) !important;
+    background-image: none !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .partner-invoice-generator h1,
+[data-theme="dark"] .partner-invoice-generator h2,
+[data-theme="dark"] .partner-invoice-generator h3,
+[data-theme="dark"] .partner-invoice-generator h4,
+[data-theme="dark"] .partner-invoice-generator label,
+[data-theme="dark"] .partner-invoice-generator p {
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .partner-invoice-generator small,
+[data-theme="dark"] .partner-invoice-generator .help-text {
+    color: var(--qw-text-secondary) !important;
+}
+
+/* Labels DANS .filters et .dashboard-filters (haute spécificité) */
+[data-theme="dark"] .filters label,
+[data-theme="dark"] .filters .form-group label,
+[data-theme="dark"] .filters .form-label,
+[data-theme="dark"] .dashboard-filters label,
+[data-theme="dark"] .dashboard-filters .form-group label,
+[data-theme="dark"] .chart-card label {
+    color: var(--qw-text) !important;
+    opacity: 1 !important;
+}
+
+/* Inputs dans .filters */
+[data-theme="dark"] .filters input,
+[data-theme="dark"] .filters select,
+[data-theme="dark"] .filters textarea,
+[data-theme="dark"] .dashboard-filters input,
+[data-theme="dark"] .dashboard-filters select {
+    background: #131c2d !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Titres des chart-cards et info-cards */
+[data-theme="dark"] .chart-card h1,
+[data-theme="dark"] .chart-card h2,
+[data-theme="dark"] .chart-card h3,
+[data-theme="dark"] .chart-card h4,
+[data-theme="dark"] .chart-card h5,
+[data-theme="dark"] .info-card h3,
+[data-theme="dark"] .info-card h4 {
+    color: var(--qw-text) !important;
+}
+
+/* Sous-textes hint sous les stat cards (Du 01/05 au 13/05, Soldes actuels) */
+[data-theme="dark"] .stat-card .stat-period,
+[data-theme="dark"] .stat-card .stat-subtitle,
+[data-theme="dark"] .stat-card small,
+[data-theme="dark"] .stat-card .stat-info,
+[data-theme="dark"] .stat-card .stat-meta,
+[data-theme="dark"] .stat-content small,
+[data-theme="dark"] .stat-content .text-muted {
+    color: var(--qw-text-secondary) !important;
+    opacity: 1 !important;
+    filter: none !important;
+}
+
+/* Container avec inline background:white sur .form-group child */
+[data-theme="dark"] .form-group > div[style*="background: white"],
+[data-theme="dark"] .form-group > div[style*="background:white"],
+[data-theme="dark"] #expense-type-checkboxes-container,
+[data-theme="dark"] [id$="-checkboxes-container"] {
+    background: #131c2d !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+
+/* Containers de checkboxes (Type de Dépense list) */
+[data-theme="dark"] #expense-type-checkboxes-container label,
+[data-theme="dark"] [id$="-checkboxes-container"] label,
+[data-theme="dark"] .checkbox-list label,
+[data-theme="dark"] .checkbox-group label {
+    color: var(--qw-text) !important;
+}
+
+/* Hover/expanded headers */
+[data-theme="dark"] .accordion-header:hover {
+    background: #25324a !important;
+}
+
+/* Tableaux */
+[data-theme="dark"] .data-table,
+[data-theme="dark"] table {
+    background: var(--qw-surface) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .data-table thead,
+[data-theme="dark"] .data-table thead th,
+[data-theme="dark"] #users-list thead th {
+    background: #1a2436 !important;
+    color: var(--qw-text-secondary) !important;
+    border-bottom-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .data-table tbody td {
+    border-bottom-color: rgba(255, 255, 255, 0.05) !important;
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .data-table tbody tr:hover,
+[data-theme="dark"] #users-list tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* Inputs / forms */
+[data-theme="dark"] .form-control,
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="month"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] input[type="search"],
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+    background: #131c2d !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .form-control::placeholder,
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+    color: var(--qw-text-muted) !important;
+}
+[data-theme="dark"] .form-control:disabled,
+[data-theme="dark"] input:disabled,
+[data-theme="dark"] select:disabled {
+    background: #0f1825 !important;
+    color: var(--qw-text-muted) !important;
+}
+
+/* Checkboxes / radios — fond visible sur sombre */
+[data-theme="dark"] input[type="checkbox"]:not(:checked),
+[data-theme="dark"] input[type="radio"]:not(:checked) {
+    background: #131c2d !important;
+    border-color: #475569 !important;
+}
+
+/* Modal header neutre */
+[data-theme="dark"] .modal-header {
+    background: #1a2436 !important;
+    border-bottom-color: var(--qw-border) !important;
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .modal-header h1,
+[data-theme="dark"] .modal-header h2,
+[data-theme="dark"] .modal-header h3,
+[data-theme="dark"] .modal-header h4 {
+    color: var(--qw-text) !important;
+}
+
+/* Skeleton — adaptation gradient sombre */
+[data-theme="dark"] .skeleton {
+    background: linear-gradient(
+        90deg,
+        #1f2a3d 0%,
+        #2a3954 50%,
+        #1f2a3d 100%
+    ) !important;
+    background-size: 200% 100% !important;
+}
+
+/* Empty states */
+[data-theme="dark"] .no-data-message,
+[data-theme="dark"] .empty-state {
+    background: var(--qw-surface) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .no-data-message i {
+    color: #475569 !important;
+}
+
+/* Toast — palette ajustée */
+[data-theme="dark"] .notification {
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Confirm modal */
+[data-theme="dark"] .confirm-modal-overlay {
+    background: rgba(0, 0, 0, 0.65) !important;
+}
+[data-theme="dark"] .confirm-modal-dialog {
+    background: var(--qw-surface) !important;
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .confirm-modal-title {
+    color: var(--qw-text) !important;
+}
+[data-theme="dark"] .confirm-modal-message {
+    color: var(--qw-text-secondary) !important;
+}
+[data-theme="dark"] .confirm-modal-cancel {
+    background: #2a3954 !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .confirm-modal-cancel:hover {
+    background: #344560 !important;
+}
+
+/* Boutons secondary outlined */
+[data-theme="dark"] .btn-secondary,
+[data-theme="dark"] .btn-back,
+[data-theme="dark"] .btn-edit {
+    background: #25324a !important;
+    color: var(--qw-text) !important;
+    border-color: var(--qw-border) !important;
+}
+[data-theme="dark"] .btn-secondary:hover,
+[data-theme="dark"] .btn-back:hover,
+[data-theme="dark"] .btn-edit:hover {
+    background: #2f3e5b !important;
+    border-color: #475569 !important;
+}
+
+/* Action buttons in tables (ghost) — fond plus marqué en dark */
+[data-theme="dark"] .action-buttons .btn-info {
+    background: rgba(59, 130, 246, 0.18) !important;
+    color: #93c5fd !important;
+}
+[data-theme="dark"] .action-buttons .btn-warning {
+    background: rgba(251, 191, 36, 0.15) !important;
+    color: #fcd34d !important;
+}
+[data-theme="dark"] .action-buttons .btn-danger {
+    background: rgba(248, 113, 113, 0.15) !important;
+    color: #fca5a5 !important;
+}
+
+/* Status badges Oui/Non/Actif */
+[data-theme="dark"] .badge.bg-success,
+[data-theme="dark"] .badge-success,
+[data-theme="dark"] .status-yes {
+    background: rgba(52, 211, 153, 0.15) !important;
+    color: #6ee7b7 !important;
+    border-color: rgba(52, 211, 153, 0.3) !important;
+}
+[data-theme="dark"] .badge.bg-danger,
+[data-theme="dark"] .badge-danger,
+[data-theme="dark"] .status-no {
+    background: rgba(248, 113, 113, 0.15) !important;
+    color: #fca5a5 !important;
+    border-color: rgba(248, 113, 113, 0.3) !important;
+}
+
+/* Role badge */
+[data-theme="dark"] .role-badge {
+    background: rgba(59, 130, 246, 0.15) !important;
+    color: #93c5fd !important;
+    border-color: rgba(59, 130, 246, 0.3) !important;
+}
+
+/* Client badges — primary plus saturé pour visibilité */
+[data-theme="dark"] .client-badge {
+    background: var(--qw-primary) !important;
+    color: #ffffff !important;
+}
+[data-theme="dark"] .client-badge.is-internal {
+    background: #475569 !important;
+}
+
+/* Sidebar active state — saturation plus prononcée */
+[data-theme="dark"] .sidebar .nav-link.active {
+    background: rgba(59, 130, 246, 0.18) !important;
+    color: #93c5fd !important;
+    border-left-color: var(--qw-primary) !important;
+}
+[data-theme="dark"] .sidebar .nav-link.active i {
+    color: #93c5fd !important;
+}
+[data-theme="dark"] .sidebar .nav-link:hover {
+    background: rgba(59, 130, 246, 0.1) !important;
+    color: var(--qw-text) !important;
+}
+
+/* Toggle button (le bouton soleil/lune) — défini dans app.js mais stylé ici */
+.qw-theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid var(--qw-border);
+    background: var(--qw-surface);
+    color: var(--qw-text-secondary);
+    cursor: pointer;
+    transition: background-color 0.15s ease, color 0.15s ease,
+                border-color 0.15s ease;
+    margin-right: 12px;
+}
+.qw-theme-toggle:hover {
+    background: var(--qw-primary-soft);
+    color: var(--qw-primary);
+    border-color: rgba(37, 99, 235, 0.3);
+}
+.qw-theme-toggle:focus-visible {
+    outline: 2px solid var(--qw-primary);
+    outline-offset: 2px;
+}
+.qw-theme-toggle i {
+    font-size: 14px;
+}
