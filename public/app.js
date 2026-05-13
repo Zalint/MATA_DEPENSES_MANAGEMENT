@@ -16339,33 +16339,38 @@ function updateOperationsHistoryTable(operations) {
     
     operations.forEach(operation => {
         const row = document.createElement('tr');
-        
-        const typeClass = operation.operation_type === 'credit' ? 'amount-positive' : 'amount-negative';
-        const typeText = operation.operation_type === 'credit' ? 'Avance (+)' : 'Remboursement (-)';
-        
+
+        const isCredit = operation.operation_type === 'credit';
+        // Pill colorée pour le type + classe d'aide pour la ligne entière
+        const typePill = isCredit
+            ? '<span class="qw-pill qw-pill-success qw-op-type-pill"><i class="fas fa-arrow-up"></i> Avance</span>'
+            : '<span class="qw-pill qw-pill-danger qw-op-type-pill"><i class="fas fa-arrow-down"></i> Remboursement</span>';
+        const amountClass = isCredit ? 'qw-op-amount-credit' : 'qw-op-amount-debit';
+        row.classList.add(isCredit ? 'qw-op-row-credit' : 'qw-op-row-debit');
+
         // Générer les boutons d'actions selon les permissions
         const actionsHtml = generateCreanceOperationActions(operation);
-        
+
         // Formater les dates
         const operationDate = formatDate(operation.operation_date);
         const timestamp = new Date(operation.timestamp_creation);
         const timestampDate = timestamp.toLocaleDateString('fr-FR');
-        const timestampTime = timestamp.toLocaleTimeString('fr-FR', { 
-            hour: '2-digit', 
-            minute: '2-digit' 
+        const timestampTime = timestamp.toLocaleTimeString('fr-FR', {
+            hour: '2-digit',
+            minute: '2-digit'
         });
-        
+
         row.innerHTML = `
             <td>${operationDate}</td>
             <td>${timestampDate}<br><small class="text-muted">${timestampTime}</small></td>
             <td>${operation.client_name}</td>
-            <td class="${typeClass}">${typeText}</td>
-            <td class="${typeClass}">${formatCurrency(operation.amount)}</td>
+            <td>${typePill}</td>
+            <td class="${amountClass}">${isCredit ? '+' : '−'} ${formatCurrency(operation.amount)}</td>
             <td>${operation.description || '-'}</td>
             <td>${operation.created_by_name}</td>
             <td>${actionsHtml}</td>
         `;
-        
+
         tbody.appendChild(row);
     });
 }

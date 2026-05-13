@@ -15623,3 +15623,50 @@ span.previsible-no,
     border-top-color: var(--qw-border);
 }
 
+/* =========================================================
+   CREANCE — Historique des opérations : différencier
+   visuellement Avance (vert) vs Remboursement (rouge)
+   ========================================================= */
+
+/* Le pill type prend le pas sur la couleur de cellule par défaut */
+.data-table td .qw-op-type-pill {
+    color: inherit !important;
+    font-weight: 500 !important;
+}
+
+/* Cellule montant : couleur explicite, signé visible */
+.data-table td.qw-op-amount-credit {
+    color: #15803d !important;
+    font-weight: 600 !important;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.data-table td.qw-op-amount-debit {
+    color: #b91c1c !important;
+    font-weight: 600 !important;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+/* Liseré gauche subtil sur la ligne pour renforcer la distinction */
+.data-table tbody tr.qw-op-row-credit > td:first-child {
+    box-shadow: inset 3px 0 0 0 rgba(34, 197, 94, 0.55);
+}
+.data-table tbody tr.qw-op-row-debit > td:first-child {
+    box-shadow: inset 3px 0 0 0 rgba(220, 38, 38, 0.55);
+}
+
+/* Dark mode : montants plus lisibles sur fond sombre */
+[data-theme="dark"] .data-table td.qw-op-amount-credit {
+    color: #4ade80 !important;
+}
+[data-theme="dark"] .data-table td.qw-op-amount-debit {
+    color: #f87171 !important;
+}
+[data-theme="dark"] .data-table tbody tr.qw-op-row-credit > td:first-child {
+    box-shadow: inset 3px 0 0 0 rgba(74, 222, 128, 0.55);
+}
+[data-theme="dark"] .data-table tbody tr.qw-op-row-debit > td:first-child {
+    box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.55);
+}
+
