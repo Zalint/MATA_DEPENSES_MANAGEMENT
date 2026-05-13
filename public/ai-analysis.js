@@ -730,9 +730,6 @@ function generateExportHTML(data, params, forWord = false) {
     `.trim();
 }
 
-// Initialize on page load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initAIAnalysis);
-} else {
-    initAIAnalysis();
-}
+// L'initialisation est déclenchée depuis app.js (loadInitialData) APRÈS
+// l'authentification. Pas d'auto-init sur DOMContentLoaded pour éviter
+// de courir un setup module avant que l'utilisateur soit connecté.

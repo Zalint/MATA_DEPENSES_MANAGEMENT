@@ -1070,15 +1070,9 @@ function switchSnapshotTab(targetTab) {
     }
 }
 
-// Initialiser les snapshots quand la page est chargée
-document.addEventListener('DOMContentLoaded', function() {
-    // Attendre un peu pour que le reste de l'app soit initialisé
-    setTimeout(() => {
-        if (document.getElementById('snapshots-history-section')) {
-            initializeSnapshots();
-        }
-    }, 1000);
-});
+// L'initialisation est déclenchée depuis app.js (loadInitialData) APRÈS
+// l'authentification. Pas d'auto-init sur DOMContentLoaded : il appelait
+// /api/snapshots avant la connexion → 401 et toast d'erreur parasite.
 
 // Fonction pour gérer les sections collapsibles
 function toggleSection(sectionId) {
