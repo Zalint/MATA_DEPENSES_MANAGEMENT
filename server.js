@@ -21,6 +21,317 @@ function formatCurrency(amount) {
     return parseInt(amount).toLocaleString('fr-FR') + ' FCFA';
 }
 
+// Valeurs par défaut (utilisées si la table app_settings n'a pas encore
+// été peuplée pour la facture). Ces defaults sont mergés avec les
+// valeurs DB pour que la suppression d'une entrée DB ne laisse pas
+// l'app sans les alias historiques.
+const DEFAULT_SUPPLIER_ALIASES = {
+    'ali ka': 'Ali KA',
+    'aly ka': 'Ali KA',
+    'ali  ka': 'Ali KA'
+};
+const DEFAULT_SUPPLIER_PROFILES = {
+    'Ali KA': {
+        displayName: 'Aly Ka, marchand de bétail',
+        location: 'Foirail de Sicap Mbao',
+        phone: '778625595'
+    }
+};
+
+/**
+ * Charge la config "template facture" depuis app_settings, mémorisée 30 s.
+ * Sources : DB (clés invoice_supplier_aliases / invoice_supplier_profiles)
+ * + defaults hardcodés. DB écrase les defaults clé par clé.
+ * @returns {Promise<{aliases: Object<string,string>, profiles: Object<string,Object>}>}
+ */
+async function getInvoiceTemplateConfig() {
+    const now = Date.now();
+    if (invoiceTemplateCache && (now - invoiceTemplateCacheTime) < CONFIG_CACHE_TTL_MS) {
+        return invoiceTemplateCache;
+    }
+    let dbAliases = null;
+    let dbProfiles = null;
+    try {
+        const r = await pool.query(
+            "SELECT key, value FROM app_settings WHERE key IN ('invoice_supplier_aliases', 'invoice_supplier_profiles')"
+        );
+        for (const row of r.rows) {
+            if (row.key === 'invoice_supplier_aliases' && row.value && typeof row.value === 'object') {
+                dbAliases = row.value;
+            } else if (row.key === 'invoice_supplier_profiles' && row.value && typeof row.value === 'object') {
+                dbProfiles = row.value;
+            }
+        }
+    } catch (error) {
+        if (error.code !== PG_UNDEFINED_TABLE) {
+            console.error('Erreur lecture app_settings invoice template (fallback defaults):', error.message);
+        }
+    }
+    const aliases = { ...DEFAULT_SUPPLIER_ALIASES, ...(dbAliases || {}) };
+    const profiles = { ...DEFAULT_SUPPLIER_PROFILES, ...(dbProfiles || {}) };
+    invoiceTemplateCache = { aliases, profiles };
+    invoiceTemplateCacheTime = now;
+    return invoiceTemplateCache;
+}
+
+/**
+ * Normalise un nom de fournisseur :
+ * - trim, normalisation des espaces
+ * - lookup dans le map d'alias fourni (case-insensitive)
+ * @param {string|null|undefined} name
+ * @param {Object<string,string>} aliasMap  Doit être déjà chargé (cf. getInvoiceTemplateConfig)
+ */
+function normalizeSupplierName(name, aliasMap) {
+    if (!name || typeof name !== 'string') return '';
+    const trimmed = name.trim();
+    if (!trimmed) return '';
+    const key = trimmed.toLowerCase().replace(/\s+/g, ' ');
+    return (aliasMap && aliasMap[key]) || trimmed;
+}
+
+/**
+ * Formate un numéro de téléphone sénégalais (9 chiffres) en groupes
+ * lisibles : 778625595 -> "77 862 55 95". Pour les autres formats,
+ * on renvoie la valeur d'origine telle quelle.
+ */
+function formatSupplierPhone(raw) {
+    if (!raw) return '';
+    const digits = String(raw).replace(/\D/g, '');
+    if (digits.length === 9) {
+        return `${digits.slice(0, 2)} ${digits.slice(2, 5)} ${digits.slice(5, 7)} ${digits.slice(7, 9)}`;
+    }
+    return String(raw);
+}
+
+/**
+ * Rend l'en-tête fournisseur en haut à gauche d'une facture PDF.
+ * Si un profil complet existe pour la forme canonique, on affiche
+ * Nom / Lieu d'activité / Téléphone. Sinon, juste le nom en gras.
+ * @param {PDFDocument} doc
+ * @param {string|null|undefined} rawName
+ * @param {{aliases: Object, profiles: Object}} config  Charger via getInvoiceTemplateConfig()
+ */
+function renderSupplierHeader(doc, rawName, config) {
+    const aliases = (config && config.aliases) || DEFAULT_SUPPLIER_ALIASES;
+    const profiles = (config && config.profiles) || DEFAULT_SUPPLIER_PROFILES;
+    const canonical = normalizeSupplierName(rawName, aliases);
+    const profile = profiles[canonical];
+
+    if (profile) {
+        // Layout type "facture pro" : un bandeau d'accentuation vertical
+        // bleu à gauche, le nom du fournisseur en hero, puis l'adresse
+        // et le téléphone dessous en typographie sobre. Pas de préfixes
+        // verbeux ("Nom :", "Lieu d'activité :"...) qui alourdissent.
+        const barX = 50;             // Position du bandeau d'accent
+        const contentX = 64;         // Texte décalé pour laisser respirer après le bandeau
+        const blockTop = 50;
+        let y = blockTop;
+
+        // Pré-calcul : on dessine le texte AVANT le bandeau pour
+        // connaître la hauteur finale et tracer un bandeau de la
+        // bonne longueur (PDFKit ne sait pas mesurer après coup).
+
+        // Nom hero (sombre, semi-gras, taille équilibrée — pas trop grosse
+        // comme dans les vraies factures pro)
+        doc.fontSize(15).font('Helvetica-Bold').fillColor('#0f172a')
+            .text(profile.displayName || canonical || '', contentX, y, { width: 360 });
+        y = doc.y + 6; // récupère la position courante après wrap éventuel
+
+        // Adresse / lieu d'activité (gris moyen, taille discrète)
+        if (profile.location) {
+            doc.fontSize(9.5).font('Helvetica').fillColor('#475569')
+                .text(profile.location, contentX, y, { width: 360 });
+            y = doc.y + 2;
+        }
+
+        // Téléphone avec préfixe "Tél." et indicatif international +221
+        // (formatage en groupes lisibles 77 862 55 95)
+        if (profile.phone) {
+            const formatted = formatSupplierPhone(profile.phone);
+            doc.fontSize(9.5).font('Helvetica').fillColor('#475569')
+                .text(`Tél. +221 ${formatted}`, contentX, y);
+            y = doc.y + 2;
+        }
+
+        // Bandeau d'accentuation vertical bleu (cadre sur la gauche),
+        // hauteur calée sur la hauteur réelle du bloc texte.
+        const blockBottom = y;
+        const barHeight = Math.max(36, blockBottom - blockTop);
+        doc.rect(barX, blockTop, 3, barHeight).fill('#1e3a8a');
+
+        // Reset des couleurs / police pour ne pas polluer le reste
+        doc.fillColor('black').strokeColor('black').lineWidth(1);
+    } else {
+        // Pas de profil : juste le nom en gros gras
+        doc.fontSize(20).font('Helvetica-Bold').fillColor('black')
+            .text(canonical || '', 50, 55);
+    }
+}
+
+// =====================================================
+// TEMPLATE FACTURE CRÉANCE (ancien format MATA)
+// =====================================================
+// Utilisé par les factures générées depuis Gestion Créance > Vue Globale
+// > Par client. Tous les champs sont éditables depuis Config > Modèle
+// de facture > Facture Créance.
+
+const DEFAULT_CREANCE_INVOICE_TEMPLATE = {
+    company_name: 'MATA',
+    address_line_1: 'Virage, Apt Nord 603D, Résidence Aquanique',
+    address_line_2: 'A : 01387695 2Y3 / RC : SN DKR 2024 B 29149',
+    address_line_3: 'Ouest foire : 78 480 95 95',
+    address_line_4: '',
+    designation: 'Produits frais',
+    categories: 'bœuf, agneau, poulet',
+    title_color: '#1e3a8a'
+};
+
+/**
+ * Charge le template de facture créance depuis app_settings (clé
+ * invoice_creance_template), mémorisé 30 s. Defaults mergés.
+ */
+async function getCreanceInvoiceTemplate() {
+    const now = Date.now();
+    if (creanceInvoiceTemplateCache && (now - creanceInvoiceTemplateCacheTime) < CONFIG_CACHE_TTL_MS) {
+        return creanceInvoiceTemplateCache;
+    }
+    let db = null;
+    try {
+        const r = await pool.query(
+            "SELECT value FROM app_settings WHERE key = 'invoice_creance_template' LIMIT 1"
+        );
+        if (r.rows.length > 0 && r.rows[0].value && typeof r.rows[0].value === 'object') {
+            db = r.rows[0].value;
+        }
+    } catch (error) {
+        if (error.code !== PG_UNDEFINED_TABLE) {
+            console.error('Erreur lecture invoice_creance_template (fallback defaults):', error.message);
+        }
+    }
+    const merged = { ...DEFAULT_CREANCE_INVOICE_TEMPLATE, ...(db || {}) };
+    creanceInvoiceTemplateCache = merged;
+    creanceInvoiceTemplateCacheTime = now;
+    return merged;
+}
+
+/**
+ * Génère une page de facture créance MATA pour un client.
+ * @param {PDFDocument} doc
+ * @param {{name: string, portfolio: string, solde: number}} clientData
+ * @param {Object} tpl  Template chargé via getCreanceInvoiceTemplate()
+ * @param {string|number} invoiceNumber  N° unique de la facture
+ */
+function renderCreanceInvoice(doc, clientData, tpl, invoiceNumber) {
+    const T = tpl || DEFAULT_CREANCE_INVOICE_TEMPLATE;
+    const color = T.title_color || '#1e3a8a';
+    const formatNumber = n => (parseFloat(n) || 0).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+    // === EN-TÊTE MATA (ancien format) ===
+    doc.fontSize(24).font('Helvetica-Bold').fillColor(color)
+        .text(T.company_name || 'MATA', 50, 50);
+
+    doc.fontSize(9).font('Helvetica').fillColor('black');
+    if (T.address_line_1) doc.text(T.address_line_1, 50, 80);
+    if (T.address_line_2) doc.text(T.address_line_2, 50, 95);
+    if (T.address_line_3) doc.text(T.address_line_3, 50, 110);
+    if (T.address_line_4) doc.text(T.address_line_4, 50, 125);
+
+    // FACTURE title (centré façon historique)
+    doc.fontSize(16).font('Helvetica-Bold').fillColor(color).text('FACTURE', 275, 55);
+
+    // Date + N°
+    doc.fontSize(10).font('Helvetica').fillColor('black');
+    const currentDate = new Date().toLocaleDateString('fr-FR');
+    doc.text(`Date : ${currentDate}`, 450, 50);
+    doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626');
+    doc.text(`N° : ${invoiceNumber}`, 450, 70);
+
+    // Ligne de séparation
+    doc.strokeColor(color).lineWidth(1);
+    doc.moveTo(50, 160).lineTo(545, 160).stroke();
+
+    // Titre de section
+    let yPos = 180;
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
+    doc.text('Dépenses', 50, yPos);
+    yPos += 30;
+
+    // En-tête du tableau
+    const tableStartY = yPos;
+    const colPositions = [50, 110, 330, 430];
+    doc.rect(50, tableStartY, 495, 25).fill(color);
+    doc.fontSize(11).font('Helvetica-Bold').fillColor('white');
+    doc.text('QUANTITÉ', colPositions[0] + 5, tableStartY + 8);
+    doc.text('DÉSIGNATION', colPositions[1] + 5, tableStartY + 8);
+    doc.text('P. UNITAIRE', colPositions[2] + 5, tableStartY + 8);
+    doc.text('PRIX TOTAL', colPositions[3] + 5, tableStartY + 8);
+    yPos = tableStartY + 25;
+
+    // Unique ligne : 1.00 Produits frais [solde] [solde]
+    const solde = parseFloat(clientData && clientData.solde || 0);
+    const formattedSolde = formatNumber(solde);
+    doc.rect(50, yPos, 495, 30).fill('#f8f9fa').stroke('#dee2e6');
+    doc.fontSize(10).font('Helvetica').fillColor('black');
+    doc.text('1.00', colPositions[0] + 5, yPos + 10);
+    doc.text(T.designation || 'Produits frais', colPositions[1] + 5, yPos + 10, { width: 200, height: 20 });
+    doc.text(formattedSolde, colPositions[2] + 5, yPos + 10);
+    doc.text(formattedSolde, colPositions[3] + 5, yPos + 10);
+    yPos += 30;
+
+    // Pas de lignes vides (sur demande)
+
+    // MONTANT TOTAL
+    doc.rect(50, yPos, 495, 3).fill(color);
+    yPos += 10;
+    doc.rect(50, yPos, 360, 30).fill(color);
+    doc.fontSize(14).font('Helvetica-Bold').fillColor('white');
+    doc.text('MONTANT TOTAL', 60, yPos + 10);
+    doc.rect(410, yPos, 135, 30).stroke(color).lineWidth(2);
+    doc.fontSize(16).font('Helvetica-Bold').fillColor(color);
+    doc.text(`${formattedSolde} F`, 420, yPos + 8);
+    yPos += 60;
+
+    // Bloc métadonnées client + catégories
+    doc.fontSize(10).font('Helvetica').fillColor('black');
+    const clientName = (clientData && clientData.name) || '';
+    doc.text(`Client : ${clientName}`, 50, yPos);
+    yPos += 15;
+    if (T.categories) {
+        doc.text(`Catégories de produits : ${T.categories}`, 50, yPos);
+    }
+
+    // Cachet MATA — ancré en bas à droite (marges fixes par rapport au bord
+    // de la page pour que ce soit prévisible quelle que soit la mise en page
+    // au-dessus).
+    const cachetW = 130;
+    const cachetH = 130;
+    const cachetX = doc.page.width - cachetW - 50;   // 50pt depuis le bord droit
+    const cachetY = doc.page.height - cachetH - 50;  // 50pt depuis le bas
+    const cachetPath = path.join(__dirname, 'public', 'images', 'CachetMata.jpg');
+
+    let cachetRendered = false;
+    if (fs.existsSync(cachetPath)) {
+        try {
+            doc.image(cachetPath, cachetX, cachetY, { width: cachetW, height: cachetH });
+            cachetRendered = true;
+        } catch (error) {
+            console.warn('⚠️ Cachet MATA introuvable / illisible, fallback texte :', error.message);
+        }
+    }
+    if (!cachetRendered) {
+        // Fallback : rectangle avec texte centré "CACHET MATA"
+        doc.rect(cachetX, cachetY, cachetW, cachetH).stroke(color).lineWidth(2);
+        doc.fontSize(12).font('Helvetica-Bold').fillColor(color);
+        doc.text('CACHET\nMATA', cachetX, cachetY + cachetH / 2 - 14, {
+            width: cachetW,
+            align: 'center'
+        });
+    }
+
+    // Reset
+    doc.fillColor('black').strokeColor('black').lineWidth(1);
+}
+
 // Fonction utilitaire pour nettoyer l'encodage des caractères français
 function cleanEncoding(obj) {
     if (typeof obj === 'string') {
@@ -79,6 +390,20 @@ let virementClientsContextCacheTime = 0;
 function invalidateVirementClientsCache() {
     virementClientsContextCache = null;
     virementClientsContextCacheTime = 0;
+}
+
+let invoiceTemplateCache = null;
+let invoiceTemplateCacheTime = 0;
+function invalidateInvoiceTemplateCache() {
+    invoiceTemplateCache = null;
+    invoiceTemplateCacheTime = 0;
+}
+
+let creanceInvoiceTemplateCache = null;
+let creanceInvoiceTemplateCacheTime = 0;
+function invalidateCreanceInvoiceTemplateCache() {
+    creanceInvoiceTemplateCache = null;
+    creanceInvoiceTemplateCacheTime = 0;
 }
 
 // Fonction utilitaire pour lire la configuration financière (async, mémorisée 30 s).
@@ -1381,13 +1706,132 @@ const fileFilter = (req, file, cb) => {
     }
 };
 
-const upload = multer({ 
+const upload = multer({
     storage: storage,
     fileFilter: fileFilter,
     limits: {
         fileSize: 5 * 1024 * 1024 // 5MB max
     }
 });
+
+// =====================================================
+// DOCUMENTS COMPTABLES — config & multer
+// =====================================================
+// Upload de documents comptables (factures, justificatifs, états...) accessibles
+// uniquement après déverrouillage par mot de passe partagé. Fichiers stockés
+// sur disque dans uploads/comptable/{year}/{id}-{slug}.ext.
+const COMPTABLE_UPLOAD_BASE_DIR = path.join(__dirname, 'uploads', 'comptable');
+const COMPTABLE_MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+const COMPTABLE_UNLOCK_TTL_MS = 30 * 60 * 1000;   // 30 min d'inactivité
+const COMPTABLE_PASSWORD_SETTING_KEY = 'comptable_password_hash';
+const COMPTABLE_ALLOWED_MIMES = new Set([
+    'application/pdf',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'image/jpeg',
+    'image/png',
+    'image/jpg'
+]);
+const COMPTABLE_ALLOWED_EXTS = new Set([
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.jpg', '.jpeg', '.png'
+]);
+
+// Assurer l'existence du répertoire racine au démarrage
+try {
+    if (!fs.existsSync(COMPTABLE_UPLOAD_BASE_DIR)) {
+        fs.mkdirSync(COMPTABLE_UPLOAD_BASE_DIR, { recursive: true });
+    }
+} catch (err) {
+    console.warn('⚠️ Impossible de créer le répertoire comptable :', err.message);
+}
+
+const comptableStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const year = parseInt(req.body.year, 10) || new Date().getFullYear();
+        if (year < 2000 || year > 2100) {
+            return cb(new Error('Année invalide'), null);
+        }
+        const dir = path.join(COMPTABLE_UPLOAD_BASE_DIR, String(year));
+        try {
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            cb(null, dir);
+        } catch (err) {
+            cb(err, null);
+        }
+    },
+    filename: (req, file, cb) => {
+        // Nom : {timestamp}-{slug}.ext (l'id DB est ajouté dans le path après l'insert)
+        const ext = path.extname(file.originalname || '').toLowerCase();
+        const base = (file.originalname || 'document')
+            .replace(/\.[^.]+$/, '')
+            .replace(/[^a-zA-Z0-9_-]+/g, '_')
+            .slice(0, 60) || 'document';
+        cb(null, `${Date.now()}_${base}${ext}`);
+    }
+});
+const comptableFileFilter = (req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    const mime = (file.mimetype || '').toLowerCase();
+    if (!COMPTABLE_ALLOWED_EXTS.has(ext) || !COMPTABLE_ALLOWED_MIMES.has(mime)) {
+        return cb(new Error('Format de fichier non autorisé. Acceptés : PDF, Word, Excel, JPG, PNG.'), false);
+    }
+    cb(null, true);
+};
+const comptableUpload = multer({
+    storage: comptableStorage,
+    fileFilter: comptableFileFilter,
+    limits: { fileSize: COMPTABLE_MAX_FILE_SIZE }
+});
+
+/**
+ * Lit le hash bcrypt du mot de passe partagé depuis app_settings.
+ * Retourne null si non configuré.
+ */
+async function getComptablePasswordHash() {
+    try {
+        const r = await pool.query(
+            'SELECT value FROM app_settings WHERE key = $1 LIMIT 1',
+            [COMPTABLE_PASSWORD_SETTING_KEY]
+        );
+        if (r.rows.length === 0) return null;
+        const v = r.rows[0].value;
+        // app_settings.value est JSONB ; on stocke { hash: '$2b$...' }
+        if (v && typeof v === 'object' && typeof v.hash === 'string') return v.hash;
+        return null;
+    } catch (error) {
+        if (error.code !== PG_UNDEFINED_TABLE) {
+            console.error('Erreur lecture comptable password hash:', error.message);
+        }
+        return null;
+    }
+}
+
+/**
+ * Vérifie que la session a déverrouillé l'accès comptable récemment
+ * (dans la fenêtre TTL).
+ */
+function isComptableUnlocked(req) {
+    if (!req.session || !req.session.comptableUnlockedAt) return false;
+    const elapsed = Date.now() - req.session.comptableUnlockedAt;
+    return elapsed >= 0 && elapsed < COMPTABLE_UNLOCK_TTL_MS;
+}
+
+/**
+ * Middleware : exige authentification ET déverrouillage comptable.
+ */
+function requireComptableUnlock(req, res, next) {
+    if (!req.session || !req.session.user) {
+        return res.status(401).json({ error: 'Non authentifié' });
+    }
+    if (!isComptableUnlocked(req)) {
+        return res.status(423).json({ error: 'Section verrouillée — déverrouillez d\'abord', code: 'COMPTABLE_LOCKED' });
+    }
+    // Rafraîchir le TTL à chaque action authentifiée (sliding window)
+    req.session.comptableUnlockedAt = Date.now();
+    next();
+}
 
 // Middleware
 app.use(cors());
@@ -1566,6 +2010,17 @@ function requireSuperAdmin(req, res, next) {
     }
     next();
 }
+
+// Middleware pour vérifier les permissions admin strictes (admin seulement).
+// Déplacé ici (était plus bas dans le fichier) parce que certaines routes
+// l'utilisent avant la position historique de cette déclaration, ce qui
+// déclenchait un ReferenceError TDZ avec const.
+const requireStrictAdminAuth = (req, res, next) => {
+    if (!req.session?.user || req.session.user.role !== 'admin') {
+        return res.status(403).json({ error: 'Accès refusé - Seul l\'admin peut effectuer cette action' });
+    }
+    next();
+};
 
 // Routes d'authentification
 app.post('/api/login', async (req, res) => {
@@ -5036,24 +5491,24 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                 }
             }
             
-            // PARTIE 2: Ajouter les templates MATA pour les dépenses sans justificatifs
-            console.log(`⏱️ PDF GENERATION: Traitement de ${expensesWithoutJustification.length} templates MATA...`);
-            
+            // PARTIE 2: Ajouter les templates de facture pour les dépenses sans justificatifs
+            console.log(`⏱️ PDF GENERATION: Traitement de ${expensesWithoutJustification.length} templates...`);
+            // Charger la config du modèle de facture (alias + profils fournisseurs)
+            // une seule fois pour tout le batch.
+            const invoiceTemplateConfig = await getInvoiceTemplateConfig();
+
             expensesWithoutJustification.forEach((expense, index) => {
                 console.log(`⏱️ PDF GENERATION: Template ${index + 1}/${expensesWithoutJustification.length} - Dépense ID: ${expense.id}`);
                 if (!isFirstPage || index > 0) {
                     doc.addPage();
                 }
-                
-                // === EN-TÊTE MATA ===
-                doc.fontSize(24).font('Helvetica-Bold').fillColor('#1e3a8a').text('MATA', 50, 50);
-                
-                doc.fontSize(9).font('Helvetica').fillColor('black');
-                doc.text('Mirage, Apt Nord 603D, Résidence Aquanique', 50, 80);
-                doc.text('A : 01387695 2Y3 / RC : SN DKR 2024 B 29149', 50, 95);
-                doc.text('Ouest foire : 78 480 95 95', 50, 110);
-                doc.text('Grand Mbao / cité Aliou Sow : 77 858 96 96', 50, 125);
-                
+
+                // === EN-TÊTE FOURNISSEUR ===
+                // Plus de branding MATA (demande du compteable). Le helper
+                // affiche soit Nom/Lieu/Téléphone si on a un profil complet
+                // pour ce fournisseur, soit juste le nom en gras.
+                renderSupplierHeader(doc, expense.supplier, invoiceTemplateConfig);
+
                 doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a').text('FACTURE', 275, 55);
                 
                 doc.fontSize(10).font('Helvetica').fillColor('black');
@@ -5123,31 +5578,12 @@ app.post('/api/expenses/generate-invoices-pdf', requireAuth, async (req, res) =>
                 doc.text(`${finalTotal} F`, 420, yPos + 8);
                 
                 yPos += 60;
-                
-                doc.fontSize(10).font('Helvetica').fillColor('black');
-                doc.text(`Dépense effectuée par : ${expense.user_name || expense.username}`, 50, yPos);
-                yPos += 15;
-                
-                if (expense.supplier) {
-                    doc.text(`Fournisseur : ${expense.supplier}`, 50, yPos);
-                    yPos += 15;
-                }
-                
-                // Cachet MATA
-            const cachetPath = path.join(__dirname, 'public', 'images', 'CachetMata.jpg');
-            if (fs.existsSync(cachetPath)) {
-                try {
-                        doc.image(cachetPath, 400, doc.page.height - 180, { width: 120, height: 120 });
-                } catch (error) {
-                        doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e3a8a');
-                        doc.text('CACHET MATA', 450, doc.page.height - 100);
-                }
-                } else {
-                    doc.rect(400, doc.page.height - 180, 120, 120).stroke('#1e3a8a').lineWidth(2);
-                    doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
-                    doc.text('CACHET\nMATA', 440, doc.page.height - 130, { align: 'center' });
-            }
-                
+
+                // NB : "Dépense effectuée par" + "Fournisseur :" + Cachet MATA
+                // ont été retirés (demande du compteable, nouveau format sans
+                // branding MATA). Le nom du fournisseur est déjà affiché en
+                // gras en haut de la facture.
+
                 isFirstPage = false;
         });
         
@@ -5400,21 +5836,18 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
             }
         }
         
-        // PARTIE 2: Ajouter les templates MATA complets
+        // PARTIE 2: Ajouter les templates de facture complets
+        // Charger la config (alias + profils fournisseurs) pour tout le batch.
+        const invoiceTemplateConfig = await getInvoiceTemplateConfig();
         expensesWithoutJustification.forEach((expense, index) => {
             if (!isFirstPage || index > 0) {
                 doc.addPage();
             }
-            
-            // === EN-TÊTE MATA ===
-            doc.fontSize(24).font('Helvetica-Bold').fillColor('#1e3a8a').text('MATA', 50, 50);
-            
-            doc.fontSize(9).font('Helvetica').fillColor('black');
-            doc.text('Mirage, Apt Nord 603D, Résidence Aquanique', 50, 80);
-            doc.text('A : 01387695 2Y3 / RC : SN DKR 2024 B 29149', 50, 95);
-            doc.text('Ouest foire : 78 480 95 95', 50, 110);
-            doc.text('Grand Mbao / cité Aliou Sow : 77 858 96 96', 50, 125);
-            
+
+            // === EN-TÊTE FOURNISSEUR ===
+            // Voir commentaire dans /api/expenses/generate-invoices-pdf.
+            renderSupplierHeader(doc, expense.supplier, invoiceTemplateConfig);
+
             doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a').text('FACTURE', 275, 55);
             
             doc.fontSize(10).font('Helvetica').fillColor('black');
@@ -5485,31 +5918,11 @@ app.get('/api/expenses/generate-invoices-pdf-direct', requireAuth, async (req, r
             doc.text(`${finalTotal} F`, 420, yPos + 8);
             
             yPos += 60;
-            
-            doc.fontSize(10).font('Helvetica').fillColor('black');
-            doc.text(`Dépense effectuée par : ${expense.user_name || expense.username}`, 50, yPos);
-            yPos += 15;
-            
-            if (expense.supplier) {
-                doc.text(`Fournisseur : ${expense.supplier}`, 50, yPos);
-                yPos += 15;
-            }
-            
-            // Cachet MATA
-            const cachetPath = path.join(__dirname, 'public', 'images', 'CachetMata.jpg');
-            if (fs.existsSync(cachetPath)) {
-                try {
-                    doc.image(cachetPath, 400, doc.page.height - 180, { width: 120, height: 120 });
-                } catch (error) {
-                    doc.fontSize(12).font('Helvetica-Bold').fillColor('#1e3a8a');
-                    doc.text('CACHET MATA', 450, doc.page.height - 100);
-                }
-            } else {
-                doc.rect(400, doc.page.height - 180, 120, 120).stroke('#1e3a8a').lineWidth(2);
-                doc.fontSize(10).font('Helvetica-Bold').fillColor('#1e3a8a');
-                doc.text('CACHET\nMATA', 440, doc.page.height - 130, { align: 'center' });
-            }
-            
+
+            // NB : "Dépense effectuée par" + "Fournisseur :" + Cachet MATA
+            // ont été retirés (nouveau format sans branding MATA, demande du
+            // compteable). Le nom du fournisseur est en haut de la facture.
+
             isFirstPage = false;
         });
         
@@ -6878,6 +7291,670 @@ app.get('/api/partner/:accountId/deliveries', requireAuth, async (req, res) => {
 });
 
 
+// ============================================================
+// === MODÈLE DE FACTURE — alias + profils fournisseurs ===
+// ============================================================
+// Stocké dans app_settings (clés invoice_supplier_aliases et
+// invoice_supplier_profiles). Les valeurs DB écrasent les defaults
+// hardcodés (DEFAULT_SUPPLIER_ALIASES / DEFAULT_SUPPLIER_PROFILES).
+
+// GET : retourne la config courante (defaults + DB mergés)
+app.get('/api/invoice-template', requireAuth, async (req, res) => {
+    try {
+        const config = await getInvoiceTemplateConfig();
+        // On renvoie aussi les defaults pour que le front puisse indiquer
+        // "valeur par défaut" vs "personnalisée" si besoin.
+        res.json({
+            aliases: config.aliases,
+            profiles: config.profiles,
+            defaults: {
+                aliases: DEFAULT_SUPPLIER_ALIASES,
+                profiles: DEFAULT_SUPPLIER_PROFILES
+            }
+        });
+    } catch (error) {
+        console.error('Erreur GET /api/invoice-template:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Helpers de validation pour PUT
+const INVOICE_TEMPLATE_MAX_KEYS = 200;     // anti-DoS
+const INVOICE_TEMPLATE_MAX_STRING_LEN = 255;
+function validateAliasMap(value) {
+    if (value === null || value === undefined) return { ok: true, value: {} };
+    if (typeof value !== 'object' || Array.isArray(value)) {
+        return { ok: false, error: 'aliases doit être un objet { alias_lowercase: forme_canonique }' };
+    }
+    const keys = Object.keys(value);
+    if (keys.length > INVOICE_TEMPLATE_MAX_KEYS) {
+        return { ok: false, error: `Trop d'alias (max ${INVOICE_TEMPLATE_MAX_KEYS})` };
+    }
+    const normalized = {};
+    for (const k of keys) {
+        const v = value[k];
+        if (typeof k !== 'string' || typeof v !== 'string') {
+            return { ok: false, error: 'Chaque alias doit être string -> string' };
+        }
+        if (k.length > INVOICE_TEMPLATE_MAX_STRING_LEN || v.length > INVOICE_TEMPLATE_MAX_STRING_LEN) {
+            return { ok: false, error: `Valeur d'alias trop longue (max ${INVOICE_TEMPLATE_MAX_STRING_LEN})` };
+        }
+        if (FORBIDDEN_CHARS_REGEX.test(k) || FORBIDDEN_CHARS_REGEX.test(v)) {
+            return { ok: false, error: 'Caractères interdits dans un alias' };
+        }
+        const trimmedKey = k.trim().toLowerCase().replace(/\s+/g, ' ');
+        const trimmedVal = v.trim();
+        if (!trimmedKey || !trimmedVal) continue; // on ignore les lignes vides
+        normalized[trimmedKey] = trimmedVal;
+    }
+    return { ok: true, value: normalized };
+}
+function validateProfileMap(value) {
+    if (value === null || value === undefined) return { ok: true, value: {} };
+    if (typeof value !== 'object' || Array.isArray(value)) {
+        return { ok: false, error: 'profiles doit être un objet { canonical_name: profile }' };
+    }
+    const keys = Object.keys(value);
+    if (keys.length > INVOICE_TEMPLATE_MAX_KEYS) {
+        return { ok: false, error: `Trop de profils (max ${INVOICE_TEMPLATE_MAX_KEYS})` };
+    }
+    const normalized = {};
+    for (const canonical of keys) {
+        const p = value[canonical];
+        if (typeof canonical !== 'string' || !canonical.trim()) continue;
+        if (!p || typeof p !== 'object' || Array.isArray(p)) {
+            return { ok: false, error: `Profil "${canonical}" invalide (doit être un objet)` };
+        }
+        const cleanCanonical = canonical.trim();
+        if (cleanCanonical.length > INVOICE_TEMPLATE_MAX_STRING_LEN || FORBIDDEN_CHARS_REGEX.test(cleanCanonical)) {
+            return { ok: false, error: `Nom canonique invalide pour profil "${canonical}"` };
+        }
+        const profile = {};
+        for (const field of ['displayName', 'location', 'phone']) {
+            const val = p[field];
+            if (val === undefined || val === null || val === '') continue;
+            if (typeof val !== 'string') {
+                return { ok: false, error: `Profil "${canonical}" : ${field} doit être une chaîne` };
+            }
+            if (val.length > INVOICE_TEMPLATE_MAX_STRING_LEN || FORBIDDEN_CHARS_REGEX.test(val)) {
+                return { ok: false, error: `Profil "${canonical}" : ${field} contient des caractères interdits ou est trop long` };
+            }
+            profile[field] = val.trim();
+        }
+        normalized[cleanCanonical] = profile;
+    }
+    return { ok: true, value: normalized };
+}
+
+// PUT : remplace la config (aliases + profils). Réservé aux super-admins
+// (admin / directeur_general / pca) — c'est un paramètre métier, pas
+// un paramètre système critique.
+app.put('/api/invoice-template', requireSuperAdmin, async (req, res) => {
+    try {
+        const aliasResult = validateAliasMap(req.body.aliases);
+        if (!aliasResult.ok) return res.status(400).json({ error: aliasResult.error });
+        const profileResult = validateProfileMap(req.body.profiles);
+        if (!profileResult.ok) return res.status(400).json({ error: profileResult.error });
+
+        const userId = req.session.user.id;
+        await pool.query(
+            `INSERT INTO app_settings (key, value, updated_by, updated_at)
+             VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (key) DO UPDATE SET
+                 value = EXCLUDED.value,
+                 updated_at = CURRENT_TIMESTAMP,
+                 updated_by = EXCLUDED.updated_by`,
+            ['invoice_supplier_aliases', JSON.stringify(aliasResult.value), userId]
+        );
+        await pool.query(
+            `INSERT INTO app_settings (key, value, updated_by, updated_at)
+             VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (key) DO UPDATE SET
+                 value = EXCLUDED.value,
+                 updated_at = CURRENT_TIMESTAMP,
+                 updated_by = EXCLUDED.updated_by`,
+            ['invoice_supplier_profiles', JSON.stringify(profileResult.value), userId]
+        );
+        invalidateInvoiceTemplateCache();
+        res.json({ ok: true, aliases: aliasResult.value, profiles: profileResult.value });
+    } catch (error) {
+        console.error('Erreur PUT /api/invoice-template:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// GET preview : génère un PDF d'exemple avec les valeurs courantes
+app.get('/api/invoice-template/preview', requireAuth, async (req, res) => {
+    try {
+        const supplier = (typeof req.query.supplier === 'string' ? req.query.supplier : '').trim() || 'Fournisseur DEMO';
+        if (supplier.length > INVOICE_TEMPLATE_MAX_STRING_LEN || FORBIDDEN_CHARS_REGEX.test(supplier)) {
+            return res.status(400).json({ error: 'Nom de fournisseur invalide' });
+        }
+        const config = await getInvoiceTemplateConfig();
+
+        const doc = new PDFDocument({ size: 'A4', margin: 0 });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="apercu_facture.pdf"`);
+        res.setHeader('Cache-Control', 'no-cache');
+        doc.pipe(res);
+
+        // En-tête fournisseur (le coeur du template)
+        renderSupplierHeader(doc, supplier, config);
+        doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a').text('FACTURE', 275, 55);
+        doc.fontSize(10).font('Helvetica').fillColor('black');
+        doc.text(`Date : ${new Date().toLocaleDateString('fr-FR')}`, 450, 50);
+        doc.fontSize(12).font('Helvetica-Bold').fillColor('#dc2626');
+        doc.text(`N° : 00000001`, 450, 70);
+
+        doc.moveTo(50, 160).lineTo(545, 160).stroke('#1e3a8a').lineWidth(1);
+
+        let yPos = 180;
+        doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
+        doc.text('Dépenses (exemple)', 50, yPos);
+        yPos += 30;
+
+        // Mini-tableau d'exemple
+        const tableStartY = yPos;
+        const colPositions = [50, 110, 330, 430];
+        doc.rect(50, tableStartY, 495, 25).fill('#1e3a8a');
+        doc.fontSize(11).font('Helvetica-Bold').fillColor('white');
+        doc.text('QUANTITÉ', colPositions[0] + 5, tableStartY + 8);
+        doc.text('DÉSIGNATION', colPositions[1] + 5, tableStartY + 8);
+        doc.text('P. UNITAIRE', colPositions[2] + 5, tableStartY + 8);
+        doc.text('PRIX TOTAL', colPositions[3] + 5, tableStartY + 8);
+        yPos = tableStartY + 25;
+        doc.rect(50, yPos, 495, 30).fill('#f8f9fa').stroke('#dee2e6');
+        doc.fontSize(10).font('Helvetica').fillColor('black');
+        doc.text('1.00', colPositions[0] + 5, yPos + 10);
+        doc.text("Exemple d'article", colPositions[1] + 5, yPos + 10, { width: 200, height: 20 });
+        doc.text('100 000', colPositions[2] + 5, yPos + 10);
+        doc.text('100 000', colPositions[3] + 5, yPos + 10);
+        yPos += 30;
+        for (let i = 0; i < 3; i++) {
+            doc.rect(50, yPos, 495, 25).stroke('#dee2e6');
+            yPos += 25;
+        }
+        // Total
+        doc.rect(50, yPos, 495, 3).fill('#1e3a8a');
+        yPos += 10;
+        doc.rect(50, yPos, 360, 30).fill('#1e3a8a');
+        doc.fontSize(14).font('Helvetica-Bold').fillColor('white');
+        doc.text('MONTANT TOTAL', 60, yPos + 10);
+        doc.rect(410, yPos, 135, 30).stroke('#1e3a8a').lineWidth(2);
+        doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a');
+        doc.text('100 000 F', 420, yPos + 8);
+
+        doc.end();
+    } catch (error) {
+        console.error('Erreur GET /api/invoice-template/preview:', error);
+        if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+
+// ============================================================
+// === TEMPLATE FACTURE CRÉANCE (ancien format MATA) ===
+// ============================================================
+// Config stockée dans app_settings (clé invoice_creance_template).
+// Sert pour les factures générées depuis Gestion Créance > Vue Globale
+// > Par client (un PDF par client ou un PDF batch tous clients).
+
+// GET : retourne la config courante (defaults + DB mergés)
+app.get('/api/invoice-creance-template', requireAuth, async (req, res) => {
+    try {
+        const config = await getCreanceInvoiceTemplate();
+        res.json({ ...config, defaults: DEFAULT_CREANCE_INVOICE_TEMPLATE });
+    } catch (error) {
+        console.error('Erreur GET /api/invoice-creance-template:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// Validation du payload PUT
+const CREANCE_TEMPLATE_FIELDS = [
+    'company_name', 'address_line_1', 'address_line_2',
+    'address_line_3', 'address_line_4', 'designation',
+    'categories', 'title_color'
+];
+// Champs structurels qu'on refuse de laisser vides : si l'utilisateur
+// saisit une chaîne vide, on retombe sur la valeur par défaut. Les
+// autres (lignes d'adresse, catégories) peuvent être effacés.
+const CREANCE_TEMPLATE_MANDATORY = ['company_name', 'designation', 'title_color'];
+function validateCreanceTemplate(body) {
+    if (!body || typeof body !== 'object') {
+        return { ok: false, error: 'Payload invalide' };
+    }
+    const normalized = {};
+    for (const f of CREANCE_TEMPLATE_FIELDS) {
+        const raw = body[f];
+        const mandatory = CREANCE_TEMPLATE_MANDATORY.includes(f);
+        if (raw === undefined || raw === null) {
+            // Pas fourni -> default
+            normalized[f] = DEFAULT_CREANCE_INVOICE_TEMPLATE[f];
+            continue;
+        }
+        if (typeof raw !== 'string') {
+            return { ok: false, error: `${f} doit être une chaîne` };
+        }
+        const v = raw.trim();
+        if (!v) {
+            // Vide explicite : autorisé pour les champs optionnels (efface),
+            // sinon on retombe sur le default.
+            normalized[f] = mandatory ? DEFAULT_CREANCE_INVOICE_TEMPLATE[f] : '';
+            continue;
+        }
+        if (v.length > INVOICE_TEMPLATE_MAX_STRING_LEN) {
+            return { ok: false, error: `${f} trop long (max ${INVOICE_TEMPLATE_MAX_STRING_LEN})` };
+        }
+        if (FORBIDDEN_CHARS_REGEX.test(v)) {
+            return { ok: false, error: `${f} contient des caractères interdits` };
+        }
+        normalized[f] = v;
+    }
+    // Validation explicite : couleur au format hex #RRGGBB
+    if (!/^#[0-9a-fA-F]{6}$/.test(normalized.title_color)) {
+        return { ok: false, error: 'title_color doit être une couleur hexadécimale #RRGGBB' };
+    }
+    return { ok: true, value: normalized };
+}
+
+// PUT : remplace la config. Réservé aux super-admins (admin/DG/PCA).
+app.put('/api/invoice-creance-template', requireSuperAdmin, async (req, res) => {
+    try {
+        const result = validateCreanceTemplate(req.body);
+        if (!result.ok) return res.status(400).json({ error: result.error });
+        const userId = req.session.user.id;
+        await pool.query(
+            `INSERT INTO app_settings (key, value, updated_by, updated_at)
+             VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (key) DO UPDATE SET
+                 value = EXCLUDED.value,
+                 updated_at = CURRENT_TIMESTAMP,
+                 updated_by = EXCLUDED.updated_by`,
+            ['invoice_creance_template', JSON.stringify(result.value), userId]
+        );
+        invalidateCreanceInvoiceTemplateCache();
+        res.json({ ok: true, ...result.value });
+    } catch (error) {
+        console.error('Erreur PUT /api/invoice-creance-template:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// GET preview : PDF d'exemple avec un client fictif
+app.get('/api/invoice-creance-template/preview', requireAuth, async (req, res) => {
+    try {
+        const config = await getCreanceInvoiceTemplate();
+        const doc = new PDFDocument({ size: 'A4', margin: 0 });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="apercu_facture_creance.pdf"`);
+        res.setHeader('Cache-Control', 'no-cache');
+        doc.pipe(res);
+        renderCreanceInvoice(doc, {
+            name: 'Maas Mbao',
+            portfolio: 'CREANCE_CDB',
+            solde: 757684
+        }, config, Date.now().toString());
+        doc.end();
+    } catch (error) {
+        console.error('Erreur preview facture creance:', error);
+        if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// =====================================================
+// GÉNÉRATION RÉELLE — Factures créance "par client"
+// =====================================================
+// GET /api/creance/global/invoice-pdf?date=YYYY-MM-DD
+//                                     &client_name=X        (optionnel : un seul client)
+//                                     &exclusionClients=A;B (optionnel : exclusions)
+// Sans client_name => batch tous clients de la vue (1 page par client).
+// Avec client_name => 1 PDF avec uniquement ce client (1 page).
+app.get('/api/creance/global/invoice-pdf', requireAuth, async (req, res) => {
+    try {
+        const dateInput = typeof req.query.date === 'string' && req.query.date.trim()
+            ? req.query.date.trim()
+            : new Date().toISOString().split('T')[0];
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+            return res.status(400).json({ error: 'Paramètre date invalide (attendu YYYY-MM-DD)' });
+        }
+
+        const clientNameFilter = typeof req.query.client_name === 'string'
+            ? req.query.client_name.trim()
+            : '';
+        if (clientNameFilter && (clientNameFilter.length > 255 || FORBIDDEN_CHARS_REGEX.test(clientNameFilter))) {
+            return res.status(400).json({ error: 'client_name invalide' });
+        }
+
+        const MAX_CLIENT_EXCLUSIONS = 100;
+        const exclusionRaw = typeof req.query.exclusionClients === 'string' ? req.query.exclusionClients : '';
+        const exclusionList = exclusionRaw.split(';').map(s => s.trim()).filter(Boolean);
+        if (exclusionList.length > MAX_CLIENT_EXCLUSIONS) {
+            return res.status(400).json({ error: `Trop d'exclusions (max ${MAX_CLIENT_EXCLUSIONS})` });
+        }
+        for (const n of exclusionList) {
+            if (n.length > 255 || FORBIDDEN_CHARS_REGEX.test(n)) {
+                return res.status(400).json({ error: 'Nom d\'exclusion invalide' });
+            }
+        }
+        const exclusionLower = exclusionList.map(s => s.toLowerCase());
+
+        // Récup template
+        const tpl = await getCreanceInvoiceTemplate();
+
+        // Requête : pour chaque client créance, calculer le solde final
+        // au jour `dateInput` = initial_credit + credits<= - debits<=
+        const params = [dateInput, exclusionLower];
+        let clientFilterSql = '';
+        if (clientNameFilter) {
+            clientFilterSql = 'AND LOWER(cc.client_name) = LOWER($3)';
+            params.push(clientNameFilter);
+        }
+        const sql = `
+            SELECT
+                cc.client_name AS name,
+                a.account_name AS portfolio,
+                (cc.initial_credit
+                    + COALESCE(credits.total_credits, 0)
+                    - COALESCE(debits.total_debits, 0)) AS solde
+            FROM creance_clients cc
+            JOIN accounts a ON cc.account_id = a.id
+            LEFT JOIN (
+                SELECT client_id, SUM(amount) AS total_credits
+                FROM creance_operations
+                WHERE operation_type = 'credit' AND operation_date <= $1
+                GROUP BY client_id
+            ) credits ON cc.id = credits.client_id
+            LEFT JOIN (
+                SELECT client_id, SUM(amount) AS total_debits
+                FROM creance_operations
+                WHERE operation_type = 'debit' AND operation_date <= $1
+                GROUP BY client_id
+            ) debits ON cc.id = debits.client_id
+            WHERE a.account_type = 'creance'
+              AND a.is_active = true
+              AND cc.is_active = true
+              AND LOWER(cc.client_name) <> ALL($2::text[])
+              ${clientFilterSql}
+            ORDER BY solde DESC NULLS LAST, cc.client_name ASC
+        `;
+        const result = await pool.query(sql, params);
+        const clients = result.rows.map(r => ({
+            name: r.name,
+            portfolio: r.portfolio,
+            solde: parseFloat(r.solde || 0)
+        }));
+
+        if (clients.length === 0) {
+            return res.status(404).json({ error: 'Aucun client correspondant — aucune facture à générer' });
+        }
+
+        // Préparer le PDF
+        const doc = new PDFDocument({ size: 'A4', margin: 0 });
+        res.setHeader('Content-Type', 'application/pdf');
+        const safeName = clientNameFilter
+            ? clientNameFilter.replace(/[^a-zA-Z0-9]/g, '_')
+            : 'tous_clients';
+        const filename = `factures_creance_${safeName}_${dateInput.replace(/-/g, '')}.pdf`;
+        res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+        res.setHeader('Cache-Control', 'no-cache');
+        doc.pipe(res);
+
+        // N° unique pour chaque page : Date.now() + index dans le batch.
+        // Garantit qu'aucun N° généré ne se retrouvera identique à un autre
+        // dans le même batch ET entre deux appels successifs (la base
+        // timestamp avance toujours).
+        const baseTimestamp = Date.now();
+        clients.forEach((client, index) => {
+            if (index > 0) doc.addPage();
+            const invoiceNumber = (baseTimestamp + index).toString();
+            renderCreanceInvoice(doc, client, tpl, invoiceNumber);
+        });
+
+        doc.end();
+    } catch (error) {
+        console.error('Erreur génération factures créance:', error);
+        if (!res.headersSent) res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+
+// ============================================================
+// === DOCUMENTS COMPTABLES (verrou par mot de passe partagé) ===
+// ============================================================
+
+// GET /api/comptable/status
+// Indique : si un mot de passe est configuré, si la session est actuellement
+// déverrouillée, et combien de temps il reste avant le re-prompt.
+app.get('/api/comptable/status', requireAuth, async (req, res) => {
+    try {
+        const hash = await getComptablePasswordHash();
+        const unlocked = isComptableUnlocked(req);
+        const expiresInMs = unlocked
+            ? Math.max(0, COMPTABLE_UNLOCK_TTL_MS - (Date.now() - req.session.comptableUnlockedAt))
+            : 0;
+        res.json({
+            password_set: !!hash,
+            unlocked,
+            expires_in_ms: expiresInMs,
+            ttl_ms: COMPTABLE_UNLOCK_TTL_MS
+        });
+    } catch (error) {
+        console.error('Erreur GET /api/comptable/status:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// POST /api/comptable/unlock { password }
+app.post('/api/comptable/unlock', requireAuth, async (req, res) => {
+    try {
+        const { password } = req.body || {};
+        if (typeof password !== 'string' || !password) {
+            return res.status(400).json({ error: 'Mot de passe requis' });
+        }
+        const hash = await getComptablePasswordHash();
+        if (!hash) {
+            return res.status(409).json({ error: 'Aucun mot de passe configuré — demandez à un administrateur de le définir', code: 'NO_PASSWORD_SET' });
+        }
+        const ok = await bcrypt.compare(password, hash);
+        if (!ok) {
+            return res.status(401).json({ error: 'Mot de passe incorrect' });
+        }
+        req.session.comptableUnlockedAt = Date.now();
+        res.json({ ok: true, expires_in_ms: COMPTABLE_UNLOCK_TTL_MS });
+    } catch (error) {
+        console.error('Erreur POST /api/comptable/unlock:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// POST /api/comptable/lock — verrou explicite (logout du module)
+app.post('/api/comptable/lock', requireAuth, (req, res) => {
+    if (req.session) delete req.session.comptableUnlockedAt;
+    res.json({ ok: true });
+});
+
+// PUT /api/comptable/password { newPassword, currentPassword? }
+// Définit ou change le mot de passe partagé. Super admin uniquement.
+// Si un mot de passe existe déjà, currentPassword est obligatoire (sauf pour
+// 'admin' strict qui peut forcer un reset).
+app.put('/api/comptable/password', requireSuperAdmin, async (req, res) => {
+    try {
+        const { newPassword, currentPassword } = req.body || {};
+        if (typeof newPassword !== 'string' || newPassword.length < 6) {
+            return res.status(400).json({ error: 'Le nouveau mot de passe doit faire au moins 6 caractères' });
+        }
+        if (newPassword.length > 200) {
+            return res.status(400).json({ error: 'Mot de passe trop long' });
+        }
+        const existingHash = await getComptablePasswordHash();
+        if (existingHash) {
+            const isAdminStrict = req.session.user && req.session.user.role === 'admin';
+            if (!isAdminStrict) {
+                if (typeof currentPassword !== 'string' || !currentPassword) {
+                    return res.status(400).json({ error: 'Mot de passe actuel requis pour le changement' });
+                }
+                const okCurrent = await bcrypt.compare(currentPassword, existingHash);
+                if (!okCurrent) {
+                    return res.status(401).json({ error: 'Mot de passe actuel incorrect' });
+                }
+            }
+        }
+        const newHash = await bcrypt.hash(newPassword, 10);
+        const userId = req.session.user.id;
+        await pool.query(
+            `INSERT INTO app_settings (key, value, updated_by, updated_at)
+             VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (key) DO UPDATE SET
+                 value = EXCLUDED.value,
+                 updated_at = CURRENT_TIMESTAMP,
+                 updated_by = EXCLUDED.updated_by`,
+            [COMPTABLE_PASSWORD_SETTING_KEY, JSON.stringify({ hash: newHash }), userId]
+        );
+        // Invalide les sessions courantes pour forcer un nouveau unlock
+        if (req.session) delete req.session.comptableUnlockedAt;
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Erreur PUT /api/comptable/password:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// GET /api/comptable/documents?year=2026
+app.get('/api/comptable/documents', requireComptableUnlock, async (req, res) => {
+    try {
+        const year = parseInt(req.query.year, 10);
+        if (!year || year < 2000 || year > 2100) {
+            return res.status(400).json({ error: 'Paramètre year invalide' });
+        }
+        const r = await pool.query(
+            `SELECT d.id, d.libelle, d.year, d.original_filename, d.mime_type,
+                    d.size_bytes, d.uploaded_at, u.full_name AS uploaded_by_name
+             FROM comptable_documents d
+             LEFT JOIN users u ON d.uploaded_by = u.id
+             WHERE d.year = $1
+             ORDER BY d.uploaded_at DESC`,
+            [year]
+        );
+        res.json(r.rows);
+    } catch (error) {
+        if (error.code === PG_UNDEFINED_TABLE) {
+            return res.status(503).json({ error: 'Table comptable_documents absente — exécutez la migration' });
+        }
+        console.error('Erreur GET /api/comptable/documents:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// POST /api/comptable/documents (multipart : file + libelle + year)
+app.post('/api/comptable/documents',
+    requireComptableUnlock,
+    comptableUpload.single('file'),
+    async (req, res) => {
+        try {
+            if (!req.file) {
+                return res.status(400).json({ error: 'Aucun fichier reçu' });
+            }
+            const libelle = typeof req.body.libelle === 'string' ? req.body.libelle.trim() : '';
+            const year = parseInt(req.body.year, 10);
+            if (!libelle) {
+                // Nettoyer le fichier orphelin
+                try { fs.unlinkSync(req.file.path); } catch (_) {}
+                return res.status(400).json({ error: 'Libellé requis' });
+            }
+            if (libelle.length > 255 || FORBIDDEN_CHARS_REGEX.test(libelle)) {
+                try { fs.unlinkSync(req.file.path); } catch (_) {}
+                return res.status(400).json({ error: 'Libellé invalide (trop long ou caractères interdits)' });
+            }
+            if (!year || year < 2000 || year > 2100) {
+                try { fs.unlinkSync(req.file.path); } catch (_) {}
+                return res.status(400).json({ error: 'Année invalide' });
+            }
+            const userId = req.session.user.id;
+            const ins = await pool.query(
+                `INSERT INTO comptable_documents
+                    (libelle, year, original_filename, stored_path, mime_type, size_bytes, uploaded_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 RETURNING id, libelle, year, original_filename, mime_type, size_bytes, uploaded_at`,
+                [libelle, year, req.file.originalname, req.file.path, req.file.mimetype, req.file.size, userId]
+            );
+            res.status(201).json(ins.rows[0]);
+        } catch (error) {
+            // Cleanup fichier en cas d'erreur SQL
+            if (req.file && req.file.path) {
+                try { fs.unlinkSync(req.file.path); } catch (_) {}
+            }
+            if (error.code === PG_UNDEFINED_TABLE) {
+                return res.status(503).json({ error: 'Table comptable_documents absente — exécutez la migration' });
+            }
+            console.error('Erreur POST /api/comptable/documents:', error);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    }
+);
+
+// GET /api/comptable/documents/:id/download
+app.get('/api/comptable/documents/:id/download', requireComptableUnlock, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!id) return res.status(400).json({ error: 'ID invalide' });
+        const r = await pool.query(
+            'SELECT stored_path, original_filename, mime_type FROM comptable_documents WHERE id = $1',
+            [id]
+        );
+        if (r.rows.length === 0) return res.status(404).json({ error: 'Document introuvable' });
+        const doc = r.rows[0];
+        if (!fs.existsSync(doc.stored_path)) {
+            return res.status(410).json({ error: 'Fichier physique introuvable sur le serveur' });
+        }
+        // Servir en inline pour les PDF/images, en download pour le reste
+        const inlineMimes = ['application/pdf', 'image/jpeg', 'image/png'];
+        const disposition = inlineMimes.includes(doc.mime_type) ? 'inline' : 'attachment';
+        const filename = doc.original_filename || ('document_' + id);
+        res.setHeader('Content-Type', doc.mime_type || 'application/octet-stream');
+        res.setHeader('Content-Disposition', `${disposition}; filename="${filename.replace(/"/g, '')}"`);
+        fs.createReadStream(doc.stored_path).pipe(res);
+    } catch (error) {
+        console.error('Erreur download document comptable:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// DELETE /api/comptable/documents/:id  body: { password }
+// La suppression demande de re-saisir le mot de passe (sécurité supplémentaire).
+app.delete('/api/comptable/documents/:id', requireComptableUnlock, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        if (!id) return res.status(400).json({ error: 'ID invalide' });
+        const { password } = req.body || {};
+        if (typeof password !== 'string' || !password) {
+            return res.status(400).json({ error: 'Mot de passe requis pour la suppression' });
+        }
+        const hash = await getComptablePasswordHash();
+        if (!hash) {
+            return res.status(409).json({ error: 'Aucun mot de passe configuré' });
+        }
+        const ok = await bcrypt.compare(password, hash);
+        if (!ok) return res.status(401).json({ error: 'Mot de passe incorrect' });
+
+        const r = await pool.query(
+            'SELECT stored_path FROM comptable_documents WHERE id = $1',
+            [id]
+        );
+        if (r.rows.length === 0) return res.status(404).json({ error: 'Document introuvable' });
+        const storedPath = r.rows[0].stored_path;
+        await pool.query('DELETE FROM comptable_documents WHERE id = $1', [id]);
+        // Best-effort suppression du fichier physique
+        try { if (storedPath && fs.existsSync(storedPath)) fs.unlinkSync(storedPath); }
+        catch (e) { console.warn('Suppression fichier comptable échouée :', e.message); }
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('Erreur DELETE /api/comptable/documents:', error);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+
 // === ROUTES POUR LA G+�N+�RATION DE FACTURES PARTENAIRES ===
 // IMPORTANT: Ces routes doivent +�tre AVANT les routes g+�n+�rales avec :deliveryId
 
@@ -6997,15 +8074,13 @@ app.get('/api/partner/generate-invoice-pdf-direct', requireAuth, async (req, res
         
         doc.pipe(res);
         
-        // === EN-T+�TE MATA (identique au template existant) ===
-        doc.fontSize(24).font('Helvetica-Bold').fillColor('#1e3a8a').text('MATA', 50, 50);
-        
-        doc.fontSize(9).font('Helvetica').fillColor('black');
-        doc.text('Mirage, Apt Nord 603D, Residence Aquanique', 50, 80);
-        doc.text('A : 01387695 2Y3 / RC : SN DKR 2024 B 29149', 50, 95);
-        doc.text('Ouest foire : 78 480 95 95', 50, 110);
-        doc.text('Grand Mbao / cite Aliou Sow : 77 858 96 96', 50, 125);
-        
+        // === EN-TETE FOURNISSEUR / PARTENAIRE ===
+        // Nouveau format sans branding MATA (demande du compteable).
+        // Le bloc "PARTENAIRE : ..." plus bas devient redondant mais on
+        // le garde pour ne pas perturber la lecture comptable existante.
+        const invoiceTemplateConfig = await getInvoiceTemplateConfig();
+        renderSupplierHeader(doc, partner_name, invoiceTemplateConfig);
+
         doc.fontSize(16).font('Helvetica-Bold').fillColor('#1e3a8a').text('FACTURE', 275, 55);
         
         doc.fontSize(10).font('Helvetica').fillColor('black');
@@ -13482,13 +14557,10 @@ app.put('/api/creance/:accountId/clients/:clientId', requireAdminAuth, async (re
     }
 });
 
-// Middleware pour vérifier les permissions admin strictes (admin seulement)
-const requireStrictAdminAuth = (req, res, next) => {
-    if (!req.session?.user || req.session.user.role !== 'admin') {
-        return res.status(403).json({ error: 'Accès refusé - Seul l\'admin peut effectuer cette action' });
-    }
-    next();
-};
+// Le middleware requireStrictAdminAuth est désormais déclaré plus haut
+// dans le fichier (à côté de requireAuth / requireAdminAuth) pour éviter
+// un ReferenceError TDZ : certaines routes l'utilisent avant la position
+// historique de cette déclaration.
 
 // Route pour supprimer un client créance (Admin seulement)
 app.delete('/api/creance/:accountId/clients/:clientId', requireStrictAdminAuth, async (req, res) => {

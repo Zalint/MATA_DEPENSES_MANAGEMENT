@@ -15670,3 +15670,339 @@ span.previsible-no,
     box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.55);
 }
 
+/* =========================================================
+   ADMIN — Modèle de facture
+   ========================================================= */
+
+.qw-invoice-preview-card,
+.qw-invoice-card {
+    background: var(--qw-surface);
+    border: 1px solid var(--qw-border);
+    border-radius: var(--qw-radius-lg);
+    padding: 18px 20px;
+    margin-bottom: 16px;
+    box-shadow: var(--qw-shadow-sm);
+}
+.qw-invoice-preview-card {
+    border-left: 4px solid var(--qw-primary);
+}
+.qw-invoice-preview-head h4,
+.qw-invoice-card-head h4 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--qw-text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.qw-invoice-preview-head h4 i,
+.qw-invoice-card-head h4 i {
+    color: var(--qw-primary);
+}
+.qw-invoice-preview-head p,
+.qw-invoice-card-head p {
+    margin: 0 0 12px;
+    color: var(--qw-text-secondary);
+    font-size: 13px;
+}
+.qw-invoice-preview-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.qw-invoice-preview-row input {
+    flex: 1;
+    min-width: 240px;
+}
+
+.qw-invoice-card-head {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    margin-bottom: 12px;
+    position: relative;
+}
+.qw-invoice-card-head > button {
+    position: absolute;
+    top: 0;
+    right: 0;
+}
+
+.qw-invoice-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.qw-invoice-status {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--qw-text-secondary);
+}
+.qw-invoice-status-ok { color: #15803d; }
+.qw-invoice-status-error { color: #b91c1c; }
+.qw-invoice-status-pending { color: #b45309; }
+
+/* Inputs compacts dans les tables admin */
+#invoice-template-config .data-table input.form-control {
+    padding: 6px 10px !important;
+    font-size: 13px !important;
+    height: auto !important;
+    width: 100%;
+}
+#invoice-template-config .data-table .btn-sm {
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+[data-theme="dark"] .qw-invoice-status-ok { color: #4ade80; }
+[data-theme="dark"] .qw-invoice-status-error { color: #f87171; }
+[data-theme="dark"] .qw-invoice-status-pending { color: #fbbf24; }
+
+/* =========================================================
+   FACTURE CRÉANCE — Config form + Vue Par Client actions
+   ========================================================= */
+
+/* Grille du formulaire du modèle créance (2 colonnes desktop, 1 mobile) */
+.qw-creance-tpl-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px 16px;
+    margin-bottom: 12px;
+}
+.qw-creance-tpl-grid .qw-span-2 {
+    grid-column: 1 / -1;
+}
+.qw-creance-tpl-grid .form-group {
+    margin-bottom: 0;
+}
+.qw-creance-tpl-grid .form-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--qw-text-secondary);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.qw-creance-tpl-grid .form-group input.form-control {
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+    height: auto !important;
+}
+
+/* Couleur : color picker + champ texte côte à côte */
+.qw-color-input-wrap {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+.qw-color-input-wrap input[type="color"] {
+    width: 44px;
+    min-width: 44px;
+    height: 36px;
+    padding: 2px;
+    border: 1px solid var(--qw-border);
+    border-radius: 6px;
+    cursor: pointer;
+    background: var(--qw-surface);
+}
+.qw-color-input-wrap input[type="text"] {
+    flex: 1;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace !important;
+    font-size: 12.5px !important;
+    text-transform: uppercase;
+}
+
+@media (max-width: 768px) {
+    .qw-creance-tpl-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Bouton "Générer toutes les factures" + hint dans Vue Par Client */
+.qw-client-actions-bar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    padding: 12px 16px;
+    background: var(--qw-primary-soft, #eff6ff);
+    border: 1px solid rgba(37, 99, 235, 0.18);
+    border-left: 4px solid var(--qw-primary);
+    border-radius: var(--qw-radius-lg);
+    margin-bottom: 12px;
+}
+.qw-client-actions-bar .btn {
+    flex: 0 0 auto;
+}
+.qw-client-actions-hint {
+    color: var(--qw-text-secondary);
+    font-size: 12.5px;
+    line-height: 1.4;
+    flex: 1;
+    min-width: 200px;
+}
+[data-theme="dark"] .qw-client-actions-bar {
+    background: rgba(37, 99, 235, 0.12);
+    border-color: rgba(37, 99, 235, 0.3);
+}
+
+/* Bouton "Facture" par ligne (compact, ghost) */
+.qw-btn-creance-invoice.btn-sm,
+.btn.btn-sm.qw-btn-creance-invoice {
+    padding: 4px 10px !important;
+    font-size: 11.5px !important;
+    line-height: 1.4 !important;
+    white-space: nowrap;
+}
+.qw-btn-creance-invoice i {
+    font-size: 10px;
+    margin-right: 3px;
+}
+
+/* =========================================================
+   DOCUMENTS COMPTABLES — lock screen + main view
+   ========================================================= */
+
+/* Lock screen : carte centrale avec icône cadenas */
+.qw-comptable-lock-card {
+    background: var(--qw-surface);
+    border: 1px solid var(--qw-border);
+    border-radius: var(--qw-radius-lg);
+    box-shadow: var(--qw-shadow-sm);
+    padding: 36px 28px 28px;
+    text-align: center;
+    max-width: 460px;
+    margin: 24px auto;
+}
+.qw-comptable-lock-icon {
+    width: 72px;
+    height: 72px;
+    margin: 0 auto 16px;
+    border-radius: 50%;
+    background: var(--qw-primary-soft, #eff6ff);
+    color: var(--qw-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+}
+.qw-comptable-lock-card h3 {
+    margin: 0 0 6px;
+    color: var(--qw-text);
+    font-size: 18px;
+    font-weight: 600;
+}
+.qw-comptable-lock-card > p {
+    color: var(--qw-text-secondary);
+    font-size: 13px;
+    margin: 0 auto 16px;
+    max-width: 380px;
+}
+.qw-comptable-lock-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    max-width: 380px;
+    margin-left: auto;
+    margin-right: auto;
+}
+.qw-comptable-lock-form input {
+    flex: 1;
+}
+.qw-comptable-lock-form .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+[data-theme="dark"] .qw-comptable-lock-icon {
+    background: rgba(37, 99, 235, 0.15);
+}
+
+/* Barre de statut quand session déverrouillée */
+.qw-comptable-status-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    background: rgba(34, 197, 94, 0.08);
+    border: 1px solid rgba(34, 197, 94, 0.25);
+    border-left: 4px solid #15803d;
+    border-radius: var(--qw-radius-lg);
+}
+.qw-comptable-status-bar .qw-pill {
+    font-size: 13px;
+    padding: 5px 12px;
+}
+.qw-comptable-status-bar .qw-pill i {
+    font-size: 11px;
+}
+[data-theme="dark"] .qw-comptable-status-bar {
+    background: rgba(34, 197, 94, 0.12);
+}
+
+/* Grid pour le formulaire d'upload (3 colonnes : libelle x2 + année puis fichier full width) */
+.qw-comptable-upload-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 12px 16px;
+}
+.qw-comptable-upload-grid .qw-span-2 {
+    grid-column: 1 / -1;
+}
+.qw-comptable-upload-grid .qw-span-3 {
+    grid-column: 1 / -1;
+}
+.qw-comptable-upload-grid .form-group {
+    margin-bottom: 0;
+}
+.qw-comptable-upload-grid .form-group label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--qw-text-secondary);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.qw-comptable-upload-grid .form-group input.form-control {
+    padding: 8px 12px !important;
+    font-size: 13px !important;
+    height: auto !important;
+}
+
+@media (max-width: 640px) {
+    .qw-comptable-upload-grid {
+        grid-template-columns: 1fr;
+    }
+    .qw-comptable-upload-grid .qw-span-2,
+    .qw-comptable-upload-grid .qw-span-3 {
+        grid-column: 1 / -1;
+    }
+}
+
+/* Filter row : Année + bouton refresh */
+.qw-comptable-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.qw-comptable-filter-row label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--qw-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.qw-comptable-filter-row select.form-control {
+    max-width: 160px;
+    padding: 6px 10px !important;
+    height: auto !important;
+}
+

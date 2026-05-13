@@ -14297,6 +14297,14 @@ function setupConfigTabs() {
                 document.getElementById('stock-permissions-config').classList.add('active');
                 // Initialiser les permissions lorsque l'onglet est activé
                 initStockVivantPermissions();
+            } else if (configType === 'invoice-template') {
+                document.getElementById('invoice-template-config').classList.add('active');
+                // Charger les 2 configs à l'ouverture de l'onglet (lazy)
+                if (typeof loadInvoiceTemplate === 'function') loadInvoiceTemplate();
+                if (typeof loadCreanceTemplate === 'function') loadCreanceTemplate();
+            } else if (configType === 'comptable-docs') {
+                document.getElementById('comptable-docs-config').classList.add('active');
+                if (typeof initComptableDocsModule === 'function') initComptableDocsModule();
             }
         });
     });
@@ -15773,6 +15781,42 @@ function renderCreanceGlobalResults(data) {
             if (creanceGlobalLastData) renderCreanceGlobalResults(creanceGlobalLastData);
         });
     });
+
+    // Handler : génération facture pour UN client (bouton par ligne)
+    resultsEl.querySelectorAll('.qw-btn-creance-invoice').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const clientName = btn.getAttribute('data-client-name') || '';
+            if (!clientName) return;
+            openCreanceInvoicePdf({ clientName });
+        });
+    });
+
+    // Handler : génération facture pour TOUS les clients (bouton en haut)
+    const allBtn = resultsEl.querySelector('#qw-btn-creance-invoice-all');
+    if (allBtn) {
+        allBtn.addEventListener('click', () => openCreanceInvoicePdf({ clientName: null }));
+    }
+}
+
+/**
+ * Ouvre le PDF de facture(s) créance dans un nouvel onglet.
+ * - clientName=null  -> batch tous clients (avec exclusions courantes)
+ * - clientName=X     -> 1 seul client (les exclusions sont alors ignorées
+ *   car l'utilisateur a explicitement cliqué sur ce client)
+ */
+function openCreanceInvoicePdf({ clientName }) {
+    const summary = (creanceGlobalLastData && creanceGlobalLastData.summary) || {};
+    const dateSelected = summary.date_selected || new Date().toISOString().split('T')[0];
+    const params = new URLSearchParams();
+    params.set('date', dateSelected);
+    if (clientName) {
+        params.set('client_name', clientName);
+    } else if (creanceGlobalExclusions && creanceGlobalExclusions.length > 0) {
+        // Pour le batch, on respecte les exclusions courantes de la vue
+        params.set('exclusionClients', creanceGlobalExclusions.join(';'));
+    }
+    const url = `/api/creance/global/invoice-pdf?${params.toString()}`;
+    window.open(url, '_blank', 'noopener');
 }
 
 /**
@@ -15890,6 +15934,13 @@ function renderCreanceGlobalByClient(data) {
         return `<span class="qw-amount ${cls}">${fmt(v)}</span>`;
     };
 
+    // Bouton "Facture" par ligne : ouvre /api/creance/global/invoice-pdf?client_name=X
+    const invoiceBtn = (clientName) => `
+        <button type="button" class="btn btn-sm btn-secondary qw-btn-creance-invoice"
+                data-client-name="${escapeHtml(clientName)}" title="Générer la facture MATA pour ce client">
+            <i class="fas fa-file-invoice"></i> Facture
+        </button>`;
+
     // Tableau pour la Partie 1
     const renderActifsTable = () => `
         <div class="table-container" style="margin-bottom: 18px;">
@@ -15903,6 +15954,7 @@ function renderCreanceGlobalByClient(data) {
                         <th>Dernière avance</th>
                         <th>Compte</th>
                         <th>Activité</th>
+                        <th style="width: 110px;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -15915,6 +15967,7 @@ function renderCreanceGlobalByClient(data) {
                             <td>${datePill(c.lastAvance, false)}</td>
                             <td>${portfolioBadge(c.portfolio)}</td>
                             <td>${stalenessPill(c)}</td>
+                            <td>${invoiceBtn(c.name)}</td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -15931,6 +15984,7 @@ function renderCreanceGlobalByClient(data) {
                         <th>Client</th>
                         <th style="text-align: right;">Solde</th>
                         <th>Compte</th>
+                        <th style="width: 110px;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -15940,6 +15994,7 @@ function renderCreanceGlobalByClient(data) {
                             <td><strong>${escapeHtml(c.name)}</strong></td>
                             <td style="text-align: right;">${soldeCell(c.solde)}</td>
                             <td>${portfolioBadge(c.portfolio)}</td>
+                            <td>${invoiceBtn(c.name)}</td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -15947,6 +16002,18 @@ function renderCreanceGlobalByClient(data) {
         </div>`;
 
     return `
+        <!-- Barre d'actions : génération de factures MATA (ancien format) -->
+        <div class="qw-client-actions-bar">
+            <button type="button" id="qw-btn-creance-invoice-all" class="btn btn-primary"
+                    title="Générer un PDF avec une facture MATA par client (page A4 par client)">
+                <i class="fas fa-file-invoice"></i> Générer toutes les factures (${allClients.length})
+            </button>
+            <span class="qw-client-actions-hint">
+                Factures au format MATA, 1 page par client. Modèle modifiable depuis
+                <strong>Config &gt; Modèle de facture &gt; Facture Créance</strong>.
+            </span>
+        </div>
+
         <!-- Récap mini-stats par client -->
         <div class="qw-client-summary">
             <div class="qw-client-summary-item">
@@ -20693,4 +20760,880 @@ function updateValidationStatusUI(statusData) {
         message.textContent = 'Validation des dépenses désactivée';
         details.textContent = 'Les dépenses peuvent dépasser le solde du compte - Mode libre activé';
     }
+}
+
+// =====================================================
+// MODULE : Modèle de facture (admin)
+// =====================================================
+// Onglet "Modèle de facture" dans la section Admin Config.
+// - Charge GET /api/invoice-template (alias + profils)
+// - Permet d'ajouter/modifier/supprimer en place dans 2 tableaux
+// - Bouton "Aperçu" -> ouvre /api/invoice-template/preview dans un onglet
+// - Bouton "Enregistrer" -> PUT vers /api/invoice-template
+// État local pour permettre l'annulation sans refetch immédiat.
+let invoiceTemplateState = { aliases: {}, profiles: {}, defaults: { aliases: {}, profiles: {} }, dirty: false };
+let invoiceTemplateListenersAttached = false;
+
+function setInvoiceTemplateStatus(text, kind) {
+    const el = document.getElementById('invoice-template-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'qw-invoice-status' + (kind ? ' qw-invoice-status-' + kind : '');
+}
+function markInvoiceTemplateDirty(isDirty) {
+    invoiceTemplateState.dirty = isDirty;
+    setInvoiceTemplateStatus(isDirty ? 'Modifications non enregistrées' : '', isDirty ? 'pending' : '');
+}
+
+async function loadInvoiceTemplate() {
+    attachInvoiceTemplateListenersOnce();
+    setInvoiceTemplateStatus('Chargement…', '');
+    try {
+        const r = await fetch('/api/invoice-template');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        invoiceTemplateState.aliases = Object.assign({}, data.aliases || {});
+        invoiceTemplateState.profiles = JSON.parse(JSON.stringify(data.profiles || {}));
+        invoiceTemplateState.defaults = data.defaults || { aliases: {}, profiles: {} };
+        renderInvoiceTemplateTables();
+        markInvoiceTemplateDirty(false);
+        setInvoiceTemplateStatus('Configuration chargée.', 'ok');
+        setTimeout(() => { if (!invoiceTemplateState.dirty) setInvoiceTemplateStatus('', ''); }, 2000);
+    } catch (err) {
+        console.error('Erreur chargement /api/invoice-template:', err);
+        setInvoiceTemplateStatus('Erreur de chargement : ' + (err.message || err), 'error');
+    }
+}
+
+function renderInvoiceTemplateTables() {
+    renderInvoiceProfilesTable();
+    renderInvoiceAliasesTable();
+}
+
+function renderInvoiceProfilesTable() {
+    const tbody = document.getElementById('invoice-profiles-tbody');
+    if (!tbody) return;
+    const entries = Object.entries(invoiceTemplateState.profiles);
+    if (entries.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--qw-text-secondary);">Aucun profil. Cliquez sur "Ajouter un profil" pour en créer un.</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = entries.map(([canonical, p]) => `
+        <tr data-canonical="${escapeHtml(canonical)}">
+            <td><input type="text" class="form-control qw-inp-canonical" value="${escapeHtml(canonical)}" maxlength="120"></td>
+            <td><input type="text" class="form-control qw-inp-display" value="${escapeHtml(p.displayName || '')}" maxlength="120" placeholder="ex. Aly Ka, marchand de bétail"></td>
+            <td><input type="text" class="form-control qw-inp-location" value="${escapeHtml(p.location || '')}" maxlength="120" placeholder="ex. Foirail de Sicap Mbao"></td>
+            <td><input type="text" class="form-control qw-inp-phone" value="${escapeHtml(p.phone || '')}" maxlength="40" placeholder="ex. 778625595"></td>
+            <td>
+                <button type="button" class="btn btn-danger btn-sm qw-btn-del-profile" title="Supprimer ce profil">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+
+    // Listeners
+    tbody.querySelectorAll('tr').forEach(tr => {
+        tr.querySelectorAll('input').forEach(inp => {
+            inp.addEventListener('input', () => collectProfilesFromTable());
+        });
+        tr.querySelector('.qw-btn-del-profile').addEventListener('click', () => {
+            tr.remove();
+            collectProfilesFromTable();
+            if (Object.keys(invoiceTemplateState.profiles).length === 0) renderInvoiceProfilesTable();
+        });
+    });
+}
+
+function collectProfilesFromTable() {
+    const tbody = document.getElementById('invoice-profiles-tbody');
+    if (!tbody) return;
+    const next = {};
+    tbody.querySelectorAll('tr').forEach(tr => {
+        const canonicalInput = tr.querySelector('.qw-inp-canonical');
+        if (!canonicalInput) return;
+        const canonical = canonicalInput.value.trim();
+        if (!canonical) return;
+        next[canonical] = {
+            displayName: tr.querySelector('.qw-inp-display').value.trim(),
+            location: tr.querySelector('.qw-inp-location').value.trim(),
+            phone: tr.querySelector('.qw-inp-phone').value.trim()
+        };
+    });
+    invoiceTemplateState.profiles = next;
+    markInvoiceTemplateDirty(true);
+}
+
+function renderInvoiceAliasesTable() {
+    const tbody = document.getElementById('invoice-aliases-tbody');
+    if (!tbody) return;
+    const entries = Object.entries(invoiceTemplateState.aliases);
+    if (entries.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--qw-text-secondary);">Aucun alias. Cliquez sur "Ajouter un alias" pour en créer un.</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = entries.map(([alias, canonical]) => `
+        <tr>
+            <td><input type="text" class="form-control qw-inp-alias" value="${escapeHtml(alias)}" maxlength="120" placeholder="ex. aly ka"></td>
+            <td><input type="text" class="form-control qw-inp-alias-canonical" value="${escapeHtml(canonical)}" maxlength="120" placeholder="ex. Ali KA"></td>
+            <td>
+                <button type="button" class="btn btn-danger btn-sm qw-btn-del-alias" title="Supprimer cet alias">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        </tr>
+    `).join('');
+
+    tbody.querySelectorAll('tr').forEach(tr => {
+        tr.querySelectorAll('input').forEach(inp => {
+            inp.addEventListener('input', () => collectAliasesFromTable());
+        });
+        tr.querySelector('.qw-btn-del-alias').addEventListener('click', () => {
+            tr.remove();
+            collectAliasesFromTable();
+            if (Object.keys(invoiceTemplateState.aliases).length === 0) renderInvoiceAliasesTable();
+        });
+    });
+}
+
+function collectAliasesFromTable() {
+    const tbody = document.getElementById('invoice-aliases-tbody');
+    if (!tbody) return;
+    const next = {};
+    tbody.querySelectorAll('tr').forEach(tr => {
+        const aliasInput = tr.querySelector('.qw-inp-alias');
+        const canonicalInput = tr.querySelector('.qw-inp-alias-canonical');
+        if (!aliasInput || !canonicalInput) return;
+        const alias = aliasInput.value.trim().toLowerCase().replace(/\s+/g, ' ');
+        const canonical = canonicalInput.value.trim();
+        if (!alias || !canonical) return;
+        next[alias] = canonical;
+    });
+    invoiceTemplateState.aliases = next;
+    markInvoiceTemplateDirty(true);
+}
+
+function addEmptyInvoiceProfileRow() {
+    const tbody = document.getElementById('invoice-profiles-tbody');
+    if (!tbody) return;
+    // Si le tbody contient seulement le placeholder, on le nettoie
+    if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="text" class="form-control qw-inp-canonical" value="" maxlength="120" placeholder="ex. Mamadou DIOP"></td>
+        <td><input type="text" class="form-control qw-inp-display" value="" maxlength="120" placeholder="ex. Mamadou Diop, boucher"></td>
+        <td><input type="text" class="form-control qw-inp-location" value="" maxlength="120" placeholder="ex. Marché Sandaga"></td>
+        <td><input type="text" class="form-control qw-inp-phone" value="" maxlength="40" placeholder="ex. 776543210"></td>
+        <td>
+            <button type="button" class="btn btn-danger btn-sm qw-btn-del-profile" title="Supprimer ce profil">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>`;
+    tbody.appendChild(tr);
+    tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => collectProfilesFromTable()));
+    tr.querySelector('.qw-btn-del-profile').addEventListener('click', () => {
+        tr.remove();
+        collectProfilesFromTable();
+        if (Object.keys(invoiceTemplateState.profiles).length === 0) renderInvoiceProfilesTable();
+    });
+    tr.querySelector('.qw-inp-canonical').focus();
+}
+
+function addEmptyInvoiceAliasRow() {
+    const tbody = document.getElementById('invoice-aliases-tbody');
+    if (!tbody) return;
+    if (tbody.querySelector('td[colspan]')) tbody.innerHTML = '';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+        <td><input type="text" class="form-control qw-inp-alias" value="" maxlength="120" placeholder="ex. aly ka"></td>
+        <td><input type="text" class="form-control qw-inp-alias-canonical" value="" maxlength="120" placeholder="ex. Ali KA"></td>
+        <td>
+            <button type="button" class="btn btn-danger btn-sm qw-btn-del-alias" title="Supprimer cet alias">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>`;
+    tbody.appendChild(tr);
+    tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => collectAliasesFromTable()));
+    tr.querySelector('.qw-btn-del-alias').addEventListener('click', () => {
+        tr.remove();
+        collectAliasesFromTable();
+        if (Object.keys(invoiceTemplateState.aliases).length === 0) renderInvoiceAliasesTable();
+    });
+    tr.querySelector('.qw-inp-alias').focus();
+}
+
+async function saveInvoiceTemplate() {
+    collectProfilesFromTable();
+    collectAliasesFromTable();
+    setInvoiceTemplateStatus('Enregistrement…', 'pending');
+    try {
+        const r = await fetch('/api/invoice-template', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                aliases: invoiceTemplateState.aliases,
+                profiles: invoiceTemplateState.profiles
+            })
+        });
+        if (!r.ok) {
+            const txt = await r.text();
+            throw new Error('HTTP ' + r.status + ' — ' + txt.slice(0, 200));
+        }
+        const data = await r.json();
+        invoiceTemplateState.aliases = data.aliases || {};
+        invoiceTemplateState.profiles = data.profiles || {};
+        renderInvoiceTemplateTables();
+        markInvoiceTemplateDirty(false);
+        setInvoiceTemplateStatus('Modifications enregistrées.', 'ok');
+        if (typeof showNotification === 'function') showNotification('Modèle de facture enregistré', 'success');
+    } catch (err) {
+        console.error('Erreur PUT /api/invoice-template:', err);
+        setInvoiceTemplateStatus('Erreur : ' + (err.message || err), 'error');
+        if (typeof showNotification === 'function') showNotification('Erreur lors de l\'enregistrement du modèle de facture', 'error');
+    }
+}
+
+async function openInvoicePreview() {
+    const supplierInput = document.getElementById('invoice-preview-supplier');
+    const supplier = (supplierInput && supplierInput.value || '').trim();
+    // Si l'utilisateur a fait des modifs non sauvegardées, prévenir
+    // via le modal moderne (pas de confirm() natif).
+    if (invoiceTemplateState.dirty) {
+        const proceed = await confirmModal({
+            title: 'Modifications non enregistrées',
+            message: "Tu as des modifications non enregistrées dans le modèle. L'aperçu utilise la version actuellement <strong>sauvegardée en base</strong>, pas tes modifications en cours. Continuer quand même ?",
+            okLabel: 'Continuer',
+            cancelLabel: 'Annuler'
+        });
+        if (!proceed) return;
+    }
+    const params = new URLSearchParams();
+    if (supplier) params.set('supplier', supplier);
+    const url = '/api/invoice-template/preview' + (params.toString() ? ('?' + params.toString()) : '');
+    window.open(url, '_blank', 'noopener');
+}
+
+function attachInvoiceTemplateListenersOnce() {
+    if (invoiceTemplateListenersAttached) return;
+    const saveBtn = document.getElementById('invoice-template-save-btn');
+    const reloadBtn = document.getElementById('invoice-template-reload-btn');
+    const previewBtn = document.getElementById('invoice-preview-btn');
+    const addProfileBtn = document.getElementById('invoice-add-profile-btn');
+    const addAliasBtn = document.getElementById('invoice-add-alias-btn');
+    const supplierInput = document.getElementById('invoice-preview-supplier');
+    if (saveBtn) saveBtn.addEventListener('click', saveInvoiceTemplate);
+    if (reloadBtn) reloadBtn.addEventListener('click', loadInvoiceTemplate);
+    if (previewBtn) previewBtn.addEventListener('click', openInvoicePreview);
+    if (addProfileBtn) addProfileBtn.addEventListener('click', addEmptyInvoiceProfileRow);
+    if (addAliasBtn) addAliasBtn.addEventListener('click', addEmptyInvoiceAliasRow);
+    if (supplierInput) {
+        supplierInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                openInvoicePreview();
+            }
+        });
+    }
+    invoiceTemplateListenersAttached = true;
+}
+
+// =====================================================
+// MODULE : Modèle de FACTURE CRÉANCE (ancien format MATA)
+// =====================================================
+// Formulaire dans le même onglet "Modèle de facture" sous le bloc
+// supplier templates. Charge GET /api/invoice-creance-template,
+// permet d'éditer + Enregistrer (PUT) + Aperçu (ouverture PDF).
+const CREANCE_TPL_FIELDS = [
+    { key: 'company_name',   id: 'creance-tpl-company' },
+    { key: 'address_line_1', id: 'creance-tpl-addr1' },
+    { key: 'address_line_2', id: 'creance-tpl-addr2' },
+    { key: 'address_line_3', id: 'creance-tpl-addr3' },
+    { key: 'address_line_4', id: 'creance-tpl-addr4' },
+    { key: 'designation',    id: 'creance-tpl-designation' },
+    { key: 'categories',     id: 'creance-tpl-categories' },
+    { key: 'title_color',    id: 'creance-tpl-color' }
+];
+let creanceTemplateState = { data: {}, dirty: false };
+let creanceTemplateListenersAttached = false;
+
+function setCreanceTemplateStatus(text, kind) {
+    const el = document.getElementById('creance-tpl-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'qw-invoice-status' + (kind ? ' qw-invoice-status-' + kind : '');
+}
+function markCreanceTemplateDirty(isDirty) {
+    creanceTemplateState.dirty = isDirty;
+    setCreanceTemplateStatus(isDirty ? 'Modifications non enregistrées' : '', isDirty ? 'pending' : '');
+}
+
+async function loadCreanceTemplate() {
+    attachCreanceTemplateListenersOnce();
+    setCreanceTemplateStatus('Chargement…', '');
+    try {
+        const r = await fetch('/api/invoice-creance-template');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        creanceTemplateState.data = data || {};
+        // Remplir les inputs
+        CREANCE_TPL_FIELDS.forEach(f => {
+            const el = document.getElementById(f.id);
+            if (el) el.value = (data && data[f.key]) || '';
+        });
+        // Sync color picker
+        const picker = document.getElementById('creance-tpl-color-picker');
+        if (picker) picker.value = (data && /^#[0-9a-fA-F]{6}$/.test(data.title_color || '')) ? data.title_color : '#1e3a8a';
+        markCreanceTemplateDirty(false);
+        setCreanceTemplateStatus('Configuration chargée.', 'ok');
+        setTimeout(() => { if (!creanceTemplateState.dirty) setCreanceTemplateStatus('', ''); }, 2000);
+    } catch (err) {
+        console.error('Erreur chargement /api/invoice-creance-template:', err);
+        setCreanceTemplateStatus('Erreur de chargement : ' + (err.message || err), 'error');
+    }
+}
+
+function collectCreanceTemplateFromForm() {
+    const out = {};
+    CREANCE_TPL_FIELDS.forEach(f => {
+        const el = document.getElementById(f.id);
+        if (el) out[f.key] = el.value.trim();
+    });
+    return out;
+}
+
+async function saveCreanceTemplate() {
+    const payload = collectCreanceTemplateFromForm();
+    // Validation soft côté client (le serveur revalide)
+    if (payload.title_color && !/^#[0-9a-fA-F]{6}$/.test(payload.title_color)) {
+        setCreanceTemplateStatus('Couleur invalide : utiliser #RRGGBB (6 caractères hex)', 'error');
+        return;
+    }
+    setCreanceTemplateStatus('Enregistrement…', 'pending');
+    try {
+        const r = await fetch('/api/invoice-creance-template', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!r.ok) {
+            const txt = await r.text();
+            throw new Error('HTTP ' + r.status + ' — ' + txt.slice(0, 200));
+        }
+        const data = await r.json();
+        creanceTemplateState.data = data;
+        // Rafraîchir les valeurs (le serveur peut avoir trim/normalisé)
+        CREANCE_TPL_FIELDS.forEach(f => {
+            const el = document.getElementById(f.id);
+            if (el && data[f.key] !== undefined) el.value = data[f.key];
+        });
+        markCreanceTemplateDirty(false);
+        setCreanceTemplateStatus('Modèle créance enregistré.', 'ok');
+        if (typeof showNotification === 'function') showNotification('Modèle de facture créance enregistré', 'success');
+    } catch (err) {
+        console.error('Erreur PUT /api/invoice-creance-template:', err);
+        setCreanceTemplateStatus('Erreur : ' + (err.message || err), 'error');
+        if (typeof showNotification === 'function') showNotification('Erreur lors de l\'enregistrement du modèle créance', 'error');
+    }
+}
+
+async function openCreanceTemplatePreview() {
+    if (creanceTemplateState.dirty) {
+        const proceed = await confirmModal({
+            title: 'Modifications non enregistrées',
+            message: "Tu as des modifications non enregistrées. L'aperçu utilise la version <strong>sauvegardée en base</strong>, pas tes modifications en cours. Continuer ?",
+            okLabel: 'Continuer',
+            cancelLabel: 'Annuler'
+        });
+        if (!proceed) return;
+    }
+    window.open('/api/invoice-creance-template/preview', '_blank', 'noopener');
+}
+
+function attachCreanceTemplateListenersOnce() {
+    if (creanceTemplateListenersAttached) return;
+    // Inputs texte -> dirty
+    CREANCE_TPL_FIELDS.forEach(f => {
+        const el = document.getElementById(f.id);
+        if (el) el.addEventListener('input', () => markCreanceTemplateDirty(true));
+    });
+    // Color picker <-> color text input synchronisés
+    const picker = document.getElementById('creance-tpl-color-picker');
+    const colorInput = document.getElementById('creance-tpl-color');
+    if (picker && colorInput) {
+        picker.addEventListener('input', () => {
+            colorInput.value = picker.value;
+            markCreanceTemplateDirty(true);
+        });
+        colorInput.addEventListener('input', () => {
+            if (/^#[0-9a-fA-F]{6}$/.test(colorInput.value)) picker.value = colorInput.value;
+            markCreanceTemplateDirty(true);
+        });
+    }
+    // Boutons
+    const saveBtn = document.getElementById('creance-tpl-save-btn');
+    const reloadBtn = document.getElementById('creance-tpl-reload-btn');
+    const previewBtn = document.getElementById('creance-tpl-preview-btn');
+    if (saveBtn) saveBtn.addEventListener('click', saveCreanceTemplate);
+    if (reloadBtn) reloadBtn.addEventListener('click', loadCreanceTemplate);
+    if (previewBtn) previewBtn.addEventListener('click', openCreanceTemplatePreview);
+    creanceTemplateListenersAttached = true;
+}
+
+// =====================================================
+// MODULE : Documents comptables
+// =====================================================
+// Onglet "Documents comptables" dans Config. Verrouillé par mot de passe
+// partagé (configurable par admin/DG/PCA). TTL de 30 min d'inactivité.
+let comptableState = {
+    listenersAttached: false,
+    passwordSet: false,
+    unlocked: false,
+    ttlIntervalId: null,
+    ttlDeadline: 0,
+    currentYear: new Date().getFullYear()
+};
+
+function setComptablePwdStatus(text, kind) {
+    const el = document.getElementById('comptable-pwd-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'qw-invoice-status' + (kind ? ' qw-invoice-status-' + kind : '');
+}
+function setComptableUploadStatus(text, kind) {
+    const el = document.getElementById('comptable-upload-status');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'qw-invoice-status' + (kind ? ' qw-invoice-status-' + kind : '');
+}
+function setComptableUnlockError(text) {
+    const el = document.getElementById('comptable-unlock-error');
+    if (el) el.textContent = text || '';
+}
+
+function formatFileSize(bytes) {
+    const n = parseFloat(bytes) || 0;
+    if (n < 1024) return n + ' o';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' Ko';
+    if (n < 1024 * 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + ' Mo';
+    return (n / (1024 * 1024 * 1024)).toFixed(2) + ' Go';
+}
+
+async function initComptableDocsModule() {
+    attachComptableListenersOnce();
+    // Pré-remplir année courante dans l'upload et le filtre
+    const now = new Date().getFullYear();
+    const yearInput = document.getElementById('comptable-upload-year');
+    if (yearInput && !yearInput.value) yearInput.value = now;
+    populateComptableYearFilter();
+    await refreshComptableStatus();
+}
+
+function populateComptableYearFilter() {
+    const sel = document.getElementById('comptable-filter-year');
+    if (!sel || sel.options.length > 0) return;
+    const currentYear = new Date().getFullYear();
+    // 10 années en arrière + 2 en avant
+    const years = [];
+    for (let y = currentYear + 2; y >= currentYear - 10; y--) years.push(y);
+    sel.innerHTML = years.map(y => `<option value="${y}" ${y === currentYear ? 'selected' : ''}>${y}</option>`).join('');
+    comptableState.currentYear = currentYear;
+}
+
+async function refreshComptableStatus() {
+    try {
+        const r = await fetch('/api/comptable/status');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const data = await r.json();
+        comptableState.passwordSet = !!data.password_set;
+        comptableState.unlocked = !!data.unlocked;
+        updateComptablePwdStateBadge();
+        if (comptableState.unlocked) {
+            comptableState.ttlDeadline = Date.now() + (data.expires_in_ms || 0);
+            showComptableMainView();
+        } else {
+            showComptableLockScreen();
+        }
+    } catch (err) {
+        console.error('Erreur GET /api/comptable/status:', err);
+        showComptableLockScreen();
+        setComptableUnlockError('Erreur de chargement du statut : ' + (err.message || err));
+    }
+}
+
+function updateComptablePwdStateBadge() {
+    const badge = document.getElementById('comptable-pwd-state');
+    const currentWrap = document.getElementById('comptable-pwd-current-wrap');
+    if (!badge) return;
+    if (comptableState.passwordSet) {
+        badge.textContent = 'État : mot de passe défini';
+        badge.className = 'qw-pill qw-pill-success';
+        if (currentWrap) currentWrap.style.display = '';
+    } else {
+        badge.textContent = 'État : aucun mot de passe configuré';
+        badge.className = 'qw-pill qw-pill-warning';
+        if (currentWrap) currentWrap.style.display = 'none';
+    }
+}
+
+function showComptableLockScreen() {
+    const lock = document.getElementById('comptable-lock-screen');
+    const main = document.getElementById('comptable-main');
+    if (lock) lock.style.display = '';
+    if (main) main.style.display = 'none';
+    // Adapter le message selon que le mot de passe est défini ou pas
+    const msg = document.getElementById('comptable-lock-msg');
+    if (msg) {
+        msg.textContent = comptableState.passwordSet
+            ? "Cette section est verrouillée par un mot de passe partagé."
+            : "Aucun mot de passe n'a encore été configuré pour cette section. Demandez à un administrateur de le définir.";
+    }
+    const input = document.getElementById('comptable-unlock-pwd');
+    const btn = document.getElementById('comptable-unlock-btn');
+    if (input) input.disabled = !comptableState.passwordSet;
+    if (btn) btn.disabled = !comptableState.passwordSet;
+    stopComptableTtlCountdown();
+}
+
+function showComptableMainView() {
+    const lock = document.getElementById('comptable-lock-screen');
+    const main = document.getElementById('comptable-main');
+    if (lock) lock.style.display = 'none';
+    if (main) main.style.display = '';
+    setComptableUnlockError('');
+    startComptableTtlCountdown();
+    loadComptableDocuments();
+}
+
+function startComptableTtlCountdown() {
+    stopComptableTtlCountdown();
+    const tick = () => {
+        const ms = Math.max(0, comptableState.ttlDeadline - Date.now());
+        const el = document.getElementById('comptable-ttl-remaining');
+        if (el) {
+            const totalSec = Math.floor(ms / 1000);
+            const m = Math.floor(totalSec / 60);
+            const s = totalSec % 60;
+            el.textContent = `${m}:${String(s).padStart(2, '0')}`;
+        }
+        if (ms <= 0) {
+            comptableState.unlocked = false;
+            stopComptableTtlCountdown();
+            showComptableLockScreen();
+        }
+    };
+    tick();
+    comptableState.ttlIntervalId = setInterval(tick, 1000);
+}
+function stopComptableTtlCountdown() {
+    if (comptableState.ttlIntervalId) {
+        clearInterval(comptableState.ttlIntervalId);
+        comptableState.ttlIntervalId = null;
+    }
+}
+
+async function unlockComptable() {
+    const input = document.getElementById('comptable-unlock-pwd');
+    const pwd = input ? input.value : '';
+    if (!pwd) {
+        setComptableUnlockError('Mot de passe requis.');
+        return;
+    }
+    setComptableUnlockError('');
+    try {
+        const r = await fetch('/api/comptable/unlock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pwd })
+        });
+        if (!r.ok) {
+            const data = await r.json().catch(() => ({}));
+            throw new Error(data.error || ('HTTP ' + r.status));
+        }
+        const data = await r.json();
+        comptableState.unlocked = true;
+        comptableState.ttlDeadline = Date.now() + (data.expires_in_ms || 0);
+        if (input) input.value = '';
+        showComptableMainView();
+    } catch (err) {
+        setComptableUnlockError(err.message || 'Erreur de déverrouillage');
+    }
+}
+
+async function lockComptable() {
+    try { await fetch('/api/comptable/lock', { method: 'POST' }); } catch (_) {}
+    comptableState.unlocked = false;
+    showComptableLockScreen();
+}
+
+async function loadComptableDocuments() {
+    const tbody = document.getElementById('comptable-docs-tbody');
+    const sel = document.getElementById('comptable-filter-year');
+    if (!tbody || !sel) return;
+    const year = parseInt(sel.value, 10) || new Date().getFullYear();
+    comptableState.currentYear = year;
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--qw-text-secondary);">Chargement…</td></tr>`;
+    try {
+        const r = await fetch('/api/comptable/documents?year=' + encodeURIComponent(year));
+        if (r.status === 423) {
+            comptableState.unlocked = false;
+            showComptableLockScreen();
+            return;
+        }
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const docs = await r.json();
+        if (!docs || docs.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--qw-text-secondary);">Aucun document pour ${year}</td></tr>`;
+            return;
+        }
+        tbody.innerHTML = docs.map(d => `
+            <tr data-doc-id="${d.id}">
+                <td><strong>${escapeHtml(d.libelle || '')}</strong></td>
+                <td>${d.year}</td>
+                <td>
+                    <span title="${escapeHtml(d.original_filename || '')}" style="color: var(--qw-text-secondary); font-size: 12px;">
+                        ${escapeHtml((d.original_filename || '').slice(0, 50))}
+                    </span>
+                </td>
+                <td>${formatFileSize(d.size_bytes)}</td>
+                <td>${d.uploaded_at ? new Date(d.uploaded_at).toLocaleString('fr-FR') : ''}</td>
+                <td>${escapeHtml(d.uploaded_by_name || '')}</td>
+                <td>
+                    <a href="/api/comptable/documents/${d.id}/download" target="_blank" rel="noopener" class="btn btn-secondary btn-sm" title="Télécharger / Voir">
+                        <i class="fas fa-download"></i>
+                    </a>
+                    <button type="button" class="btn btn-danger btn-sm qw-btn-delete-comptable-doc" data-doc-id="${d.id}" data-libelle="${escapeHtml(d.libelle || '')}" title="Supprimer">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+        // Attach delete handlers
+        tbody.querySelectorAll('.qw-btn-delete-comptable-doc').forEach(btn => {
+            btn.addEventListener('click', () => deleteComptableDocument(btn));
+        });
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--qw-text-secondary);">Erreur : ${escapeHtml(err.message || String(err))}</td></tr>`;
+    }
+}
+
+async function uploadComptableDocument(event) {
+    event.preventDefault();
+    const fileInput = document.getElementById('comptable-upload-file');
+    const libelleInput = document.getElementById('comptable-upload-libelle');
+    const yearInput = document.getElementById('comptable-upload-year');
+    if (!fileInput || !libelleInput || !yearInput) return;
+    if (!fileInput.files || fileInput.files.length === 0) {
+        setComptableUploadStatus('Sélectionne un fichier.', 'error');
+        return;
+    }
+    const file = fileInput.files[0];
+    const MAX = 50 * 1024 * 1024;
+    if (file.size > MAX) {
+        setComptableUploadStatus('Fichier trop volumineux (max 50 Mo).', 'error');
+        return;
+    }
+    const libelle = libelleInput.value.trim();
+    const year = parseInt(yearInput.value, 10);
+    if (!libelle) {
+        setComptableUploadStatus('Libellé requis.', 'error');
+        return;
+    }
+    if (!year || year < 2000 || year > 2100) {
+        setComptableUploadStatus('Année invalide.', 'error');
+        return;
+    }
+    setComptableUploadStatus('Téléversement en cours…', 'pending');
+    try {
+        const fd = new FormData();
+        fd.append('libelle', libelle);
+        fd.append('year', String(year));
+        fd.append('file', file);
+        const r = await fetch('/api/comptable/documents', { method: 'POST', body: fd });
+        if (r.status === 423) {
+            comptableState.unlocked = false;
+            showComptableLockScreen();
+            return;
+        }
+        if (!r.ok) {
+            const data = await r.json().catch(() => ({}));
+            throw new Error(data.error || ('HTTP ' + r.status));
+        }
+        await r.json();
+        setComptableUploadStatus('Document téléversé.', 'ok');
+        fileInput.value = '';
+        libelleInput.value = '';
+        // Si l'année uploadée n'est pas l'année du filtre, on la sélectionne
+        const sel = document.getElementById('comptable-filter-year');
+        if (sel && parseInt(sel.value, 10) !== year) {
+            // Ajouter l'option si pas présente
+            if (![...sel.options].some(o => parseInt(o.value, 10) === year)) {
+                const opt = document.createElement('option');
+                opt.value = String(year);
+                opt.textContent = String(year);
+                sel.insertBefore(opt, sel.firstChild);
+            }
+            sel.value = String(year);
+        }
+        await loadComptableDocuments();
+        setTimeout(() => setComptableUploadStatus('', ''), 2000);
+    } catch (err) {
+        setComptableUploadStatus('Erreur : ' + (err.message || err), 'error');
+    }
+}
+
+async function deleteComptableDocument(btn) {
+    const docId = btn.getAttribute('data-doc-id');
+    const libelle = btn.getAttribute('data-libelle') || '';
+    if (!docId) return;
+    // Modal qui demande le mot de passe
+    const password = await promptComptableDeletePassword(libelle);
+    if (password === null) return; // annulé
+    try {
+        const r = await fetch('/api/comptable/documents/' + encodeURIComponent(docId), {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password })
+        });
+        if (r.status === 423) {
+            comptableState.unlocked = false;
+            showComptableLockScreen();
+            return;
+        }
+        if (!r.ok) {
+            const data = await r.json().catch(() => ({}));
+            throw new Error(data.error || ('HTTP ' + r.status));
+        }
+        if (typeof showNotification === 'function') showNotification('Document supprimé', 'success');
+        await loadComptableDocuments();
+    } catch (err) {
+        if (typeof showNotification === 'function') showNotification('Erreur : ' + (err.message || err), 'error');
+    }
+}
+
+/**
+ * Modal "Confirmer suppression" avec champ mot de passe. Réutilise les
+ * classes confirm-modal-* du modal partagé pour le style.
+ * Retourne le mot de passe saisi ou null si annulé.
+ */
+function promptComptableDeletePassword(libelle) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'confirm-modal-overlay';
+        overlay.setAttribute('role', 'dialog');
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.innerHTML = `
+            <div class="confirm-modal-dialog confirm-modal-danger">
+                <div class="confirm-modal-title">Confirmer la suppression</div>
+                <div class="confirm-modal-message">
+                    Vous êtes sur le point de supprimer définitivement le document :<br>
+                    <strong>${escapeHtml(libelle || 'ce document')}</strong>.<br>
+                    Pour confirmer, retapez le mot de passe d'accès.
+                </div>
+                <div class="form-group" style="margin: 10px 0 0;">
+                    <input type="password" id="qw-comptable-del-pwd" class="form-control" placeholder="Mot de passe d'accès" autocomplete="off">
+                    <small id="qw-comptable-del-err" style="color: #b91c1c; display: block; min-height: 16px;"></small>
+                </div>
+                <div class="confirm-modal-actions">
+                    <button type="button" class="btn btn-secondary confirm-modal-cancel" data-action="cancel">Annuler</button>
+                    <button type="button" class="btn btn-danger confirm-modal-ok" data-action="confirm">
+                        <i class="fas fa-trash"></i> Supprimer
+                    </button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const pwdInput = overlay.querySelector('#qw-comptable-del-pwd');
+        const errSpan = overlay.querySelector('#qw-comptable-del-err');
+        setTimeout(() => pwdInput && pwdInput.focus(), 50);
+
+        const cleanup = () => {
+            try { document.body.removeChild(overlay); } catch (_) {}
+        };
+        const onCancel = () => { cleanup(); resolve(null); };
+        const onConfirm = () => {
+            const v = pwdInput ? pwdInput.value : '';
+            if (!v) {
+                if (errSpan) errSpan.textContent = 'Mot de passe requis.';
+                return;
+            }
+            cleanup();
+            resolve(v);
+        };
+        overlay.querySelector('[data-action="cancel"]').addEventListener('click', onCancel);
+        overlay.querySelector('[data-action="confirm"]').addEventListener('click', onConfirm);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) onCancel(); });
+        pwdInput && pwdInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }
+            if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
+        });
+    });
+}
+
+async function saveComptablePassword() {
+    const newPwd = document.getElementById('comptable-pwd-new');
+    const confirmPwd = document.getElementById('comptable-pwd-confirm');
+    const currentPwd = document.getElementById('comptable-pwd-current');
+    if (!newPwd || !confirmPwd) return;
+    const newVal = newPwd.value;
+    const confirmVal = confirmPwd.value;
+    if (!newVal || newVal.length < 6) {
+        setComptablePwdStatus('Le nouveau mot de passe doit faire au moins 6 caractères.', 'error');
+        return;
+    }
+    if (newVal !== confirmVal) {
+        setComptablePwdStatus('Les deux mots de passe ne correspondent pas.', 'error');
+        return;
+    }
+    setComptablePwdStatus('Enregistrement…', 'pending');
+    try {
+        const body = { newPassword: newVal };
+        if (comptableState.passwordSet && currentPwd && currentPwd.value) {
+            body.currentPassword = currentPwd.value;
+        }
+        const r = await fetch('/api/comptable/password', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!r.ok) {
+            const data = await r.json().catch(() => ({}));
+            throw new Error(data.error || ('HTTP ' + r.status));
+        }
+        setComptablePwdStatus('Mot de passe enregistré. Tous les utilisateurs devront re-déverrouiller.', 'ok');
+        newPwd.value = '';
+        confirmPwd.value = '';
+        if (currentPwd) currentPwd.value = '';
+        // Re-fetch status pour mettre à jour le badge + verrouiller la session courante
+        await refreshComptableStatus();
+    } catch (err) {
+        setComptablePwdStatus('Erreur : ' + (err.message || err), 'error');
+    }
+}
+
+function attachComptableListenersOnce() {
+    if (comptableState.listenersAttached) return;
+
+    const unlockBtn = document.getElementById('comptable-unlock-btn');
+    const unlockPwd = document.getElementById('comptable-unlock-pwd');
+    if (unlockBtn) unlockBtn.addEventListener('click', unlockComptable);
+    if (unlockPwd) {
+        unlockPwd.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); unlockComptable(); }
+        });
+    }
+
+    const lockBtn = document.getElementById('comptable-lock-btn');
+    if (lockBtn) lockBtn.addEventListener('click', lockComptable);
+
+    const uploadForm = document.getElementById('comptable-upload-form');
+    if (uploadForm) uploadForm.addEventListener('submit', uploadComptableDocument);
+
+    const refreshBtn = document.getElementById('comptable-refresh-btn');
+    const filterSel = document.getElementById('comptable-filter-year');
+    if (refreshBtn) refreshBtn.addEventListener('click', loadComptableDocuments);
+    if (filterSel) filterSel.addEventListener('change', loadComptableDocuments);
+
+    const pwdSaveBtn = document.getElementById('comptable-pwd-save-btn');
+    if (pwdSaveBtn) pwdSaveBtn.addEventListener('click', saveComptablePassword);
+
+    comptableState.listenersAttached = true;
 }

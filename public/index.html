@@ -3204,6 +3204,12 @@
                             <button type="button" class="tab-button" data-config="stock-permissions">
                                 <i class="fas fa-user-check"></i> Permissions Stock Vivant
                             </button>
+                            <button type="button" class="tab-button" data-config="invoice-template">
+                                <i class="fas fa-file-invoice"></i> Modèle de facture
+                            </button>
+                            <button type="button" class="tab-button" data-config="comptable-docs">
+                                <i class="fas fa-folder-open"></i> Documents comptables
+                            </button>
                         </div>
 
                         <!-- Configuration des Catégories -->
@@ -3475,6 +3481,288 @@
                                     <h4><i class="fas fa-users"></i> Permissions Actuelles</h4>
                                     <div id="permissions-list" class="permissions-list">
                                         <p>Chargement des permissions...</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Modèle de facture -->
+                        <div id="invoice-template-config" class="config-panel">
+                            <div class="config-header">
+                                <h3><i class="fas fa-file-invoice"></i> Modèle de facture</h3>
+                                <p class="section-description">Gérer les profils fournisseurs (Nom / Lieu / Téléphone) et les alias d'orthographe utilisés en en-tête des factures PDF.</p>
+                            </div>
+
+                            <!-- Aperçu rapide du modèle -->
+                            <div class="qw-invoice-preview-card">
+                                <div class="qw-invoice-preview-head">
+                                    <h4><i class="fas fa-eye"></i> Aperçu du modèle</h4>
+                                    <p>Saisis un nom de fournisseur pour voir le rendu de l'en-tête (les alias et profils enregistrés sont appliqués).</p>
+                                </div>
+                                <div class="qw-invoice-preview-row">
+                                    <input type="text" id="invoice-preview-supplier" class="form-control" placeholder="ex. Ali KA ou Fournisseur DEMO" maxlength="120">
+                                    <button type="button" id="invoice-preview-btn" class="btn btn-primary">
+                                        <i class="fas fa-file-pdf"></i> Voir l'aperçu
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Profils fournisseurs -->
+                            <div class="qw-invoice-card">
+                                <div class="qw-invoice-card-head">
+                                    <h4><i class="fas fa-id-card"></i> Profils fournisseurs</h4>
+                                    <p>Quand un profil existe pour un fournisseur, la facture affiche <strong>Nom / Lieu d'activité / Téléphone</strong> au lieu du simple nom.</p>
+                                    <button type="button" id="invoice-add-profile-btn" class="btn btn-secondary">
+                                        <i class="fas fa-plus"></i> Ajouter un profil
+                                    </button>
+                                </div>
+                                <div class="table-container">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Nom canonique</th>
+                                                <th>Nom affiché</th>
+                                                <th>Lieu d'activité</th>
+                                                <th>Téléphone</th>
+                                                <th style="width: 90px;">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="invoice-profiles-tbody">
+                                            <tr><td colspan="5" style="text-align: center; color: var(--qw-text-secondary);">Chargement…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Alias -->
+                            <div class="qw-invoice-card">
+                                <div class="qw-invoice-card-head">
+                                    <h4><i class="fas fa-link"></i> Alias d'orthographe</h4>
+                                    <p>Toutes les orthographes listées à gauche seront converties en la <strong>forme canonique</strong> à droite (case-insensitive, espaces multiples ignorés).</p>
+                                    <button type="button" id="invoice-add-alias-btn" class="btn btn-secondary">
+                                        <i class="fas fa-plus"></i> Ajouter un alias
+                                    </button>
+                                </div>
+                                <div class="table-container">
+                                    <table class="data-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Alias (orthographe brute)</th>
+                                                <th>Forme canonique</th>
+                                                <th style="width: 90px;">Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="invoice-aliases-tbody">
+                                            <tr><td colspan="3" style="text-align: center; color: var(--qw-text-secondary);">Chargement…</td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Actions globales (alias + profils fournisseurs) -->
+                            <div class="qw-invoice-actions">
+                                <button type="button" id="invoice-template-save-btn" class="btn btn-primary">
+                                    <i class="fas fa-save"></i> Enregistrer les modifications
+                                </button>
+                                <button type="button" id="invoice-template-reload-btn" class="btn btn-secondary">
+                                    <i class="fas fa-undo"></i> Annuler / Recharger
+                                </button>
+                                <span id="invoice-template-status" class="qw-invoice-status" aria-live="polite"></span>
+                            </div>
+
+                            <!-- ============================================== -->
+                            <!-- FACTURE CRÉANCE — Template "ancien format MATA" -->
+                            <!-- ============================================== -->
+                            <div class="qw-invoice-card" style="margin-top: 28px;">
+                                <div class="qw-invoice-card-head">
+                                    <h4><i class="fas fa-receipt"></i> Facture Créance (ancien format MATA)</h4>
+                                    <p>Modèle utilisé pour les factures générées depuis <strong>Gestion Créance &gt; Vue Globale &gt; Par client</strong>. Tous les champs sont modifiables — laisse vide pour revenir à la valeur par défaut.</p>
+                                </div>
+
+                                <div class="qw-creance-tpl-grid">
+                                    <div class="form-group">
+                                        <label for="creance-tpl-company">Nom de l'entreprise</label>
+                                        <input type="text" id="creance-tpl-company" class="form-control" maxlength="120" placeholder="MATA">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="creance-tpl-color">Couleur du titre</label>
+                                        <div class="qw-color-input-wrap">
+                                            <input type="color" id="creance-tpl-color-picker" value="#1e3a8a">
+                                            <input type="text" id="creance-tpl-color" class="form-control" maxlength="7" placeholder="#1e3a8a">
+                                        </div>
+                                    </div>
+                                    <div class="form-group qw-span-2">
+                                        <label for="creance-tpl-addr1">Adresse — Ligne 1</label>
+                                        <input type="text" id="creance-tpl-addr1" class="form-control" maxlength="200" placeholder="Virage, Apt Nord 603D, Résidence Aquanique">
+                                    </div>
+                                    <div class="form-group qw-span-2">
+                                        <label for="creance-tpl-addr2">Adresse — Ligne 2 (NINEA / RC)</label>
+                                        <input type="text" id="creance-tpl-addr2" class="form-control" maxlength="200" placeholder="A : 01387695 2Y3 / RC : SN DKR 2024 B 29149">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="creance-tpl-addr3">Adresse — Ligne 3</label>
+                                        <input type="text" id="creance-tpl-addr3" class="form-control" maxlength="200" placeholder="Ouest foire : 78 480 95 95">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="creance-tpl-addr4">Adresse — Ligne 4</label>
+                                        <input type="text" id="creance-tpl-addr4" class="form-control" maxlength="200" placeholder="Grand Mbao / cité Aliou Sow : 77 858 96 96">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="creance-tpl-designation">Désignation produit (cellule du tableau)</label>
+                                        <input type="text" id="creance-tpl-designation" class="form-control" maxlength="120" placeholder="Produits frais">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="creance-tpl-categories">Catégories affichées sous le total</label>
+                                        <input type="text" id="creance-tpl-categories" class="form-control" maxlength="200" placeholder="bœuf, agneau, poulet">
+                                    </div>
+                                </div>
+
+                                <div class="qw-invoice-actions" style="margin-top: 14px;">
+                                    <button type="button" id="creance-tpl-preview-btn" class="btn btn-secondary">
+                                        <i class="fas fa-file-pdf"></i> Aperçu facture créance
+                                    </button>
+                                    <button type="button" id="creance-tpl-save-btn" class="btn btn-primary">
+                                        <i class="fas fa-save"></i> Enregistrer le modèle créance
+                                    </button>
+                                    <button type="button" id="creance-tpl-reload-btn" class="btn btn-secondary">
+                                        <i class="fas fa-undo"></i> Annuler / Recharger
+                                    </button>
+                                    <span id="creance-tpl-status" class="qw-invoice-status" aria-live="polite"></span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ============================================== -->
+                        <!-- DOCUMENTS COMPTABLES                            -->
+                        <!-- ============================================== -->
+                        <div id="comptable-docs-config" class="config-panel">
+                            <div class="config-header">
+                                <h3><i class="fas fa-folder-open"></i> Documents comptables</h3>
+                                <p class="section-description">Espace protégé pour stocker factures, justificatifs et états comptables. L'accès est verrouillé par un mot de passe partagé (configurable ci-dessous, super-admin uniquement).</p>
+                            </div>
+
+                            <!-- ===== SOUS-SECTION : Configuration mot de passe (super admin only) ===== -->
+                            <details id="comptable-pwd-config-card" class="qw-invoice-card" style="margin-bottom: 16px;">
+                                <summary class="qw-invoice-card-head" style="cursor: pointer; display: block;">
+                                    <h4 style="display: inline-flex; align-items: center; gap: 8px;">
+                                        <i class="fas fa-key"></i> Mot de passe d'accès (super-admin)
+                                    </h4>
+                                    <p style="margin-top: 4px;">
+                                        Définir ou changer le mot de passe partagé. <span id="comptable-pwd-state" class="qw-pill qw-pill-muted" style="margin-left: 6px;">État : —</span>
+                                    </p>
+                                </summary>
+                                <div style="padding-top: 8px;">
+                                    <div class="form-group" id="comptable-pwd-current-wrap" style="display: none;">
+                                        <label for="comptable-pwd-current">Mot de passe actuel</label>
+                                        <input type="password" id="comptable-pwd-current" class="form-control" autocomplete="current-password">
+                                        <small style="color: var(--qw-text-secondary);">Requis sauf si vous êtes admin strict (rôle <code>admin</code>).</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="comptable-pwd-new">Nouveau mot de passe</label>
+                                        <input type="password" id="comptable-pwd-new" class="form-control" autocomplete="new-password" minlength="6">
+                                        <small style="color: var(--qw-text-secondary);">Minimum 6 caractères.</small>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="comptable-pwd-confirm">Confirmer le nouveau mot de passe</label>
+                                        <input type="password" id="comptable-pwd-confirm" class="form-control" autocomplete="new-password">
+                                    </div>
+                                    <div class="qw-invoice-actions">
+                                        <button type="button" id="comptable-pwd-save-btn" class="btn btn-primary">
+                                            <i class="fas fa-save"></i> Enregistrer le mot de passe
+                                        </button>
+                                        <span id="comptable-pwd-status" class="qw-invoice-status" aria-live="polite"></span>
+                                    </div>
+                                </div>
+                            </details>
+
+                            <!-- ===== LOCK SCREEN (visible quand pas déverrouillé) ===== -->
+                            <div id="comptable-lock-screen" class="qw-comptable-lock-card">
+                                <div class="qw-comptable-lock-icon">
+                                    <i class="fas fa-lock"></i>
+                                </div>
+                                <h3>Accès protégé</h3>
+                                <p id="comptable-lock-msg">Cette section est verrouillée par un mot de passe partagé.</p>
+                                <div class="qw-comptable-lock-form">
+                                    <label for="comptable-unlock-pwd" class="visually-hidden">Mot de passe</label>
+                                    <input type="password" id="comptable-unlock-pwd" class="form-control" placeholder="Mot de passe d'accès" autocomplete="off">
+                                    <button type="button" id="comptable-unlock-btn" class="btn btn-primary">
+                                        <i class="fas fa-unlock"></i> Déverrouiller
+                                    </button>
+                                </div>
+                                <p id="comptable-unlock-error" class="qw-invoice-status qw-invoice-status-error" style="min-height: 18px;"></p>
+                            </div>
+
+                            <!-- ===== MAIN VIEW (visible une fois déverrouillé) ===== -->
+                            <div id="comptable-main" style="display: none;">
+                                <div class="qw-comptable-status-bar">
+                                    <span class="qw-pill qw-pill-success">
+                                        <i class="fas fa-unlock"></i> Session active — <span id="comptable-ttl-remaining">30:00</span>
+                                    </span>
+                                    <button type="button" id="comptable-lock-btn" class="btn btn-secondary btn-sm">
+                                        <i class="fas fa-lock"></i> Verrouiller maintenant
+                                    </button>
+                                </div>
+
+                                <!-- Upload card -->
+                                <div class="qw-invoice-card" style="margin-top: 14px;">
+                                    <div class="qw-invoice-card-head">
+                                        <h4><i class="fas fa-upload"></i> Ajouter un document</h4>
+                                        <p>Formats acceptés : PDF, Word (.doc / .docx), Excel (.xls / .xlsx), images (JPG / PNG). Max 50 Mo par fichier.</p>
+                                    </div>
+                                    <form id="comptable-upload-form" enctype="multipart/form-data">
+                                        <div class="qw-comptable-upload-grid">
+                                            <div class="form-group qw-span-2">
+                                                <label for="comptable-upload-libelle">Libellé</label>
+                                                <input type="text" id="comptable-upload-libelle" class="form-control" maxlength="255" required placeholder="ex. Bilan exercice 2026, Quittance EDF mars, etc.">
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="comptable-upload-year">Année</label>
+                                                <input type="number" id="comptable-upload-year" class="form-control" required min="2000" max="2100">
+                                            </div>
+                                            <div class="form-group qw-span-3">
+                                                <label for="comptable-upload-file">Fichier</label>
+                                                <input type="file" id="comptable-upload-file" class="form-control" required accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/jpeg,image/png">
+                                            </div>
+                                        </div>
+                                        <div class="qw-invoice-actions" style="margin-top: 12px;">
+                                            <button type="submit" id="comptable-upload-btn" class="btn btn-primary">
+                                                <i class="fas fa-cloud-upload-alt"></i> Téléverser
+                                            </button>
+                                            <span id="comptable-upload-status" class="qw-invoice-status" aria-live="polite"></span>
+                                        </div>
+                                    </form>
+                                </div>
+
+                                <!-- Filter + list -->
+                                <div class="qw-invoice-card" style="margin-top: 14px;">
+                                    <div class="qw-invoice-card-head">
+                                        <h4><i class="fas fa-list"></i> Documents par année</h4>
+                                        <p>Sélectionne une année pour voir les documents associés.</p>
+                                    </div>
+                                    <div class="qw-comptable-filter-row">
+                                        <label for="comptable-filter-year">Année</label>
+                                        <select id="comptable-filter-year" class="form-control"></select>
+                                        <button type="button" id="comptable-refresh-btn" class="btn btn-secondary btn-sm">
+                                            <i class="fas fa-sync"></i> Rafraîchir
+                                        </button>
+                                    </div>
+                                    <div class="table-container" style="margin-top: 10px;">
+                                        <table class="data-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Libellé</th>
+                                                    <th>Année</th>
+                                                    <th>Fichier</th>
+                                                    <th>Taille</th>
+                                                    <th>Date d'ajout</th>
+                                                    <th>Ajouté par</th>
+                                                    <th style="width: 160px;">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="comptable-docs-tbody">
+                                                <tr><td colspan="7" style="text-align: center; color: var(--qw-text-secondary);">Chargement…</td></tr>
+                                            </tbody>
+                                        </table>
                                     </div>
                                 </div>
                             </div>
