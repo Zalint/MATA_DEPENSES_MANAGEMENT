@@ -250,11 +250,9 @@ function renderCreanceInvoice(doc, clientData, tpl, invoiceNumber) {
     doc.strokeColor(color).lineWidth(1);
     doc.moveTo(50, 160).lineTo(545, 160).stroke();
 
-    // Titre de section
-    let yPos = 180;
-    doc.fontSize(14).font('Helvetica-Bold').fillColor('black');
-    doc.text('Dépenses', 50, yPos);
-    yPos += 30;
+    // Pas de titre "Dépenses" sur la facture créance (demande client) —
+    // on enchaîne directement avec le tableau après un petit espace.
+    let yPos = 185;
 
     // En-tête du tableau
     const tableStartY = yPos;
