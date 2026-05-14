@@ -17573,6 +17573,29 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
             console.log(`🚫 EXTERNAL: Exclusion de ${exclusionLower.length} client(s):`, exclusionClients);
         }
 
+        // ===== FILTRE PAR CLIENT (label) =====
+        // Format : ?label=Maas%20Mbao (case-insensitive, espaces multiples
+        // normalisés). Quand présent, la réponse se limite à ce client :
+        // - soldes summary : recalculés sur ce client uniquement
+        // - status / opérations : uniquement les enregistrements de ce client
+        // - analyse OpenAI : skipped (gain de coût + latence)
+        // - si client introuvable : HTTP 404
+        const labelRaw = typeof req.query.label === 'string' ? req.query.label.trim() : '';
+        if (labelRaw && (labelRaw.length > 255 || FORBIDDEN_CHARS_REGEX.test(labelRaw))) {
+            return res.status(400).json({
+                error: 'label invalide (longueur > 255 ou caractères interdits)',
+                code: 'INVALID_LABEL'
+            });
+        }
+        // Normalisation : lower + collapse des espaces multiples (cohérent
+        // avec normalizeSupplierName et le comportement attendu).
+        const labelLower = labelRaw
+            ? labelRaw.toLowerCase().replace(/\s+/g, ' ')
+            : null;
+        if (labelLower) {
+            console.log(`🎯 EXTERNAL: Filtre client unique : "${labelRaw}" (normalisé: "${labelLower}")`);
+        }
+
         // ===== PARTIE 1: SUMMARY - Différence des soldes finaux =====
         
         // Récupérer tous les portfolios de type créance
@@ -17603,6 +17626,9 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
             // Filtre d'exclusion : <> ALL($3) — si le tableau est vide, la condition est toujours vraie.
             // Comparaison sur LOWER(client_name) pour rester case-insensitive.
             const exclusionFilter = 'AND LOWER(cc.client_name) <> ALL($3::text[])';
+            // Filtre par label (un seul client) : $4 = NULL => pas de filtre,
+            // sinon match case-insensitive + espaces normalisés.
+            const labelFilter = `AND ($4::text IS NULL OR REGEXP_REPLACE(LOWER(BTRIM(cc.client_name)), '\\s+', ' ', 'g') = $4)`;
 
             // Solde à la date sélectionnée (même logique que l'interface web)
             const currentBalanceQuery = `
@@ -17630,6 +17656,7 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 WHERE cc.account_id = $1
                 AND cc.is_active = true
                 ${exclusionFilter}
+                ${labelFilter}
             `;
 
             // Solde à la date précédente (même logique que l'interface web)
@@ -17658,11 +17685,12 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 WHERE cc.account_id = $1
                 AND cc.is_active = true
                 ${exclusionFilter}
+                ${labelFilter}
             `;
 
             const [currentResult, previousResult] = await Promise.all([
-                pool.query(currentBalanceQuery, [portfolio.id, selectedDateStr, exclusionLower]),
-                pool.query(previousBalanceQuery, [portfolio.id, previousDateStr, exclusionLower])
+                pool.query(currentBalanceQuery, [portfolio.id, selectedDateStr, exclusionLower, labelLower]),
+                pool.query(previousBalanceQuery, [portfolio.id, previousDateStr, exclusionLower, labelLower])
             ]);
 
             const currentBalance = parseFloat(currentResult.rows[0]?.solde_final || 0);
@@ -17688,6 +17716,7 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
             
             // STATUS: Information sur les clients (même logique que l'interface web)
             // $3 = exclusion array — vide = pas de filtre, sinon exclut les LOWER(client_name) listés.
+            // $4 = label (text|NULL) — si défini, ne retourne que ce client (case-insensitive).
             const clientsStatusQuery = `
                 SELECT
                     cc.id,
@@ -17714,13 +17743,14 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 WHERE cc.account_id = $1
                 AND cc.is_active = true
                 AND LOWER(cc.client_name) <> ALL($3::text[])
+                AND ($4::text IS NULL OR REGEXP_REPLACE(LOWER(BTRIM(cc.client_name)), '\\s+', ' ', 'g') = $4)
                 ORDER BY cc.client_name
             `;
 
             // OPERATIONS: Historique des opérations de l'année courante jusqu'à la date sélectionnée
             const currentYear = selectedDate.getFullYear();
             const yearStartDate = `${currentYear}-01-01`;
-            
+
             const operationsQuery = `
                 SELECT
                     co.operation_date as date_operation,
@@ -17737,12 +17767,13 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 AND co.operation_date >= $2
                 AND co.operation_date <= $3
                 AND LOWER(cc.client_name) <> ALL($4::text[])
+                AND ($5::text IS NULL OR REGEXP_REPLACE(LOWER(BTRIM(cc.client_name)), '\\s+', ' ', 'g') = $5)
                 ORDER BY co.operation_date DESC, co.created_at DESC
             `;
 
             const [statusResult, operationsResult] = await Promise.all([
-                pool.query(clientsStatusQuery, [portfolio.id, selectedDateStr, exclusionLower]),
-                pool.query(operationsQuery, [portfolio.id, yearStartDate, selectedDateStr, exclusionLower])
+                pool.query(clientsStatusQuery, [portfolio.id, selectedDateStr, exclusionLower, labelLower]),
+                pool.query(operationsQuery, [portfolio.id, yearStartDate, selectedDateStr, exclusionLower, labelLower])
             ]);
 
             const clientsStatus = statusResult.rows.map(client => ({
@@ -17776,10 +17807,42 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
             });
         }
 
+        // ===== POST-FILTRAGE QUAND label EST FOURNI =====
+        // Quand on cible un seul client, on retire des arrays les portefeuilles
+        // qui ne le contiennent pas (status vide ET pas d'opérations) pour ne
+        // pas polluer la réponse avec des zéros.
+        let filteredSummaryData = summaryData;
+        let filteredDetailsData = detailsData;
+        if (labelLower) {
+            // On garde un portefeuille uniquement s'il a au moins une entrée
+            // status OU une opération pour ce client.
+            const keptPortfolioIds = new Set(
+                detailsData
+                    .filter(d => (d.status && d.status.length > 0) || (d.operations && d.operations.length > 0))
+                    .map(d => d.portfolio_id)
+            );
+            filteredDetailsData = detailsData.filter(d => keptPortfolioIds.has(d.portfolio_id));
+            filteredSummaryData = summaryData.filter(p => keptPortfolioIds.has(p.portfolio_id));
+
+            // Aucun portefeuille trouvé pour ce label -> 404
+            if (filteredDetailsData.length === 0) {
+                return res.status(404).json({
+                    error: 'Client introuvable dans les portefeuilles créance',
+                    code: 'CLIENT_NOT_FOUND',
+                    label: labelRaw
+                });
+            }
+        }
+
         // ===== INTÉGRATION OPENAI =====
-        
+        // On skip l'analyse IA quand un label est fourni : la réponse cible
+        // un seul client (pas pertinent d'avoir une analyse globale) et ça
+        // évite un appel OpenAI inutile + de la latence.
+
         let openaiInsights = null;
-        try {
+        if (labelLower) {
+            openaiInsights = null;
+        } else { try {
             const openai = new OpenAI({
                 apiKey: openaiApiKey,
             });
@@ -17860,44 +17923,56 @@ Répondez en français de manière professionnelle.`;
                 error_details: process.env.NODE_ENV === 'development' ? openaiError.message : undefined,
                 generated_at: new Date().toISOString()
             };
-        }
+        } } // fin du else { try { ... } catch { ... } } pour le bypass OpenAI quand label fourni
 
         // ===== RÉPONSE FINALE =====
-        
+
+        // openai_integration : "skipped" si label fourni, "error" si OpenAI a échoué, sinon "success"
+        const openaiIntegrationStatus = labelLower
+            ? 'skipped'
+            : (openaiInsights && openaiInsights.error ? 'error' : 'success');
+
         const response = {
             summary: {
                 date_selected: selectedDateStr,
                 date_previous: previousDateStr,
-                portfolios_count: portfolios.length,
-                portfolios: summaryData,
+                portfolios_count: filteredSummaryData.length,
+                portfolios: filteredSummaryData,
                 totals: {
-                    current_balance: summaryData.reduce((sum, p) => sum + p.current_balance, 0),
-                    previous_balance: summaryData.reduce((sum, p) => sum + p.previous_balance, 0),
-                    total_difference: summaryData.reduce((sum, p) => sum + p.difference, 0)
+                    current_balance: filteredSummaryData.reduce((sum, p) => sum + p.current_balance, 0),
+                    previous_balance: filteredSummaryData.reduce((sum, p) => sum + p.previous_balance, 0),
+                    total_difference: filteredSummaryData.reduce((sum, p) => sum + p.difference, 0)
                 }
             },
-            details: detailsData,
+            details: filteredDetailsData,
             ai_insights: openaiInsights,
             metadata: {
                 generated_at: new Date().toISOString(),
-                openai_integration: openaiInsights?.error ? "error" : "success",
+                openai_integration: openaiIntegrationStatus,
+                // 1.2 : ajout du filtrage par client unique via le paramètre `label`
                 // 1.1 : ajout du filtrage exclusionClients (case-insensitive) et du champ excluded_clients
-                api_version: "1.1",
+                api_version: "1.2",
                 year_filter: selectedDate.getFullYear(),
-                total_clients: detailsData.reduce((sum, d) => sum + d.status.length, 0),
-                total_operations: detailsData.reduce((sum, d) => sum + d.operations.length, 0),
+                total_clients: filteredDetailsData.reduce((sum, d) => sum + d.status.length, 0),
+                total_operations: filteredDetailsData.reduce((sum, d) => sum + d.operations.length, 0),
                 // Liste des noms tels que reçus dans la query (avant lowercasing pour le filtre).
                 // Permet au consommateur de vérifier que l'exclusion a bien été prise en compte.
-                excluded_clients: exclusionClients
+                excluded_clients: exclusionClients,
+                // Filtre client unique (null si pas de filtre, sinon écho de la query).
+                label: labelRaw || null,
+                label_normalized: labelLower || null
             }
         };
 
-        console.log(`✅ EXTERNAL: Réponse générée avec ${portfolios.length} portfolios et analyse IA`);
+        const logSuffix = labelLower
+            ? `pour client "${labelRaw}" (IA désactivée)`
+            : 'et analyse IA';
+        console.log(`✅ EXTERNAL: Réponse générée avec ${filteredSummaryData.length} portfolios ${logSuffix}`);
         res.json(response);
 
     } catch (error) {
         console.error('❌ EXTERNAL: Erreur lors de la génération de l\'API créance:', error);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Erreur serveur lors de la génération des données créance',
             code: 'CREANCE_API_ERROR',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
