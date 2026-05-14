@@ -17628,7 +17628,7 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
             const exclusionFilter = 'AND LOWER(cc.client_name) <> ALL($3::text[])';
             // Filtre par label (un seul client) : $4 = NULL => pas de filtre,
             // sinon match case-insensitive + espaces normalisés.
-            const labelFilter = `AND ($4::text IS NULL OR REGEXP_REPLACE(LOWER(cc.client_name), '\\s+', ' ', 'g') = $4)`;
+            const labelFilter = `AND ($4::text IS NULL OR REGEXP_REPLACE(LOWER(BTRIM(cc.client_name)), '\\s+', ' ', 'g') = $4)`;
 
             // Solde à la date sélectionnée (même logique que l'interface web)
             const currentBalanceQuery = `
@@ -17743,7 +17743,7 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 WHERE cc.account_id = $1
                 AND cc.is_active = true
                 AND LOWER(cc.client_name) <> ALL($3::text[])
-                AND ($4::text IS NULL OR REGEXP_REPLACE(LOWER(cc.client_name), '\\s+', ' ', 'g') = $4)
+                AND ($4::text IS NULL OR REGEXP_REPLACE(LOWER(BTRIM(cc.client_name)), '\\s+', ' ', 'g') = $4)
                 ORDER BY cc.client_name
             `;
 
@@ -17767,7 +17767,7 @@ app.get('/external/api/creance', requireAdminAuth, async (req, res) => {
                 AND co.operation_date >= $2
                 AND co.operation_date <= $3
                 AND LOWER(cc.client_name) <> ALL($4::text[])
-                AND ($5::text IS NULL OR REGEXP_REPLACE(LOWER(cc.client_name), '\\s+', ' ', 'g') = $5)
+                AND ($5::text IS NULL OR REGEXP_REPLACE(LOWER(BTRIM(cc.client_name)), '\\s+', ' ', 'g') = $5)
                 ORDER BY co.operation_date DESC, co.created_at DESC
             `;
 
